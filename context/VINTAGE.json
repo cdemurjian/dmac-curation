@@ -1,14 +1,19 @@
 {
-  "snapshot_date": "2026-05-27",
+  "bundled_date": "2026-05-27",
+  "bundled_date_meaning": "Date these snapshots were assembled into the dmac-curation plugin. Individual source files may have been fetched earlier — see data_provenance below.",
   "source": "Charlie Demurjian's working curation projects (intravchip + srp/lee)",
   "files": {
     "sampletypes_db.json": "101 sample types",
     "assays_db.json": "217 assays",
-    "projects_db.json": "projects list incl. CSBC, GBM_BTC, Griffith, Impact",
+    "projects_db.json": "10 projects: Break Through Cancer, CSBC, GBM, Griffith, Impact, MetNet, PUBLISHED, RMS-NGC, Shoulders, SRP",
     "neo4j_schema.json": "Neo4j labels and relationships",
-    "neo4j_assay-sample-conn.json": "176 allowed (assay, parent_type, child_type) edges",
-    "min_api_endpoints_enriched.json": "API endpoint enrichment",
+    "neo4j_assay-sample-conn.json": "176 allowed (assay, parent_type, child_type) edges (wrapper has {fetched_at, connections})",
+    "min_api_endpoints_enriched.json": "13 enriched API endpoint records",
     "NExtSEEK_API.yaml": "OpenAPI spec for nextseek.mit.edu"
   },
-  "note": "Refresh via tools/refresh_context.py (planned, not yet implemented). Lockfile in each curation project records which vintage was used at /curate-init."
+  "data_provenance": {
+    "neo4j_assay-sample-conn.json": "fetched_at field inside file: 2026-04-23T15:51:40Z",
+    "other_files": "no embedded fetch timestamps; assumed fetched circa 2026-04-23 to 2026-05-08 across the source projects"
+  },
+  "note": "Refresh via tools/refresh_context.py (planned, not yet implemented). Lockfile in each curation project records which bundled_date was used at /curate-init."
 }
