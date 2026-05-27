@@ -19,20 +19,28 @@ def inspect(path: Path, sheet: str | None, sample_rows: int) -> int:
     if not path.exists():
         print(f"ERROR: {path} not found", file=sys.stderr)
         return 2
-    wb = load_workbook(path, read_only=True, data_only=True)
+    try:
+        wb = load_workbook(path, read_only=True, data_only=True)
+    except Exception as e:
+        print(f"ERROR: cannot open {path}: {e}", file=sys.stderr)
+        return 2
     try:
         print(f"## {path.name}")
         print(f"Sheets ({len(wb.sheetnames)}):")
         for s in wb.sheetnames:
             ws = wb[s]
             # max_row/max_col are unreliable in read_only — count manually
-            rows = sum(1 for _ in ws.iter_rows(values_only=True))
-            print(f"  - {s}: {rows} rows × {ws.max_column} cols")
+            all_rows = list(ws.iter_rows(values_only=True))
+            n_rows = len(all_rows)
+            n_cols = max((len(r) for r in all_rows), default=0)
+            print(f"  - {s}: {n_rows} rows (incl. header) × {n_cols} cols")
 
+        missing = False
         targets = [sheet] if sheet else wb.sheetnames
         for s in targets:
             if s not in wb.sheetnames:
                 print(f"\n(sheet '{s}' not found)")
+                missing = True
                 continue
             ws = wb[s]
             print(f"\n### Sheet: {s}")
@@ -48,7 +56,7 @@ def inspect(path: Path, sheet: str | None, sample_rows: int) -> int:
                     if i >= sample_rows:
                         break
                     print(f"    [{i}] {list(row)}")
-        return 0
+        return 1 if missing else 0
     finally:
         wb.close()
 
@@ -57,7 +65,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("path", type=Path, help="Path to .xlsx file")
     p.add_argument("--sheet", help="Limit detail to this sheet (default: all)")
-    p.add_argument("--sample", type=int, default=0, help="Show this many sample data rows per sheet")
+    p.add_argument("--sample", type=int, default=0, help="Show this many sample data rows per sheet (0 = none)")
     args = p.parse_args()
     return inspect(args.path, args.sheet, args.sample)
 
