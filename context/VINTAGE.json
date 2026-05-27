@@ -1,0 +1,14 @@
+{
+  "snapshot_date": "2026-05-27",
+  "source": "Charlie Demurjian's working curation projects (intravchip + srp/lee)",
+  "files": {
+    "sampletypes_db.json": "101 sample types",
+    "assays_db.json": "217 assays",
+    "projects_db.json": "projects list incl. CSBC, GBM_BTC, Griffith, Impact",
+    "neo4j_schema.json": "Neo4j labels and relationships",
+    "neo4j_assay-sample-conn.json": "176 allowed (assay, parent_type, child_type) edges",
+    "min_api_endpoints_enriched.json": "API endpoint enrichment",
+    "NExtSEEK_API.yaml": "OpenAPI spec for nextseek.mit.edu"
+  },
+  "note": "Refresh via tools/refresh_context.py (planned, not yet implemented). Lockfile in each curation project records which vintage was used at /curate-init."
+}
