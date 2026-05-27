@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["requests>=2.31", "python-dotenv>=1.0"]
+# dependencies = ["requests>=2.31"]
 # ///
 """
 Reusable NExtSEEK API client for resolving assay titles → assay IDs per project.
@@ -83,7 +83,7 @@ class NExtSEEKClient:
         self.session = requests.Session()
         self.session.headers.update({
             "Accept": "application/json",
-            "User-Agent": "yufei-gemm-curation/1.0",
+            "User-Agent": "dmac-curation/0.1.0",
         })
         if username and password:
             self.session.auth = HTTPBasicAuth(username, password)

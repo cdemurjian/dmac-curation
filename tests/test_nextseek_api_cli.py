@@ -22,3 +22,12 @@ def test_fetch_assays_help_runs():
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
     assert "project-id" in result.stdout or "project-id" in result.stderr
+
+
+def test_validate_help_runs():
+    result = subprocess.run(
+        ["uv", "run", "--script", str(SCRIPT), "validate", "--help"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert "project-id" in result.stdout or "project-id" in result.stderr
