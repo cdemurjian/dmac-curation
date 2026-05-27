@@ -1,0 +1,297 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["openpyxl>=3.1"]
+# ///
+# scripts/_common.py
+"""Shared helpers for the IntravChip build scripts.
+
+Single source of truth for:
+  - the batch stamp (`260527KAM`)
+  - UID minting per sample type
+  - manifest / OMERO / MetNet All workbook readers
+  - the OOC UID map (populated by build_intravchip_ooc, consumed by D.IMG/A.IMG/D.SIM)
+  - the 4-sheet xlsx writer
+"""
+from __future__ import annotations
+
+import csv
+import json
+import re
+from pathlib import Path
+from typing import Iterable
+
+from openpyxl import Workbook, load_workbook
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+ROOT = Path(__file__).resolve().parent.parent
+MANIFEST = ROOT / "manifest.csv"
+OMERO_CSV = ROOT / "omero_images.csv"
+METNET_ALL = ROOT / "previous_metadata" / "MetNet All 260527.xlsx"
+SAMPLETYPES_DB = ROOT / "context" / "sampletypes_db.json"
+OOC_UID_MAP = ROOT / "context" / "_ooc_uid_map.json"
+ASSAY_SHEETS = ROOT / "assay_sheets" / "4sheet_originals"
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+LAB_BATCH = "260527KAM"
+
+# Existing UIDs we cite as parents (NEVER duplicated as new rows)
+CEL_REUSE = {
+    "HUVEC": "CEL-241211KAM-1",
+    "HPNLF": "CEL-241211KAM-2",
+    "MDA-MB-231": "CEL-230131KAM-3",
+    "MCF-7": "CEL-230131KAM-5",
+    "MCF7": "CEL-230131KAM-5",  # alias
+}
+
+SCIENTIST = "Marie Floryan"
+
+# Manuscript section headers used verbatim as `Protocol` field values
+MS_PROTOCOL = {
+    "cell_culture": "Cell culture",
+    "device_fabrication": "Microfluidic device and pump fabrication",
+    "device_seeding": "Microfluidic device seeding and culture",
+    "imaging": "Imaging",
+    "image_analysis": "Image Analysis",
+    "storm": "STORM imaging of microfluidic device",
+    "sim": "Computer simulations for vessels and collection chamber",
+}
+
+
+# ---------------------------------------------------------------------------
+# UID minting
+# ---------------------------------------------------------------------------
+def _mint_uid_batch(sampletype: str, n: int) -> str:
+    """Legacy 2-arg form: uses module-level LAB_BATCH constant.
+
+    Kept for internal use by intravchip build scripts that call
+    mint_uid(sampletype, n) via the old interface.  New code should
+    call mint_uid(sample_type, lab, date, n) below.
+    """
+    return f"{sampletype}-{LAB_BATCH}-{n}"
+
+
+def mint_uid(sample_type: str, lab: str, date: str, n: int) -> str:
+    """Canonical 4-arg UID minter: ``mint_uid('RNA', 'KAM', '260527', 1)`` → ``'RNA-260527KAM-1'``.
+
+    This is the universal UID format documented in SKILL.md:
+      ``<TYPE>-YYMMDD<LAB>-N``
+
+    Args:
+      sample_type: SampleType abbreviation, e.g. ``'OOC'``, ``'D.SEQ'``.
+      lab:         Lab code suffix, e.g. ``'KAM'``, ``'ENG'``.
+      date:        6-digit YYMMDD string, e.g. ``'260527'``.
+      n:           Integer counter (1-based).
+    """
+    return f"{sample_type}-{date}{lab}-{n}"
+
+
+# ---------------------------------------------------------------------------
+# Manifest + OMERO loaders
+# ---------------------------------------------------------------------------
+def load_manifest() -> list[dict]:
+    """Return all manifest rows; caller filters."""
+    with MANIFEST.open() as f:
+        return list(csv.DictReader(f))
+
+
+def load_omero() -> dict[str, dict]:
+    """Map filename → omero row dict."""
+    with OMERO_CSV.open() as f:
+        return {r["filename"]: r for r in csv.DictReader(f)}
+
+
+# ---------------------------------------------------------------------------
+# MetNet All workbook reference (per spec §6.0a)
+# ---------------------------------------------------------------------------
+def load_metnet_all() -> dict:
+    """Read MetNet All denormalized snapshot.
+
+    Returns:
+      { 'CEL': [list of row dicts], 'OOC': [...], ... }  one entry per tab.
+
+    Build scripts use this to:
+      - look up existing CEL/OOC rows when generating new ones whose Parent
+        is an existing UID (we cite identical Type/Source/Tissue/etc.)
+      - validate controlled-vocab values (OOC.Type, .Material, .Vascularization, .ExperimentType)
+        before inventing a new term
+    """
+    wb = load_workbook(METNET_ALL, read_only=True, data_only=True)
+    out: dict[str, list[dict]] = {}
+    for sheet in wb.sheetnames:
+        ws = wb[sheet]
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            out[sheet] = []
+            continue
+        headers = [h or f"_col{i}" for i, h in enumerate(rows[0])]
+        out[sheet] = [
+            {h: v for h, v in zip(headers, row) if v is not None}
+            for row in rows[1:]
+        ]
+    return out
+
+
+def metnet_cel_lookup(uid: str, metnet: dict) -> dict | None:
+    """Find an existing CEL row by UID in the MetNet All snapshot."""
+    for r in metnet.get("CEL", []):
+        if r.get("UID") == uid:
+            return r
+    return None
+
+
+def metnet_ooc_vocab(metnet: dict) -> dict[str, set]:
+    """Return distinct values for controlled-vocab OOC columns."""
+    vocab: dict[str, set] = {
+        "Type": set(),
+        "Material": set(),
+        "Vascularization": set(),
+        "ExperimentType": set(),
+        "Stimulation": set(),
+    }
+    for r in metnet.get("OOC", []):
+        for k in vocab:
+            v = r.get(k)
+            if v is not None and str(v).strip():
+                vocab[k].add(str(v).strip())
+    return vocab
+
+
+# ---------------------------------------------------------------------------
+# OOC UID map (cross-script handoff)
+# ---------------------------------------------------------------------------
+def save_ooc_uid_map(device_to_uid: dict[str, str]) -> None:
+    OOC_UID_MAP.parent.mkdir(parents=True, exist_ok=True)
+    OOC_UID_MAP.write_text(json.dumps(device_to_uid, indent=2, sort_keys=True))
+
+
+def load_ooc_uid_map() -> dict[str, str]:
+    if not OOC_UID_MAP.exists():
+        raise FileNotFoundError(
+            f"{OOC_UID_MAP} not found — run build_intravchip_ooc.py first."
+        )
+    return json.loads(OOC_UID_MAP.read_text())
+
+
+# ---------------------------------------------------------------------------
+# SampleType schema lookup (for the Instructions sheet)
+# ---------------------------------------------------------------------------
+def sampletype_schema(sampletype: str) -> dict:
+    db = json.loads(SAMPLETYPES_DB.read_text())
+    for r in db:
+        if r.get("SampleType") == sampletype:
+            return r
+    raise KeyError(f"SampleType {sampletype!r} not found in {SAMPLETYPES_DB}")
+
+
+# ---------------------------------------------------------------------------
+# 4-sheet xlsx writer (Instructions / Samples / Assay / Ontology)
+# ---------------------------------------------------------------------------
+def write_4sheet_xlsx(
+    out_path: Path,
+    sampletype: str,
+    samples: list[dict],
+    assay_titles: list[str],
+    ontology: dict[str, list[str]] | None = None,
+) -> None:
+    """Emit the standard 4-sheet structure NExtSEEK auto-detects.
+
+    Args:
+      out_path: target file (parents are created).
+      sampletype: SampleType abbreviation, e.g. 'OOC'.
+      samples: list of row dicts. Each dict's keys MUST be the field names
+               from the SampleType schema (case-sensitive). 'UID' is required
+               even if blank.
+      assay_titles: assay title strings to register on the Assay sheet.
+      ontology: optional { fieldname: [allowed values] } for the Ontology sheet.
+
+    The Samples sheet uses one column per distinct field key across all rows
+    (so missing fields produce empty cells, NOT 'null'/'None').
+    """
+    schema = sampletype_schema(sampletype)
+    all_keys: list[str] = []
+    seen: set[str] = set()
+    # UID always first
+    all_keys.append("UID")
+    seen.add("UID")
+    # Then the schema's required + standard + possible fields (in that order)
+    for src in ("Required Metadata", "Standard Metadata", "Possible Metadata Fields"):
+        for k in (schema.get(src) or "").split(","):
+            k = k.strip()
+            if k and k not in seen:
+                all_keys.append(k)
+                seen.add(k)
+    # Finally any keys present in samples but not in the schema (denormalized)
+    for s in samples:
+        for k in s.keys():
+            if k not in seen:
+                all_keys.append(k)
+                seen.add(k)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    wb = Workbook()
+    # --- Instructions ------------------------------------------------------
+    ws = wb.active
+    ws.title = "Instructions"
+    ws.append(["Field", "Database Field", "Field Type", "Ontology"])
+    for k in all_keys:
+        ws.append([k, f"{sampletype}::{k}", "Text", ""])
+    # --- Samples -----------------------------------------------------------
+    ws = wb.create_sheet("Samples")
+    ws.append(all_keys)
+    for s in samples:
+        ws.append([s.get(k, "") for k in all_keys])
+    # --- Assay -------------------------------------------------------------
+    ws = wb.create_sheet("Assay")
+    ws.append(["SampleType", "AssayType", "Assay", "Direction"])
+    for t in assay_titles:
+        ws.append([sampletype, "", t, "child"])
+    # --- Ontology ----------------------------------------------------------
+    ws = wb.create_sheet("Ontology")
+    ws.append(["Field", "Value"])
+    for field, values in (ontology or {}).items():
+        for v in values:
+            ws.append([field, v])
+    wb.save(out_path)
+
+
+# ---------------------------------------------------------------------------
+# Tumor-CEL parent lookup by device-id pattern (spec §5.2)
+# ---------------------------------------------------------------------------
+_TUMOR_PARENT_PATTERNS = [
+    (re.compile(r"^d9-MV3-flow-dev-\d+$"), "MV3-NEW"),                 # filled at build-time
+    (re.compile(r"^MCF7-day9-(gel-)?dev-\d+$"), CEL_REUSE["MCF-7"]),
+    (re.compile(r"^PM6-day-9-dev-\d+$"), "PM6-NEW"),                   # filled at build-time
+    # MVN-only controls (no tumor parent — empty)
+    (re.compile(r"^d7-MVN-only-dev-\d+$"), None),
+    (re.compile(r"^d9-MVN-231-(flow|static)-dev-\d+$"), None),
+    # 231-loaded specific patterns (must come BEFORE the generic .*231.* fallback)
+    (re.compile(r"^d[79]-(\d+)?(00)?TCs-(flow-)?(static-)?dev-\d+$"), CEL_REUSE["MDA-MB-231"]),
+    (re.compile(r"^d4-1000-231-(flow|static)-dev\d+$"), CEL_REUSE["MDA-MB-231"]),
+    (re.compile(r"^tc-area-.*"), CEL_REUSE["MDA-MB-231"]),
+    (re.compile(r"^d9-(DMSO|sor-(5|10)um)-\d+$"), CEL_REUSE["MDA-MB-231"]),
+    # Final fallback: any device-id containing '231' that wasn't matched above
+    # → MDA-MB-231 parent. Must be LAST so it doesn't shadow co-culture patterns
+    # like `d9-MV3-231-dev-*` if those ever appear.
+    (re.compile(r".*231.*", re.IGNORECASE), CEL_REUSE["MDA-MB-231"]),
+]
+
+
+def tumor_parent_for(device_id: str, mv3_uid: str, pm6_uid: str) -> str | None:
+    """Return the tumor CEL UID parent for a device, or None for MVN-only ctrls.
+
+    Args:
+      mv3_uid / pm6_uid: the freshly-minted CEL UIDs from build_intravchip_cel.py.
+    """
+    for pat, parent in _TUMOR_PARENT_PATTERNS:
+        if pat.match(device_id):
+            if parent == "MV3-NEW":
+                return mv3_uid
+            if parent == "PM6-NEW":
+                return pm6_uid
+            return parent
+    # Unmatched device — flag with a sentinel rather than guessing
+    return f"*** PLACEHOLDER: no tumor-parent rule matched device_id={device_id!r} ***"
