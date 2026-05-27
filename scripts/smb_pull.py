@@ -11,8 +11,12 @@ pipes through `pigz -c`, and writes gzipped output to the local destination.
 Resumable (--resume), supports row slicing (--rows N-M or --rows-from FILE),
 and dry-run mode (--dry-run).
 
-Credentials read from .env via python-dotenv (MIT_USER, MIT_PASS, MIT_DOMAIN,
-SMB_HOST, SMB_SHARE). VPN required for MIT BMC server.
+Credentials read from .env via python-dotenv:
+  MIT_USER (e.g. cdemu@mit.edu - domain embedded in the username)
+  MIT_PASS
+  SMB_HOST (default: bmc-pub14.mit.edu)
+  SMB_SHARE (default: depends on lab)
+VPN required for MIT BMC server.
 
 Usage:
   uv run scripts/smb_pull.py --dry-run        # build manifest + size estimate, no transfer
@@ -99,7 +103,7 @@ def load_manuscript_samples() -> list[dict]:
     )
     ws = wb.active
     rows = list(ws.iter_rows(values_only=True))
-    hdr = list(rows[0])
+    hdr = list(rows[0])  # TODO(v0.2): unguarded — raises IndexError on empty workbook; add check
     i_sa = hdr.index("Sample Annotation")
     i_acc = hdr.index("Mouse Acc.# ID#")
     i_folder = hdr.index("Folder Name")
@@ -271,7 +275,7 @@ def do_pull(job: dict, resume: bool):
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(out.suffix + ".partial")
     t0 = time.time()
-    total_in = sum(sz for _, sz, _ in job["sources"])
+    total_in = sum(sz for _, sz, _ in job["sources"])  # TODO(v0.2): dead code, remove — total_in is never read
     bytes_in = 0
     with open(tmp, "wb") as fh_out:
         proc = subprocess.Popen(["pigz", "-c"], stdin=subprocess.PIPE, stdout=fh_out)
@@ -345,11 +349,17 @@ def main():
             "VPN is required for the MIT BMC SMB server."
         )
 
-    smbclient.register_session(HOST, username=MIT_USER, password=MIT_PASS)
+    # Verify pigz is available before any SMB work — fail fast on a missing tool
+    if not args.dry_run and subprocess.call(
+        ["which", "pigz"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    ) != 0:
+        sys.exit("pigz not found; install it (e.g. sudo dnf install pigz) and retry.")
 
     by_batch_stats: dict = defaultdict(lambda: {"jobs": 0, "src_bytes": 0, "errors": 0})
 
     if args.from_manifest:
+        # --from-manifest: read the plan locally; skip SMB planning entirely.
+        # register_session is deferred until we actually start pulling below.
         if not MANIFEST.exists():
             sys.exit(f"--from-manifest requires {MANIFEST} to exist. Run --dry-run first.")
         jobs_all = load_jobs_from_manifest()
@@ -359,6 +369,9 @@ def main():
             by_batch_stats[b]["jobs"] += 1
             by_batch_stats[b]["src_bytes"] += sum(sz for _, sz, _ in j["sources"])
     else:
+        # Planning phase requires SMB connectivity — register session now.
+        smbclient.register_session(HOST, username=MIT_USER, password=MIT_PASS)
+
         samples = load_manuscript_samples()
         if args.batch:
             samples = [s for s in samples if s["folder"] == args.batch]
@@ -379,22 +392,30 @@ def main():
                     by_batch_stats[b]["jobs"] += 1
                     by_batch_stats[b]["src_bytes"] += sum(sz for _, sz, _ in j["sources"])
 
-    # --rows N-M filter
+    # Write the full manifest BEFORE any row-filtering so the manifest always
+    # reflects the complete plan.  (Finding 1: filtering mutated jobs_all in place
+    # and wrote only the slice — destroying the full manifest.)
+    if not args.from_manifest:
+        write_manifest(jobs_all)
+
+    # --rows N-M filter — applies only to the pull phase, not to the manifest
+    jobs_to_pull = list(jobs_all)
     if args.rows:
         try:
             lo, hi = (int(x) for x in args.rows.split("-"))
         except ValueError:
             sys.exit(f"--rows must be like '1-107', got {args.rows!r}")
-        original = len(jobs_all)
-        jobs_all = jobs_all[lo - 1:hi]
-        print(f"Row filter {args.rows}: {len(jobs_all)}/{original} jobs selected")
+        original = len(jobs_to_pull)
+        jobs_to_pull = jobs_to_pull[lo - 1:hi]
+        print(f"Row filter {args.rows}: {len(jobs_to_pull)}/{original} jobs selected")
 
     # --rows-from FILE filter
-    if args.rows_from:
+    elif args.rows_from:
+        # TODO(v0.2): bare ValueError here if a line isn't an integer — add proper error message
         wanted = {int(x) for x in Path(args.rows_from).read_text().split() if x.strip()}
-        original = len(jobs_all)
-        jobs_all = [j for i, j in enumerate(jobs_all, 1) if i in wanted]
-        print(f"Row-list filter ({args.rows_from}): {len(jobs_all)}/{original} jobs selected")
+        original = len(jobs_to_pull)
+        jobs_to_pull = [j for i, j in enumerate(jobs_to_pull, 1) if i in wanted]
+        print(f"Row-list filter ({args.rows_from}): {len(jobs_to_pull)}/{original} jobs selected")
 
     print("\n=== Per-batch summary ===")
     grand_bytes = 0
@@ -410,10 +431,7 @@ def main():
         f"~{grand_bytes * 0.3 / 1e9:.0f} GB gzipped est.   errors: {grand_errs}"
     )
 
-    if not args.from_manifest:
-        write_manifest(jobs_all)
-
-    errs = [j for j in jobs_all if "error" in j]
+    errs = [j for j in jobs_to_pull if "error" in j]
     if errs:
         print(f"\n{len(errs)} errors (first 10):")
         for j in errs[:10]:
@@ -427,15 +445,19 @@ def main():
         print(f"\nABORTING: {len(errs)} errors found in plan. Resolve before pulling.")
         sys.exit(1)
 
-    # Verify pigz is available
-    if subprocess.call(["which", "pigz"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
-        sys.exit("pigz not found; install it (e.g. sudo dnf install pigz) and retry.")
+    # For --from-manifest: session not yet registered; do it now before pulling.
+    if args.from_manifest:
+        smbclient.register_session(HOST, username=MIT_USER, password=MIT_PASS)
 
-    print(f"\nPulling {grand_jobs} jobs ({grand_bytes/1e9:.1f} GB uncompressed)...")
-    for i, j in enumerate(jobs_all, 1):
+    # jobs_to_pull denominator: only non-error rows in the (possibly filtered) pull set
+    total_jobs_to_pull = sum(1 for j in jobs_to_pull if "error" not in j)
+    print(f"\nPulling {total_jobs_to_pull} jobs ({grand_bytes/1e9:.1f} GB uncompressed)...")
+    pull_idx = 0
+    for j in jobs_to_pull:
         if "error" in j:
             continue
-        print(f"[{i}/{grand_jobs}] {j['sample_annotation']} {j['stream']}  ({sum(sz for _, sz, _ in j['sources'])/1e9:.2f} GB)")
+        pull_idx += 1
+        print(f"[{pull_idx}/{total_jobs_to_pull}] {j['sample_annotation']} {j['stream']}  ({sum(sz for _, sz, _ in j['sources'])/1e9:.2f} GB)")
         do_pull(j, resume=args.resume)
 
 
