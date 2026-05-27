@@ -1,0 +1,14 @@
+{
+  "name": "dmac-curation",
+  "version": "0.1.0",
+  "description": "Curate research-project metadata for NExtSEEK / FairDomHub via the 13-phase pipeline (inventory → sample tree → build → consolidate → QA → deposit → retrieve → email PI).",
+  "author": {
+    "name": "Charlie Demurjian",
+    "email": "cdemurjian@gmail.com",
+    "url": "https://github.com/cdemurjian"
+  },
+  "homepage": "https://github.com/cdemurjian/dmac-curation",
+  "repository": "https://github.com/cdemurjian/dmac-curation",
+  "license": "MIT",
+  "keywords": ["nextseek", "fairdomhub", "metadata-curation", "mit", "dmac", "claude-code-plugin"]
+}
