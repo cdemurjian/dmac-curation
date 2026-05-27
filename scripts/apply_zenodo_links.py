@@ -76,15 +76,16 @@ def load_curation_index(meta: Path) -> dict[str, tuple[str, str]]:
 
 
 def discover_sheet_map(assay_dir: Path) -> dict[str, Path]:
-    """Auto-discover sample-type → upload sheet by scanning assay_sheets/ for *-upload*.xlsx."""
-    result: dict[str, Path] = {}
-    for p in sorted(assay_dir.glob("*-upload*.xlsx")):
-        # Derive sample type from filename prefix (e.g. "A.FLOW-upload.xlsx" → "A.FLOW")
-        stem = p.stem  # "A.FLOW-upload"
-        stype = stem.split("-upload")[0]
-        if stype:
-            result[stype] = p
-    return result
+    """Map sample type → sheet path. Prefer -upload-new over -upload."""
+    by_base: dict[str, Path] = {}
+    for p in sorted(assay_dir.glob("*.xlsx")):
+        if "-upload-new" in p.stem:
+            base = p.stem.replace("-upload-new", "")
+            by_base[base] = p  # always overrides
+        elif "-upload" in p.stem:
+            base = p.stem.replace("-upload", "")
+            by_base.setdefault(base, p)  # only set if not already from -new
+    return by_base
 
 
 def main():
@@ -158,13 +159,16 @@ def main():
         try:
             ws = wb["Samples"]
             hdr = [c.value for c in ws[1]]
-            if "UID" not in hdr or "Link_PrimaryData" not in hdr:
-                # Add Link_PrimaryData column if missing
-                if "Link_PrimaryData" not in hdr:
-                    ws.cell(row=1, column=len(hdr) + 1).value = "Link_PrimaryData"
-                    hdr.append("Link_PrimaryData")
-                    print(f"  added Link_PrimaryData column")
-            i_uid = hdr.index("UID") + 1
+            # Add Link_PrimaryData column if missing
+            if "Link_PrimaryData" not in hdr:
+                ws.cell(row=1, column=len(hdr) + 1).value = "Link_PrimaryData"
+                hdr.append("Link_PrimaryData")
+                print(f"  added Link_PrimaryData column")
+            try:
+                i_uid = hdr.index("UID") + 1
+            except ValueError:
+                print(f"  SKIP {sheet_path.name}: no UID column")
+                continue
             i_link = hdr.index("Link_PrimaryData") + 1
             # Build {uid → url} for this sheet's updates
             uid_to_url = {u: url for u, url, _, _ in updates}

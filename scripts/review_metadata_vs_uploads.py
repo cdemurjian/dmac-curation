@@ -71,11 +71,6 @@ def discover_active_uploads(sheets_dir: Path) -> dict[str, list[str]]:
             result.setdefault(stype, []).append(p.name)
     return result
 
-COMPARE_COLS = [
-    "File_PrimaryData", "Link_PrimaryData", "Parent",
-    "Accession", "Checksum_PrimaryData",
-]
-
 
 def load_sheet_rows(path: Path, sheet_name: str | None = None) -> tuple[list[str], list[dict]]:
     wb = load_workbook(path, read_only=True, data_only=True)

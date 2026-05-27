@@ -44,137 +44,145 @@ def find_row_by_first_col(ws, value):
 def render(json_path: Path, template_path: Path, out_path: Path):
     print(f"Loading template: {template_path}")
     wb = load_workbook(template_path)
-    ws = wb["Metadata"]
+    try:
+        ws = wb["Metadata"]
 
-    with open(json_path) as f:
-        data = json.load(f)
-    samples = data["samples"]
-    paired = data.get("paired_end_experiments", [])
+        with open(json_path) as f:
+            data = json.load(f)
+        samples = data["samples"]
+        paired = data.get("paired_end_experiments", [])
 
-    # Find header rows in template
-    samples_hdr_row = find_row_by_first_col(ws, "*library name")
-    protocols_row = find_row_by_first_col(ws, "PROTOCOLS")
-    pe_hdr_row = find_row_by_first_col(ws, "file name 1")
+        # Find header rows in template
+        samples_hdr_row = find_row_by_first_col(ws, "*library name")
+        protocols_row = find_row_by_first_col(ws, "PROTOCOLS")
+        pe_hdr_row = find_row_by_first_col(ws, "file name 1")
 
-    if samples_hdr_row is None:
-        raise ValueError("Couldn't find SAMPLES header row (*library name) in template")
-    if protocols_row is None:
-        raise ValueError("Couldn't find PROTOCOLS row in template")
-    if pe_hdr_row is None:
-        raise ValueError("Couldn't find PAIRED-END EXPERIMENTS header row (file name 1) in template")
-    print(
-        f"SAMPLES header row {samples_hdr_row}, "
-        f"PROTOCOLS row {protocols_row}, PE header row {pe_hdr_row}"
-    )
-
-    # --- Capture static block: PROTOCOLS row through PE file-name header row, inclusive ---
-    static_block = []
-    for r in range(protocols_row, pe_hdr_row + 1):
-        static_block.append(
-            [ws.cell(row=r, column=c).value for c in range(1, STATIC_BLOCK_COLS + 1)]
-        )
-    print(f"Captured {len(static_block)} rows of PROTOCOLS+PE-header block")
-
-    # --- Determine output columns for SAMPLES ---
-    base_cols = [
-        "*library name", "*title", "*library strategy", "*organism",
-        "**tissue", "**cell line", "**cell type",
-        "genotype", "treatment", "batch",
-        "*molecule", "*single or paired-end", "*instrument model", "description",
-    ]
-
-    def raw_count(s):
-        if "raw_files" in s:
-            return len(s["raw_files"])
-        return 1
-
-    def proc_count(s):
-        if "processed_data_files" in s:
-            return len(s["processed_data_files"])
-        return sum(
-            1 for k in ("processed data file", "processed data file (2)") if s.get(k)
+        if samples_hdr_row is None:
+            raise ValueError("Couldn't find SAMPLES header row (*library name) in template")
+        if protocols_row is None:
+            raise ValueError("Couldn't find PROTOCOLS row in template")
+        if pe_hdr_row is None:
+            raise ValueError("Couldn't find PAIRED-END EXPERIMENTS header row (file name 1) in template")
+        print(
+            f"SAMPLES header row {samples_hdr_row}, "
+            f"PROTOCOLS row {protocols_row}, PE header row {pe_hdr_row}"
         )
 
-    max_raw = max((raw_count(s) for s in samples), default=1)
-    max_proc = max((proc_count(s) for s in samples), default=0)
+        # --- Capture static block: PROTOCOLS row through PE file-name header row, inclusive ---
+        static_block = []
+        for r in range(protocols_row, pe_hdr_row + 1):
+            static_block.append(
+                [ws.cell(row=r, column=c).value for c in range(1, STATIC_BLOCK_COLS + 1)]
+            )
+        print(f"Captured {len(static_block)} rows of PROTOCOLS+PE-header block")
 
-    proc_headers = []
-    if max_proc >= 1:
-        proc_headers.append("processed data file")
-    for i in range(2, max_proc + 1):
-        proc_headers.append(f"processed data file ({i})")
+        # --- Determine output columns for SAMPLES ---
+        base_cols = [
+            "*library name", "*title", "*library strategy", "*organism",
+            "**tissue", "**cell line", "**cell type",
+            "genotype", "treatment", "batch",
+            "*molecule", "*single or paired-end", "*instrument model", "description",
+        ]
 
-    raw_headers = ["*raw file"]
-    if max_raw >= 2:
-        raw_headers.append("raw file")
-    for i in range(2, max_raw):
-        raw_headers.append(f"raw file ({i})")
+        def raw_count(s):
+            if "raw_files" in s:
+                return len(s["raw_files"])
+            return 1
 
-    full_header = base_cols + proc_headers + raw_headers
-    print(f"Writing {len(full_header)} columns: {full_header}")
+        def proc_count(s):
+            if "processed_data_files" in s:
+                return len(s["processed_data_files"])
+            return sum(
+                1 for k in ("processed data file", "processed data file (2)") if s.get(k)
+            )
 
-    # --- Wipe from samples_hdr_row to end of sheet ---
-    old_max_row = ws.max_row
-    old_max_col = ws.max_column
-    for r in range(samples_hdr_row, old_max_row + 1):
-        for c in range(1, old_max_col + 1):
-            ws.cell(row=r, column=c).value = None
+        max_raw = max((raw_count(s) for s in samples), default=1)
+        max_proc = max((proc_count(s) for s in samples), default=0)
 
-    # --- Write SAMPLES header ---
-    for i, h in enumerate(full_header, start=1):
-        ws.cell(row=samples_hdr_row, column=i).value = h
+        proc_headers = []
+        if max_proc >= 1:
+            proc_headers.append("processed data file")
+        for i in range(2, max_proc + 1):
+            proc_headers.append(f"processed data file ({i})")
 
-    # --- Write sample rows ---
-    sample_start_row = samples_hdr_row + 1
-    for ri, s in enumerate(samples, start=sample_start_row):
-        row_vals = [s.get(col) for col in base_cols]
+        # TODO(v0.2): VERIFY GEO column naming for 3+ raw files per sample.
+        # Code reviewer (2026-05-27) claimed GEO template uses plain "raw file"
+        # for all extra columns, not "raw file (N)". However lee-session-3
+        # successfully submitted bulk RNA with numbered columns. Confirm against
+        # actual GEO_template.xlsx and the GEO validator before changing.
+        raw_headers = ["*raw file"]
+        if max_raw >= 2:
+            raw_headers.append("raw file")
+        for i in range(2, max_raw):
+            raw_headers.append(f"raw file ({i})")
 
-        # Processed
-        proc_list = s.get("processed_data_files") or []
-        if not proc_list:
-            if s.get("processed data file"):
-                proc_list = [s["processed data file"]]
-            if s.get("processed data file (2)"):
-                proc_list.append(s["processed data file (2)"])
-        for i in range(len(proc_headers)):
-            row_vals.append(proc_list[i] if i < len(proc_list) else None)
+        full_header = base_cols + proc_headers + raw_headers
+        print(f"Writing {len(full_header)} columns: {full_header}")
 
-        # Raw
-        raw_list = s.get("raw_files") or [v for v in [s.get("*raw file")] if v]
-        for i in range(len(raw_headers)):
-            row_vals.append(raw_list[i] if i < len(raw_list) else None)
+        # --- Wipe from samples_hdr_row to end of sheet ---
+        old_max_row = ws.max_row
+        old_max_col = ws.max_column
+        for r in range(samples_hdr_row, old_max_row + 1):
+            for c in range(1, old_max_col + 1):
+                ws.cell(row=r, column=c).value = None
 
-        for ci, v in enumerate(row_vals, start=1):
-            ws.cell(row=ri, column=ci).value = v
+        # --- Write SAMPLES header ---
+        for i, h in enumerate(full_header, start=1):
+            ws.cell(row=samples_hdr_row, column=i).value = h
 
-    last_sample_row = sample_start_row + len(samples) - 1
+        # --- Write sample rows ---
+        sample_start_row = samples_hdr_row + 1
+        for ri, s in enumerate(samples, start=sample_start_row):
+            row_vals = [s.get(col) for col in base_cols]
 
-    # --- Re-paste static PROTOCOLS+PE-header block ---
-    # Leave 1 blank row gap (matches template style: blank row 53 before PROTOCOLS).
-    static_start_row = last_sample_row + 2
-    for offset, row_vals in enumerate(static_block):
-        for ci, v in enumerate(row_vals, start=1):
-            if v is not None:
-                ws.cell(row=static_start_row + offset, column=ci).value = v
-    new_pe_hdr_row = static_start_row + (len(static_block) - 1)
+            # Processed
+            proc_list = s.get("processed_data_files") or []
+            if not proc_list:
+                if s.get("processed data file"):
+                    proc_list = [s["processed data file"]]
+                if s.get("processed data file (2)"):
+                    proc_list.append(s["processed data file (2)"])
+            for i in range(len(proc_headers)):
+                row_vals.append(proc_list[i] if i < len(proc_list) else None)
 
-    # --- Write PAIRED-END EXPERIMENTS data rows ---
-    for ri, pe in enumerate(paired, start=new_pe_hdr_row + 1):
-        ws.cell(row=ri, column=1).value = pe.get("file name 1")
-        ws.cell(row=ri, column=2).value = pe.get("file name 2")
-        ws.cell(row=ri, column=3).value = pe.get("file name 3")
-        ws.cell(row=ri, column=4).value = pe.get("file name 4")
+            # Raw
+            raw_list = s.get("raw_files") or [v for v in [s.get("*raw file")] if v]
+            for i in range(len(raw_headers)):
+                row_vals.append(raw_list[i] if i < len(raw_list) else None)
 
-    print(
-        f"Wrote {len(samples)} sample rows (rows {sample_start_row}-{last_sample_row}) "
-        f"and {len(paired)} paired-end rows (after row {new_pe_hdr_row})"
-    )
-    print(
-        f"PROTOCOLS block now at row {static_start_row}, "
-        f"PE header now at row {new_pe_hdr_row}"
-    )
-    wb.save(out_path)
-    print(f"Saved: {out_path}")
+            for ci, v in enumerate(row_vals, start=1):
+                ws.cell(row=ri, column=ci).value = v
+
+        last_sample_row = sample_start_row + len(samples) - 1
+
+        # --- Re-paste static PROTOCOLS+PE-header block ---
+        # Leave 1 blank row gap (matches template style: blank row 53 before PROTOCOLS).
+        static_start_row = last_sample_row + 2
+        for offset, row_vals in enumerate(static_block):
+            for ci, v in enumerate(row_vals, start=1):
+                if v is not None:
+                    ws.cell(row=static_start_row + offset, column=ci).value = v
+        new_pe_hdr_row = static_start_row + (len(static_block) - 1)
+
+        # --- Write PAIRED-END EXPERIMENTS data rows ---
+        for ri, pe in enumerate(paired, start=new_pe_hdr_row + 1):
+            ws.cell(row=ri, column=1).value = pe.get("file name 1")
+            ws.cell(row=ri, column=2).value = pe.get("file name 2")
+            ws.cell(row=ri, column=3).value = pe.get("file name 3")
+            ws.cell(row=ri, column=4).value = pe.get("file name 4")
+
+        print(
+            f"Wrote {len(samples)} sample rows (rows {sample_start_row}-{last_sample_row}) "
+            f"and {len(paired)} paired-end rows (after row {new_pe_hdr_row})"
+        )
+        print(
+            f"PROTOCOLS block now at row {static_start_row}, "
+            f"PE header now at row {new_pe_hdr_row}"
+        )
+        wb.save(out_path)
+        print(f"Saved: {out_path}")
+    finally:
+        wb.close()
 
 
 def main() -> None:
