@@ -40,33 +40,36 @@ def collect_uids(assay_sheets_dir: Path, include_parents: bool) -> list[str]:
 
     for path in candidates.values():
         wb = load_workbook(path, read_only=True, data_only=True)
-        if "Samples" not in wb.sheetnames:
-            continue
-        ws = wb["Samples"]
-        rows_iter = ws.iter_rows(values_only=True)
-        header = next(rows_iter, None)
-        if header is None:
-            continue
-        uid_col = None
-        for i, h in enumerate(header):
-            if h and str(h).strip().lower() == "uid":
-                uid_col = i
-                break
-        if uid_col is None:
-            continue
-        for row in rows_iter:
-            if uid_col >= len(row):
+        try:
+            if "Samples" not in wb.sheetnames:
                 continue
-            uid = row[uid_col]
-            if not uid:
+            ws = wb["Samples"]
+            rows_iter = ws.iter_rows(values_only=True)
+            header = next(rows_iter, None)
+            if header is None:
                 continue
-            uid = str(uid).strip()
-            if "-" not in uid:
+            uid_col = None
+            for i, h in enumerate(header):
+                if h and str(h).strip().lower() == "uid":
+                    uid_col = i
+                    break
+            if uid_col is None:
                 continue
-            sample_type = uid.split("-", 1)[0]
-            if not include_parents and sample_type in PARENT_TYPES:
-                continue
-            seen.add(uid)
+            for row in rows_iter:
+                if uid_col >= len(row):
+                    continue
+                uid = row[uid_col]
+                if not uid:
+                    continue
+                uid = str(uid).strip()
+                if "-" not in uid:
+                    continue
+                sample_type = uid.split("-", 1)[0]
+                if not include_parents and sample_type in PARENT_TYPES:
+                    continue
+                seen.add(uid)
+        finally:
+            wb.close()
 
     return sorted(seen)
 

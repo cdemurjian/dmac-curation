@@ -40,6 +40,14 @@ from collections import defaultdict, Counter
 import openpyxl
 
 REPO = str(Path(__file__).resolve().parent.parent)
+
+# ---------------------------------------------------------------------------
+# TODO(v0.2): These constants are IntravChip-specific defaults left over from
+# the original session. For other projects, override via:
+#   - CLI args (--expected-counts, --upload-path, --master-baseline)
+#   - or a project-local config file (e.g. .dmac-curation/qa_config.json)
+# /curate-qa command (Task 15) will eventually pass project-specific values.
+# ---------------------------------------------------------------------------
 DEFAULT_UPLOAD = os.path.join(REPO, "assay_sheets", "IntravChip_upload.xlsx")
 PREV_METADATA = os.path.join(REPO, "previous_metadata", "MetNet All 260527.xlsx")
 
