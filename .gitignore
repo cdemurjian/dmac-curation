@@ -1,0 +1,78 @@
+# ============================================================
+# Secrets — never commit
+# ============================================================
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+credentials
+credentials.*
+secrets
+secrets.*
+.netrc
+.smbcreds
+*_token*
+*_secret*
+*_password*
+*.kdbx
+
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+build/
+dist/
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+uv.lock
+
+# ============================================================
+# Editors / OS
+# ============================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ============================================================
+# Curation-project artifacts (only relevant if this repo is
+# accidentally used as a curation working dir — keep them out)
+# ============================================================
+*.partial
+GEO/
+Zenodo_upload/
+images_to_upload_to_omero/
+omero_images.csv
+manifest.csv
+RETRIEVE.TXT
+*-upload-new.xlsx
+*_AllMetadata*.xlsx
+rclone.log
+pull.log
+
+# ============================================================
+# Logs / scratch
+# ============================================================
+*.log
+.scratch/
+scratch/
+tmp/
