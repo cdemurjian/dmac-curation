@@ -1,0 +1,23 @@
+# Questions for {{ pi_name|title }}
+
+**Generated:** {{ generated_date }}
+
+This file accumulates questions as curation progresses. `/curate-questions` adds new entries; `/curate-questions resolve <id>` marks one resolved.
+
+## Open
+
+{% for q in open_questions %}
+### {{ q.id }} — {{ q.topic }}
+{{ q.body }}
+
+*(surfaced during Phase {{ q.phase }})*
+{% endfor %}
+
+## Resolved
+
+{% for q in resolved_questions %}
+### {{ q.id }} — {{ q.topic }}
+{{ q.body }}
+
+**Answer:** {{ q.answer }}
+{% endfor %}

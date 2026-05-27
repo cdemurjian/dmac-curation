@@ -1,0 +1,35 @@
+# Secrets — never commit
+.env
+.env.local
+*.key
+*.pem
+credentials*
+secrets*
+.netrc
+.smbcreds
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Curation artifacts (large data; project-specific)
+files/*
+!files/.gitkeep
+*.partial
+GEO/
+Zenodo_upload/
+images_to_upload_to_omero/
+*.fastq.gz
+*.bam
+
+# Generated tables
+manifest.csv
+omero_images.csv
+RETRIEVE.TXT
+*-upload-new.xlsx
+*_AllMetadata*.xlsx
+
+# Logs
+*.log
+.scratch/

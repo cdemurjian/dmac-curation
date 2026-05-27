@@ -1,0 +1,39 @@
+# File inventory — {{ pi_name|title }} curation
+
+**Generated:** {{ generated_date }}
+
+## Inputs received
+
+### `files/`
+{{ files_summary | default('(empty — no raw data dropped in yet)') }}
+
+### `manuscript/`
+{{ manuscript_summary | default('(empty)') }}
+
+### `previous_metadata/`
+{{ previous_metadata_summary | default('(empty)') }}
+
+### `email_convo.md`
+{{ email_summary | default('(no email log present)') }}
+
+## Existing master metadata
+
+{% if master_xlsx %}
+File: `{{ master_xlsx }}`
+
+| Sheet | Row count | Sample-type code | {{ pi_name }}'s rows |
+|---|---|---|---|
+{% for sheet in master_sheets %}
+| {{ sheet.name }} | {{ sheet.rows }} | {{ sheet.sampletype }} | {{ sheet.pi_rows }} |
+{% endfor %}
+{% else %}
+(no master spreadsheet found in `previous_metadata/`)
+{% endif %}
+
+## Things to flag now
+
+{{ flags | default('(none)') }}
+
+## Suggested next step
+
+`/curate-sample-tree`

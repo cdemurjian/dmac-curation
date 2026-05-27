@@ -1,0 +1,27 @@
+# Curation plan — {{ pi_name|title }}
+
+**Generated:** {{ generated_date }}
+
+## Goal
+
+{{ goal }}
+
+## Scope
+
+{{ scope }}
+
+## Per-arm checklist
+
+{% for arm in arms %}
+- [ ] Arm {{ arm.letter }} ({{ arm.title }}) — {{ arm.row_estimate }} new rows across {{ arm.sample_types | join(', ') }}
+{% endfor %}
+
+## Deposits required
+
+{% for deposit in deposits %}
+- [ ] {{ deposit.target }}: {{ deposit.what }}
+{% endfor %}
+
+## Email to PI
+
+- [ ] Draft `EMAIL_TO_PI.md` with: sample tree summary, open questions, deposit status

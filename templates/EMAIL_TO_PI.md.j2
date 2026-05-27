@@ -1,0 +1,38 @@
+# Email to {{ pi_name|title }} — draft
+
+**Subject:** {{ subject | default(pi_name|title + ' paper curation update') }}
+
+Hi {{ pi_name|title }},
+
+{{ greeting | default('Quick update on the metadata curation for your paper.') }}
+
+## What's been curated
+
+{{ summary_paragraph }}
+
+{% if sample_tree_svg %}
+*(sample tree rendering attached as `{{ sample_tree_svg }}`)*
+{% endif %}
+
+## Files we have curated
+
+{{ files_curated_summary }}
+
+## Questions
+
+{% for q in questions %}
+{{ loop.index }}. {{ q }}
+{% endfor %}
+
+## Status of external deposits
+
+{% for d in deposits %}
+- **{{ d.target }}**: {{ d.status }}
+{% endfor %}
+
+## What I need from you
+
+{{ asks }}
+
+Thanks!
+{{ scientist_name }}

@@ -1,0 +1,35 @@
+# {{ pi_name|title }} curation — {{ lab|upper }} lab
+
+**Project initialized:** {{ init_date }}
+**Lab tag:** `{{ lab|upper }}` (UIDs use format `<TYPE>-YYMMDD{{ lab|upper }}-N`)
+**PI:** {{ pi_name }}
+**NExtSEEK project ID:** {{ project_id | default('TBD — set after /curate-resolve-assays') }}
+
+## Inputs
+
+Drop these into the empty subdirectories before running `/curate-inventory`:
+
+- `files/` — PI's raw data (images, sequencing, mass spec, etc.)
+- `manuscript/` — paper draft (.docx, PDFs)
+- `previous_metadata/` — master spreadsheet ({{ lab|upper }} All YYMMDD.xlsx) + any PI-returned edits
+- `email_convo.md` (optional) — PI email thread
+
+## Pipeline
+
+Run `/curate-status` at any time to see current phase. Suggested order:
+
+1. `/curate-inventory` → `FILE_INDEX.md`
+2. `/curate-sample-tree` → `SAMPLE_TREE.md`
+3. `/curate-questions add` (as gaps surface) → `QUESTIONS_FOR_PI.md`
+4. `/curate-build <arm>` per arm → `assay_sheets/4sheet_originals/`
+5. `/curate-consolidate` → `assay_sheets/Arm{X}.xlsx`
+6. `/curate-resolve-assays --project-id N` → `context/assay_ids_cache.json` (then curate `context/assay_synonyms.json`)
+7. `/curate-qa` → CLEAN/SOFT_FLAG/HARD_REJECT report
+8. `/curate-deposit <target>` → external uploads + URL backfill
+9. `/curate-retrieve` → `RETRIEVE.TXT`
+10. `/curate-validate <downloaded.xlsx>` → round-trip diff
+11. `/curate-email` → `EMAIL_TO_PI.md`
+
+## Plugin lockfile
+
+`.dmac-curation.json` records the plugin SHA and schema vintage used at init. Don't edit by hand.

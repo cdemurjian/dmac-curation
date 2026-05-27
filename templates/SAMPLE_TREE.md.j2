@@ -1,0 +1,40 @@
+# Sample tree — {{ pi_name|title }} ({{ paper_short_title }})
+
+**Generated:** {{ generated_date }}
+**Lab tag:** `{{ lab|upper }}`
+**Curation date stamp:** `{{ curation_date_stamp }}` (used in new UIDs as `<TYPE>-{{ curation_date_stamp }}{{ lab|upper }}-N`)
+
+## Study overview
+
+{{ study_overview }}
+
+## Already in master ({{ pi_name }}'s existing rows)
+
+{% for type_summary in existing_rows %}
+- **{{ type_summary.sampletype }}**: {{ type_summary.count }} rows ({{ type_summary.note }})
+{% endfor %}
+
+## Experimental arms
+
+{% for arm in arms %}
+### Arm {{ arm.letter }} — {{ arm.title }}
+
+```
+{{ arm.ascii_tree }}
+```
+
+**Rows to create:**
+{% for type in arm.new_rows %}
+- `{{ type.sampletype }}` × {{ type.count }} — {{ type.note }}
+{% endfor %}
+
+**Open questions:** {{ arm.questions | default('(none)') }}
+{% endfor %}
+
+## Cross-arm questions
+
+{{ cross_arm_questions | default('(none)') }}
+
+## Suggested next step
+
+`/curate-build {{ arms[0].letter }}` (or any arm in any order)
