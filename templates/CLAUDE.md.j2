@@ -3,7 +3,7 @@
 **Project initialized:** {{ init_date }}
 **Lab tag:** `{{ lab|upper }}` (UIDs use format `<TYPE>-YYMMDD{{ lab|upper }}-N`)
 **PI:** {{ pi_name }}
-**NExtSEEK project ID:** {{ project_id | default('TBD — set after /curate-resolve-assays') }}
+**NExtSEEK project ID:** {{ project_id | default('TBD — set after /curate-resolve-assays', true) }}
 
 ## Inputs
 

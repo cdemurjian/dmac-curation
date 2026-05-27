@@ -28,13 +28,13 @@
 - `{{ type.sampletype }}` × {{ type.count }} — {{ type.note }}
 {% endfor %}
 
-**Open questions:** {{ arm.questions | default('(none)') }}
+**Open questions:** {{ arm.questions | default('(none)', true) }}
 {% endfor %}
 
 ## Cross-arm questions
 
-{{ cross_arm_questions | default('(none)') }}
+{{ cross_arm_questions | default('(none)', true) }}
 
 ## Suggested next step
 
-`/curate-build {{ arms[0].letter }}` (or any arm in any order)
+`/curate-build {{ arms[0].letter if arms else 'A' }}` (or any arm in any order)

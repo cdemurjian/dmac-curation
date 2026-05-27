@@ -5,23 +5,23 @@
 ## Inputs received
 
 ### `files/`
-{{ files_summary | default('(empty — no raw data dropped in yet)') }}
+{{ files_summary | default('(empty — no raw data dropped in yet)', true) }}
 
 ### `manuscript/`
-{{ manuscript_summary | default('(empty)') }}
+{{ manuscript_summary | default('(empty)', true) }}
 
 ### `previous_metadata/`
-{{ previous_metadata_summary | default('(empty)') }}
+{{ previous_metadata_summary | default('(empty)', true) }}
 
 ### `email_convo.md`
-{{ email_summary | default('(no email log present)') }}
+{{ email_summary | default('(no email log present)', true) }}
 
 ## Existing master metadata
 
 {% if master_xlsx %}
 File: `{{ master_xlsx }}`
 
-| Sheet | Row count | Sample-type code | {{ pi_name }}'s rows |
+| Sheet | Row count | Sample-type code | {{ pi_name|title }}'s rows |
 |---|---|---|---|
 {% for sheet in master_sheets %}
 | {{ sheet.name }} | {{ sheet.rows }} | {{ sheet.sampletype }} | {{ sheet.pi_rows }} |
@@ -32,7 +32,7 @@ File: `{{ master_xlsx }}`
 
 ## Things to flag now
 
-{{ flags | default('(none)') }}
+{{ flags | default('(none)', true) }}
 
 ## Suggested next step
 

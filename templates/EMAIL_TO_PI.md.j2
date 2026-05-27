@@ -1,16 +1,16 @@
 # Email to {{ pi_name|title }} — draft
 
-**Subject:** {{ subject | default(pi_name|title + ' paper curation update') }}
+**Subject:** {{ subject | default(pi_name|title + ' paper curation update', true) }}
 
 Hi {{ pi_name|title }},
 
-{{ greeting | default('Quick update on the metadata curation for your paper.') }}
+{{ greeting | default('Quick update on the metadata curation for your paper.', true) }}
 
 ## What's been curated
 
 {{ summary_paragraph }}
 
-{% if sample_tree_svg %}
+{% if sample_tree_svg is defined and sample_tree_svg %}
 *(sample tree rendering attached as `{{ sample_tree_svg }}`)*
 {% endif %}
 
