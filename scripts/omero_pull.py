@@ -5,7 +5,8 @@
 # ///
 # TODO(v0.2): extract REST client into deposit/omero_rest_client.py for reuse
 """
-Pull OMERO image IDs via the REST API and reconcile against the local manifest.
+Pull OMERO image IDs via the REST API (default https://omero.mit.edu; override
+with --base) and reconcile against the local manifest.
 
 Usage examples
 --------------
@@ -59,7 +60,7 @@ from typing import Iterator
 
 DEFAULT_BASE = "https://omero.mit.edu"
 DEFAULT_PAGE = 500  # OMERO.web typically caps at 500
-USER_AGENT = "intravchip-curation/1.0 (omero-pull)"
+USER_AGENT = "dmac-curation/0.1.0 (omero-pull)"
 
 CSV_COLS = [
     "filename",        # OMERO Image.Name (== our renamed filename)

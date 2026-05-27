@@ -21,3 +21,5 @@ def test_omero_pull_help():
         capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
+    for sub in ["images", "diff", "all"]:
+        assert sub in result.stdout, f"subcommand {sub} not in --help"

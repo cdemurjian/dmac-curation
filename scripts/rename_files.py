@@ -3,10 +3,13 @@
 # requires-python = ">=3.11"
 # dependencies = []
 # ///
-"""
-IntravChip file rename + flatten tool.
+"""File rename + flatten tool for curation-project `files/` trees.
 
-See RENAME_PLAN.md for the design. Operates in five modes:
+Walks a directory of raw data organized by Figure subfolders (`files/Figure 1/`,
+`files/Figure 2/`, ...), classifies each file by type, proposes new canonical
+filenames, and applies the rename atomically.
+
+5 subcommands:
 
     walk        --root files/ --manifest manifest.csv
                 Parse the tree, emit manifest.csv. No filesystem changes.
@@ -24,7 +27,13 @@ See RENAME_PLAN.md for the design. Operates in five modes:
     rollback    --manifest manifest.csv
                 Reverse a previous apply using the manifest's original_path mapping.
 
-Stdlib only.
+Manifest CSV (`manifest.csv` at repo root) is the source of truth — every rename
+flows through it. Stdlib only (no openpyxl, no requests).
+
+The default classifier rules in this script (FIGURE_DIRS, FIG5_CHAMBER_TO_CANONICAL,
+SUBSTITUTIONS, and the `intrav_sim_final.mph` Figure 1 COMSOL pattern) reflect
+the IntravChip dataset. For other projects, fork these constants or pass
+`--config <yaml>` (planned for v0.2).
 """
 from __future__ import annotations
 
@@ -42,6 +51,8 @@ from typing import Iterable, NamedTuple
 # Configuration
 # ---------------------------------------------------------------------------
 
+# TODO(v0.2): These constants are IntravChip-specific. For other projects,
+# fork the script or load from a per-project YAML config file.
 FIGURE_DIRS = [f"Figure {n}" for n in range(1, 8)]
 
 # Canonical case restoration. After path components are lowercased + whitespace
@@ -413,6 +424,8 @@ def classify(rel_path: Path) -> FileSpec:
 
     # ---- Figure 1: single COMSOL file ---------------------------------------
     if figure == 1:
+        # TODO(v0.2): IntravChip-specific Figure 1 classifier. For other projects,
+        # replace this filename pattern or move to a per-project config file.
         if name == "intrav_sim_final.mph":
             return FileSpec(
                 figure=1, device_id="", region="na", acquisition="", roi="",
