@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["requests>=2.31"]
+# dependencies = []
 # ///
 # TODO(v0.2): extract REST client into deposit/omero_rest_client.py for reuse
 """
