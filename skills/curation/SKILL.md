@@ -36,6 +36,15 @@ You are helping a curator at MIT DMAC turn a PI's research-project data into NEx
 
 For deep per-phase reference, read `skills/curation/PHASES.md`. For each command's behavior, the `commands/curate-*.md` files are authoritative.
 
+## FairDomHub direct API (standalone — NOT part of the 13-phase pipeline)
+
+Two FDH capabilities independent of NExtSEEK curation:
+- **Upload a study** → `/fdh-upload` drives the interactive `scripts/fdh/submit.py`.
+- **Programmatic API access** ("find / delete / patch … on FDH") → `/fdh-api` runs a
+  reuse-or-generate loop over `scripts/fdh/fdh_api.py` + `context/fdh_api_index.json`.
+
+Deep reference: `skills/curation/FDH.md` (load on demand). Auth: `.env` `FDH_API`.
+
 ## Hard rules (never violate)
 
 1. **Q&A before UIDs.** If the PI hasn't confirmed experimental scope, draft `EMAIL_TO_PI.md` skeleton (or `QUESTIONS_FOR_PI.md`) before minting UIDs. Where ambiguity exists, ask.
@@ -67,6 +76,8 @@ For deep per-phase reference, read `skills/curation/PHASES.md`. For each command
 - "RETRIEVE.TXT" → Phase 11 artifact (downstream UIDs for `chat_nextseek`)
 - "all set" / "lets move on" → phase complete, proceed
 - "screw the X" → de-scope X for now
+- "upload to FairDomHub" / "FDH upload" → `/fdh-upload` (interactive `submit.py`)
+- "access the FDH API" / "find/delete/patch … on FDH" → `/fdh-api` reuse-or-generate loop
 
 ## Pitfalls to pre-warn about
 
