@@ -66,14 +66,14 @@ class FairDomHubClient:
             return path_or_url
         return f"{self.base_url}/{path_or_url.lstrip('/')}"
 
-    def _request(self, method, path_or_url, *, params=None, json_body=None,
+    def _request(self, method, path_or_url, *, params=None, json_body=None, headers=None,
                  max_retries=5, backoff=2.0):
         url = self._abs(path_or_url)
         attempt = 0
         while True:
             try:
-                r = self.session.request(method, url, params=params,
-                                         json=json_body, timeout=self.timeout)
+                r = self.session.request(method, url, params=params, json=json_body,
+                                         headers=headers, timeout=self.timeout)
             except requests.RequestException:
                 if attempt < max_retries:
                     time.sleep(backoff ** attempt)
@@ -108,8 +108,11 @@ class FairDomHubClient:
         return self._json("GET", "/search", params=params)
 
     def page_through(self, path_or_url):
-        items, url = [], path_or_url
+        items, url, seen = [], path_or_url, set()
         while url:
+            if url in seen:
+                break  # malformed API returned a repeating links.next — stop
+            seen.add(url)
             payload = self._json("GET", url)
             items.extend(payload.get("data") or [])
             url = (payload.get("links") or {}).get("next")
@@ -133,7 +136,8 @@ class FairDomHubClient:
         return self._json("GET", "/people/current")
 
     def download_blob(self, url, dest):
-        r = self._request("GET", url)
+        # Content-blob downloads return raw bytes; don't force a JSON Accept header.
+        r = self._request("GET", url, headers={"Accept": "*/*"})
         dest = Path(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(r.content)

@@ -31,6 +31,7 @@ submission tool `submit.py`. This is a standalone track — it does NOT consume 
 ## Behavioral rules
 
 - Never edit `submit.py` to bypass its prompts. It is intentionally interactive.
-- `Assets/Output/session.json` stores the API token in plain text — remind the user it is
-  gitignored and must not be committed.
+- `Assets/Output/session.json` stores the API token in plain text. The plugin cannot ignore it
+  for the user (submit.py runs in their own working directory), so tell the user to add
+  `Assets/Output/` to their project's `.gitignore` and never commit it.
 - Known project IDs live in `PROJECT_MAPPING` inside `submit.py`; new projects are added there.

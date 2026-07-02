@@ -58,6 +58,7 @@ Thumbs.db
 # accidentally used as a curation working dir — keep them out)
 # ============================================================
 *.partial
+Assets/Output/
 GEO/
 Zenodo_upload/
 images_to_upload_to_omero/

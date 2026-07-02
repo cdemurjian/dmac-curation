@@ -102,4 +102,6 @@ if __name__ == "__main__":
   confirmation before any DELETE/PATCH.
 - New generated scripts are committed only after the user reviews the diff (review-then-commit).
 - Credentials come from `.env` only; never printed or committed. `Assets/Output/session.json`
-  (from submit.py) holds a token in plaintext and is gitignored.
+  (from submit.py) holds a token in plaintext — the user must add `Assets/Output/` to their
+  project's `.gitignore`; the plugin cannot guarantee it since submit.py runs in the user's
+  own working directory.
