@@ -169,7 +169,7 @@
       "browse",
       "collections"
     ],
-    "llm_hint": "Summary: List translation items in a collection.",
+    "llm_hint": "Requires the numeric resource id. Summary: List translation items in a collection.",
     "yaml_lines": [
       8476,
       8506
@@ -1173,15 +1173,16 @@
     "method": "GET",
     "operation_id": "currentPerson",
     "summary": "Fetch the currently authenticated user",
-    "category": "people_list",
+    "category": "people_read",
     "primary_entities": [
       "people"
     ],
     "intent_patterns": [
-      "list",
-      "all",
-      "show",
-      "browse",
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
       "people"
     ],
     "llm_hint": "Summary: Fetch the currently authenticated user.",
@@ -2300,7 +2301,7 @@
     "method": "PUT",
     "operation_id": "uploadAssetContent",
     "summary": "Upload content to an existing content blob placeholder",
-    "category": "file_read",
+    "category": "file_update",
     "primary_entities": [
       "content_blobs"
     ],
@@ -2331,7 +2332,7 @@
       "browse",
       "content_blobs"
     ],
-    "llm_hint": "Two-step: resolve the blob link from the parent resource first. Summary: Download content.",
+    "llm_hint": "Requires the numeric resource id. Two-step: resolve the blob link from the parent resource first. Summary: Download content.",
     "yaml_lines": [
       9341,
       9368

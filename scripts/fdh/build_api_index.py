@@ -70,13 +70,31 @@ def entity_of(path):
     return "resource"
 
 
+# Non-{id} paths that still address a single resource (e.g. /people/current).
+_SINGLETON_SUFFIXES = ("current",)
+
+
+def _is_item(path):
+    """True when the path addresses a single resource: it ends in a {placeholder}
+    or a known singleton suffix like /current."""
+    tail = path.rstrip("/").split("/")[-1]
+    return tail.endswith("}") or tail in _SINGLETON_SUFFIXES
+
+
 def categorize(path, method):
     if path == "/search":
         return "search"
     if "content_blobs" in path:
-        return "file_download" if path.endswith("/download") else "file_read"
+        # Method-aware so writes/deletes on blobs are not mislabeled as reads.
+        if method == "get":
+            return "file_download" if path.endswith("/download") else "file_read"
+        if method in ("put", "post", "patch"):
+            return "file_update"
+        if method == "delete":
+            return "file_delete"
+        return f"file_{method}"
     entity = entity_of(path)
-    is_item = path.rstrip("/").endswith("}")
+    is_item = _is_item(path)
     if method == "get":
         return f"{entity}_read" if is_item else f"{entity}_list"
     if method == "post":
@@ -99,17 +117,17 @@ _INTENTS = {
 
 
 def intent_patterns(path, method):
-    is_item = path.rstrip("/").endswith("}")
+    is_item = _is_item(path)
     key = "get_item" if (method == "get" and is_item) else ("get_list" if method == "get" else method)
     return list(_INTENTS.get(key, [])) + [entity_of(path)]
 
 
 def llm_hint(path, method, summary):
-    is_item = path.rstrip("/").endswith("}")
+    needs_id = "{" in path  # a real path placeholder like {id}; excludes /people/current
     bits = []
     if method == "delete":
         bits.append("DESTRUCTIVE — irreversible on the live repo; dry-run and confirm before writing.")
-    if method in ("patch", "put", "delete") or (method == "get" and is_item):
+    if needs_id and method in ("get", "patch", "put", "delete"):
         bits.append("Requires the numeric resource id.")
     if "content_blobs" in path:
         bits.append("Two-step: resolve the blob link from the parent resource first.")
