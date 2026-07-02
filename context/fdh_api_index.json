@@ -1,0 +1,2340 @@
+[
+  {
+    "path": "/assays",
+    "method": "GET",
+    "operation_id": "listAssays",
+    "summary": "List assays",
+    "category": "assays_list",
+    "primary_entities": [
+      "assays"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "assays"
+    ],
+    "llm_hint": "Summary: List assays.",
+    "yaml_lines": [
+      7493,
+      7527
+    ]
+  },
+  {
+    "path": "/assays",
+    "method": "POST",
+    "operation_id": "createAssay",
+    "summary": "Create a new assay",
+    "category": "assays_create",
+    "primary_entities": [
+      "assays"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "assays"
+    ],
+    "llm_hint": "Summary: Create a new assay.",
+    "yaml_lines": [
+      7528,
+      7664
+    ]
+  },
+  {
+    "path": "/assays/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteAssay",
+    "summary": "Delete an assay",
+    "category": "assays_delete",
+    "primary_entities": [
+      "assays"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "assays"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete an assay.",
+    "yaml_lines": [
+      7933,
+      7957
+    ]
+  },
+  {
+    "path": "/assays/{id}",
+    "method": "GET",
+    "operation_id": "readAssay",
+    "summary": "Fetch an assay",
+    "category": "assays_read",
+    "primary_entities": [
+      "assays"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "assays"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch an assay.",
+    "yaml_lines": [
+      7807,
+      7932
+    ]
+  },
+  {
+    "path": "/assays/{id}",
+    "method": "PATCH",
+    "operation_id": "updateAssay",
+    "summary": "Update an assay",
+    "category": "assays_update",
+    "primary_entities": [
+      "assays"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "assays"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update an assay.",
+    "yaml_lines": [
+      7673,
+      7806
+    ]
+  },
+  {
+    "path": "/collections",
+    "method": "GET",
+    "operation_id": "listCollections",
+    "summary": "List collections",
+    "category": "collections_list",
+    "primary_entities": [
+      "collections"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "collections"
+    ],
+    "llm_hint": "Summary: List collections.",
+    "yaml_lines": [
+      7959,
+      8005
+    ]
+  },
+  {
+    "path": "/collections",
+    "method": "POST",
+    "operation_id": "createCollection",
+    "summary": "Create a new collection",
+    "category": "collections_create",
+    "primary_entities": [
+      "collections"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "collections"
+    ],
+    "llm_hint": "Summary: Create a new collection.",
+    "yaml_lines": [
+      8006,
+      8103
+    ]
+  },
+  {
+    "path": "/collections/{collection_id}/items",
+    "method": "GET",
+    "operation_id": "listCollectionItems",
+    "summary": "List translation items in a collection",
+    "category": "collections_list",
+    "primary_entities": [
+      "collections"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "collections"
+    ],
+    "llm_hint": "Summary: List translation items in a collection.",
+    "yaml_lines": [
+      8476,
+      8506
+    ]
+  },
+  {
+    "path": "/collections/{collection_id}/items",
+    "method": "POST",
+    "operation_id": "createCollectionItem",
+    "summary": "Add a new item to a collection",
+    "category": "collections_create",
+    "primary_entities": [
+      "collections"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "collections"
+    ],
+    "llm_hint": "Summary: Add a new item to a collection.",
+    "yaml_lines": [
+      8507,
+      8569
+    ]
+  },
+  {
+    "path": "/collections/{collection_id}/items/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteCollectionItem",
+    "summary": "Remove an item from a collection",
+    "category": "collections_delete",
+    "primary_entities": [
+      "collections"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "collections"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Remove an item from a collection.",
+    "yaml_lines": [
+      8699,
+      8724
+    ]
+  },
+  {
+    "path": "/collections/{collection_id}/items/{id}",
+    "method": "GET",
+    "operation_id": "readCollectionItem",
+    "summary": "Fetch an item from a collection",
+    "category": "collections_read",
+    "primary_entities": [
+      "collections"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "collections"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch an item from a collection.",
+    "yaml_lines": [
+      8586,
+      8635
+    ]
+  },
+  {
+    "path": "/collections/{collection_id}/items/{id}",
+    "method": "PATCH",
+    "operation_id": "updateCollectionItem",
+    "summary": "Update an item in a collection",
+    "category": "collections_update",
+    "primary_entities": [
+      "collections"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "collections"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update an item in a collection.",
+    "yaml_lines": [
+      8636,
+      8698
+    ]
+  },
+  {
+    "path": "/collections/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteCollection",
+    "summary": "Delete a collection",
+    "category": "collections_delete",
+    "primary_entities": [
+      "collections"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "collections"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete a collection.",
+    "yaml_lines": [
+      8442,
+      8466
+    ]
+  },
+  {
+    "path": "/collections/{id}",
+    "method": "GET",
+    "operation_id": "readCollection",
+    "summary": "Fetch a collection",
+    "category": "collections_read",
+    "primary_entities": [
+      "collections"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "collections"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a collection.",
+    "yaml_lines": [
+      8113,
+      8340
+    ]
+  },
+  {
+    "path": "/collections/{id}",
+    "method": "PATCH",
+    "operation_id": "updateCollection",
+    "summary": "Update a collection",
+    "category": "collections_update",
+    "primary_entities": [
+      "collections"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "collections"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update a collection.",
+    "yaml_lines": [
+      8341,
+      8441
+    ]
+  },
+  {
+    "path": "/data_files",
+    "method": "GET",
+    "operation_id": "listDataFiles",
+    "summary": "List data files",
+    "category": "data_files_list",
+    "primary_entities": [
+      "data_files"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "data_files"
+    ],
+    "llm_hint": "Summary: List data files.",
+    "yaml_lines": [
+      8726,
+      8760
+    ]
+  },
+  {
+    "path": "/data_files",
+    "method": "POST",
+    "operation_id": "createDataFile",
+    "summary": "Create a new data file",
+    "category": "data_files_create",
+    "primary_entities": [
+      "data_files"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "data_files"
+    ],
+    "llm_hint": "Summary: Create a new data file.",
+    "yaml_lines": [
+      8761,
+      8906
+    ]
+  },
+  {
+    "path": "/data_files/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteDataFile",
+    "summary": "Delete a data file",
+    "category": "data_files_delete",
+    "primary_entities": [
+      "data_files"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "data_files"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete a data file.",
+    "yaml_lines": [
+      9207,
+      9231
+    ]
+  },
+  {
+    "path": "/data_files/{id}",
+    "method": "GET",
+    "operation_id": "readDataFile",
+    "summary": "Fetch a data file",
+    "category": "data_files_read",
+    "primary_entities": [
+      "data_files"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "data_files"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a data file.",
+    "yaml_lines": [
+      8916,
+      9059
+    ]
+  },
+  {
+    "path": "/data_files/{id}",
+    "method": "PATCH",
+    "operation_id": "updateDataFile",
+    "summary": "Update a data file",
+    "category": "data_files_update",
+    "primary_entities": [
+      "data_files"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "data_files"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update a data file.",
+    "yaml_lines": [
+      9060,
+      9206
+    ]
+  },
+  {
+    "path": "/documents",
+    "method": "GET",
+    "operation_id": "listDocuments",
+    "summary": "List documents",
+    "category": "documents_list",
+    "primary_entities": [
+      "documents"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "documents"
+    ],
+    "llm_hint": "Summary: List documents.",
+    "yaml_lines": [
+      9370,
+      9416
+    ]
+  },
+  {
+    "path": "/documents",
+    "method": "POST",
+    "operation_id": "createDocument",
+    "summary": "Create a new document",
+    "category": "documents_create",
+    "primary_entities": [
+      "documents"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "documents"
+    ],
+    "llm_hint": "Summary: Create a new document.",
+    "yaml_lines": [
+      9417,
+      9555
+    ]
+  },
+  {
+    "path": "/documents/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteDocument",
+    "summary": "Delete a document",
+    "category": "documents_delete",
+    "primary_entities": [
+      "documents"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "documents"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete a document.",
+    "yaml_lines": [
+      9835,
+      9859
+    ]
+  },
+  {
+    "path": "/documents/{id}",
+    "method": "GET",
+    "operation_id": "readDocument",
+    "summary": "Fetch a document",
+    "category": "documents_read",
+    "primary_entities": [
+      "documents"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "documents"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a document.",
+    "yaml_lines": [
+      9565,
+      9694
+    ]
+  },
+  {
+    "path": "/documents/{id}",
+    "method": "PATCH",
+    "operation_id": "updateDocument",
+    "summary": "Update a document",
+    "category": "documents_update",
+    "primary_entities": [
+      "documents"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "documents"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update a document.",
+    "yaml_lines": [
+      9695,
+      9834
+    ]
+  },
+  {
+    "path": "/events",
+    "method": "GET",
+    "operation_id": "listEvents",
+    "summary": "List events",
+    "category": "events_list",
+    "primary_entities": [
+      "events"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "events"
+    ],
+    "llm_hint": "Summary: List events.",
+    "yaml_lines": [
+      9861,
+      9895
+    ]
+  },
+  {
+    "path": "/events",
+    "method": "POST",
+    "operation_id": "createEvent",
+    "summary": "Create a new event",
+    "category": "events_create",
+    "primary_entities": [
+      "events"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "events"
+    ],
+    "llm_hint": "Summary: Create a new event.",
+    "yaml_lines": [
+      9896,
+      9984
+    ]
+  },
+  {
+    "path": "/events/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteEvent",
+    "summary": "Delete an event",
+    "category": "events_delete",
+    "primary_entities": [
+      "events"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "events"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete an event.",
+    "yaml_lines": [
+      10155,
+      10179
+    ]
+  },
+  {
+    "path": "/events/{id}",
+    "method": "GET",
+    "operation_id": "readEvent",
+    "summary": "Fetch an event",
+    "category": "events_read",
+    "primary_entities": [
+      "events"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "events"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch an event.",
+    "yaml_lines": [
+      9994,
+      10065
+    ]
+  },
+  {
+    "path": "/events/{id}",
+    "method": "PATCH",
+    "operation_id": "updateEvent",
+    "summary": "Update an event",
+    "category": "events_update",
+    "primary_entities": [
+      "events"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "events"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update an event.",
+    "yaml_lines": [
+      10066,
+      10154
+    ]
+  },
+  {
+    "path": "/extended_metadata_types",
+    "method": "GET",
+    "operation_id": "listExtendedMetadataTypes",
+    "summary": "List extended metadata types",
+    "category": "extended_metadata_types_list",
+    "primary_entities": [
+      "extended_metadata_types"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "extended_metadata_types"
+    ],
+    "llm_hint": "Summary: List extended metadata types.",
+    "yaml_lines": [
+      10181,
+      10221
+    ]
+  },
+  {
+    "path": "/extended_metadata_types/{id}",
+    "method": "GET",
+    "operation_id": "readExtendedMetadataType",
+    "summary": "Fetch an extended metadata type",
+    "category": "extended_metadata_types_read",
+    "primary_entities": [
+      "extended_metadata_types"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "extended_metadata_types"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch an extended metadata type.",
+    "yaml_lines": [
+      10231,
+      10339
+    ]
+  },
+  {
+    "path": "/institutions",
+    "method": "GET",
+    "operation_id": "listInstitutions",
+    "summary": "List institutions",
+    "category": "institutions_list",
+    "primary_entities": [
+      "institutions"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "institutions"
+    ],
+    "llm_hint": "Summary: List institutions.",
+    "yaml_lines": [
+      10341,
+      10394
+    ]
+  },
+  {
+    "path": "/institutions",
+    "method": "POST",
+    "operation_id": "createInstitution",
+    "summary": "Create a new institution",
+    "category": "institutions_create",
+    "primary_entities": [
+      "institutions"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "institutions"
+    ],
+    "llm_hint": "Summary: Create a new institution.",
+    "yaml_lines": [
+      10395,
+      10462
+    ]
+  },
+  {
+    "path": "/institutions/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteInstitution",
+    "summary": "Delete an institution",
+    "category": "institutions_delete",
+    "primary_entities": [
+      "institutions"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "institutions"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete an institution.",
+    "yaml_lines": [
+      10596,
+      10620
+    ]
+  },
+  {
+    "path": "/institutions/{id}",
+    "method": "GET",
+    "operation_id": "readInstitution",
+    "summary": "Fetch an institution",
+    "category": "institutions_read",
+    "primary_entities": [
+      "institutions"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "institutions"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch an institution.",
+    "yaml_lines": [
+      10472,
+      10529
+    ]
+  },
+  {
+    "path": "/institutions/{id}",
+    "method": "PATCH",
+    "operation_id": "updateInstitution",
+    "summary": "Update an institution",
+    "category": "institutions_update",
+    "primary_entities": [
+      "institutions"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "institutions"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update an institution.",
+    "yaml_lines": [
+      10530,
+      10595
+    ]
+  },
+  {
+    "path": "/investigations",
+    "method": "GET",
+    "operation_id": "listInvestigations",
+    "summary": "List investigations",
+    "category": "investigations_list",
+    "primary_entities": [
+      "investigations"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "investigations"
+    ],
+    "llm_hint": "Summary: List investigations.",
+    "yaml_lines": [
+      10622,
+      10668
+    ]
+  },
+  {
+    "path": "/investigations",
+    "method": "POST",
+    "operation_id": "createInvestigation",
+    "summary": "Create a new investigation",
+    "category": "investigations_create",
+    "primary_entities": [
+      "investigations"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "investigations"
+    ],
+    "llm_hint": "Summary: Create a new investigation.",
+    "yaml_lines": [
+      10669,
+      10777
+    ]
+  },
+  {
+    "path": "/investigations/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteInvestigation",
+    "summary": "Delete an investigation",
+    "category": "investigations_delete",
+    "primary_entities": [
+      "investigations"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "investigations"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete an investigation.",
+    "yaml_lines": [
+      10999,
+      11023
+    ]
+  },
+  {
+    "path": "/investigations/{id}",
+    "method": "GET",
+    "operation_id": "readInvestigation",
+    "summary": "Fetch an investigation",
+    "category": "investigations_read",
+    "primary_entities": [
+      "investigations"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "investigations"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch an investigation.",
+    "yaml_lines": [
+      10787,
+      10889
+    ]
+  },
+  {
+    "path": "/investigations/{id}",
+    "method": "PATCH",
+    "operation_id": "updateInvestigation",
+    "summary": "Update an investigation",
+    "category": "investigations_update",
+    "primary_entities": [
+      "investigations"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "investigations"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update an investigation.",
+    "yaml_lines": [
+      10890,
+      10998
+    ]
+  },
+  {
+    "path": "/isa_tags",
+    "method": "GET",
+    "operation_id": "listIsaTags",
+    "summary": "List possible ISA Tags",
+    "category": "isa_tags_list",
+    "primary_entities": [
+      "isa_tags"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "isa_tags"
+    ],
+    "llm_hint": "Summary: List possible ISA Tags.",
+    "yaml_lines": [
+      14770,
+      14870
+    ]
+  },
+  {
+    "path": "/isa_tags/{id}",
+    "method": "GET",
+    "operation_id": "readIsaTag",
+    "summary": "Fetch an Isa Tag",
+    "category": "isa_tags_read",
+    "primary_entities": [
+      "isa_tags"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "isa_tags"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch an Isa Tag.",
+    "yaml_lines": [
+      14879,
+      14921
+    ]
+  },
+  {
+    "path": "/models",
+    "method": "GET",
+    "operation_id": "listModels",
+    "summary": "List models",
+    "category": "models_list",
+    "primary_entities": [
+      "models"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "models"
+    ],
+    "llm_hint": "Summary: List models.",
+    "yaml_lines": [
+      11025,
+      11059
+    ]
+  },
+  {
+    "path": "/models",
+    "method": "POST",
+    "operation_id": "createModel",
+    "summary": "Create a new model",
+    "category": "models_create",
+    "primary_entities": [
+      "models"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "models"
+    ],
+    "llm_hint": "Summary: Create a new model.",
+    "yaml_lines": [
+      11060,
+      11203
+    ]
+  },
+  {
+    "path": "/models/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteModel",
+    "summary": "Delete a model",
+    "category": "models_delete",
+    "primary_entities": [
+      "models"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "models"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete a model.",
+    "yaml_lines": [
+      11492,
+      11516
+    ]
+  },
+  {
+    "path": "/models/{id}",
+    "method": "GET",
+    "operation_id": "readModel",
+    "summary": "Fetch a model",
+    "category": "models_read",
+    "primary_entities": [
+      "models"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "models"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a model.",
+    "yaml_lines": [
+      11213,
+      11350
+    ]
+  },
+  {
+    "path": "/models/{id}",
+    "method": "PATCH",
+    "operation_id": "updateModel",
+    "summary": "Update a model",
+    "category": "models_update",
+    "primary_entities": [
+      "models"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "models"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update a model.",
+    "yaml_lines": [
+      11351,
+      11491
+    ]
+  },
+  {
+    "path": "/organisms",
+    "method": "GET",
+    "operation_id": "listOrganisms",
+    "summary": "List organisms",
+    "category": "organisms_list",
+    "primary_entities": [
+      "organisms"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "organisms"
+    ],
+    "llm_hint": "Summary: List organisms.",
+    "yaml_lines": [
+      11518,
+      11564
+    ]
+  },
+  {
+    "path": "/organisms/{id}",
+    "method": "GET",
+    "operation_id": "readOrganism",
+    "summary": "Fetch an organism",
+    "category": "organisms_read",
+    "primary_entities": [
+      "organisms"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "organisms"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch an organism.",
+    "yaml_lines": [
+      11574,
+      11627
+    ]
+  },
+  {
+    "path": "/people",
+    "method": "GET",
+    "operation_id": "listPeople",
+    "summary": "List people",
+    "category": "people_list",
+    "primary_entities": [
+      "people"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "people"
+    ],
+    "llm_hint": "Summary: List people.",
+    "yaml_lines": [
+      11629,
+      11915
+    ]
+  },
+  {
+    "path": "/people",
+    "method": "POST",
+    "operation_id": "createPerson",
+    "summary": "Create a new person",
+    "category": "people_create",
+    "primary_entities": [
+      "people"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "people"
+    ],
+    "llm_hint": "Summary: Create a new person.",
+    "yaml_lines": [
+      11916,
+      12010
+    ]
+  },
+  {
+    "path": "/people/current",
+    "method": "GET",
+    "operation_id": "currentPerson",
+    "summary": "Fetch the currently authenticated user",
+    "category": "people_list",
+    "primary_entities": [
+      "people"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "people"
+    ],
+    "llm_hint": "Summary: Fetch the currently authenticated user.",
+    "yaml_lines": [
+      12012,
+      12121
+    ]
+  },
+  {
+    "path": "/people/{id}",
+    "method": "DELETE",
+    "operation_id": "deletePerson",
+    "summary": "Delete a person",
+    "category": "people_delete",
+    "primary_entities": [
+      "people"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "people"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete a person.",
+    "yaml_lines": [
+      12338,
+      12362
+    ]
+  },
+  {
+    "path": "/people/{id}",
+    "method": "GET",
+    "operation_id": "readPerson",
+    "summary": "Fetch a person",
+    "category": "people_read",
+    "primary_entities": [
+      "people"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "people"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a person.",
+    "yaml_lines": [
+      12131,
+      12238
+    ]
+  },
+  {
+    "path": "/people/{id}",
+    "method": "PATCH",
+    "operation_id": "updatePerson",
+    "summary": "Update a person",
+    "category": "people_update",
+    "primary_entities": [
+      "people"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "people"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update a person.",
+    "yaml_lines": [
+      12239,
+      12337
+    ]
+  },
+  {
+    "path": "/presentations",
+    "method": "GET",
+    "operation_id": "listPresentations",
+    "summary": "List presentations",
+    "category": "presentations_list",
+    "primary_entities": [
+      "presentations"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "presentations"
+    ],
+    "llm_hint": "Summary: List presentations.",
+    "yaml_lines": [
+      12364,
+      12398
+    ]
+  },
+  {
+    "path": "/presentations",
+    "method": "POST",
+    "operation_id": "createPresentation",
+    "summary": "Create a new presentation",
+    "category": "presentations_create",
+    "primary_entities": [
+      "presentations"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "presentations"
+    ],
+    "llm_hint": "Summary: Create a new presentation.",
+    "yaml_lines": [
+      12399,
+      12524
+    ]
+  },
+  {
+    "path": "/presentations/{id}",
+    "method": "DELETE",
+    "operation_id": "deletePresentation",
+    "summary": "Delete a presentation",
+    "category": "presentations_delete",
+    "primary_entities": [
+      "presentations"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "presentations"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete a presentation.",
+    "yaml_lines": [
+      12791,
+      12815
+    ]
+  },
+  {
+    "path": "/presentations/{id}",
+    "method": "GET",
+    "operation_id": "readPresentation",
+    "summary": "Fetch a presentation",
+    "category": "presentations_read",
+    "primary_entities": [
+      "presentations"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "presentations"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a presentation.",
+    "yaml_lines": [
+      12534,
+      12663
+    ]
+  },
+  {
+    "path": "/presentations/{id}",
+    "method": "PATCH",
+    "operation_id": "updatePresentation",
+    "summary": "Update a presentation",
+    "category": "presentations_update",
+    "primary_entities": [
+      "presentations"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "presentations"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update a presentation.",
+    "yaml_lines": [
+      12664,
+      12790
+    ]
+  },
+  {
+    "path": "/programmes",
+    "method": "GET",
+    "operation_id": "listProgrammes",
+    "summary": "List programmes",
+    "category": "programmes_list",
+    "primary_entities": [
+      "programmes"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "programmes"
+    ],
+    "llm_hint": "Summary: List programmes.",
+    "yaml_lines": [
+      12817,
+      12869
+    ]
+  },
+  {
+    "path": "/programmes",
+    "method": "POST",
+    "operation_id": "createProgramme",
+    "summary": "Create a new programme",
+    "category": "programmes_create",
+    "primary_entities": [
+      "programmes"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "programmes"
+    ],
+    "llm_hint": "Summary: Create a new programme.",
+    "yaml_lines": [
+      12870,
+      12972
+    ]
+  },
+  {
+    "path": "/programmes/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteProgramme",
+    "summary": "Delete a programme",
+    "category": "programmes_delete",
+    "primary_entities": [
+      "programmes"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "programmes"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete a programme.",
+    "yaml_lines": [
+      13196,
+      13220
+    ]
+  },
+  {
+    "path": "/programmes/{id}",
+    "method": "GET",
+    "operation_id": "readProgramme",
+    "summary": "Fetch a programme",
+    "category": "programmes_read",
+    "primary_entities": [
+      "programmes"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "programmes"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a programme.",
+    "yaml_lines": [
+      12982,
+      13097
+    ]
+  },
+  {
+    "path": "/programmes/{id}",
+    "method": "PATCH",
+    "operation_id": "updateProgramme",
+    "summary": "Update a programme",
+    "category": "programmes_update",
+    "primary_entities": [
+      "programmes"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "programmes"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update a programme.",
+    "yaml_lines": [
+      13098,
+      13195
+    ]
+  },
+  {
+    "path": "/projects",
+    "method": "GET",
+    "operation_id": "listProjects",
+    "summary": "List projects",
+    "category": "projects_list",
+    "primary_entities": [
+      "projects"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "projects"
+    ],
+    "llm_hint": "Summary: List projects.",
+    "yaml_lines": [
+      13222,
+      13460
+    ]
+  },
+  {
+    "path": "/projects",
+    "method": "POST",
+    "operation_id": "createProject",
+    "summary": "Create a new project",
+    "category": "projects_create",
+    "primary_entities": [
+      "projects"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "projects"
+    ],
+    "llm_hint": "Summary: Create a new project.",
+    "yaml_lines": [
+      13461,
+      13607
+    ]
+  },
+  {
+    "path": "/projects/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteProject",
+    "summary": "Delete a project",
+    "category": "projects_delete",
+    "primary_entities": [
+      "projects"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "projects"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete a project.",
+    "yaml_lines": [
+      13917,
+      13941
+    ]
+  },
+  {
+    "path": "/projects/{id}",
+    "method": "GET",
+    "operation_id": "readProject",
+    "summary": "Fetch a project",
+    "category": "projects_read",
+    "primary_entities": [
+      "projects"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "projects"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a project.",
+    "yaml_lines": [
+      13617,
+      13769
+    ]
+  },
+  {
+    "path": "/projects/{id}",
+    "method": "PATCH",
+    "operation_id": "updateProject",
+    "summary": "Update a project",
+    "category": "projects_update",
+    "primary_entities": [
+      "projects"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "projects"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update a project.",
+    "yaml_lines": [
+      13770,
+      13916
+    ]
+  },
+  {
+    "path": "/publications",
+    "method": "GET",
+    "operation_id": "listPublications",
+    "summary": "List publications",
+    "category": "publications_list",
+    "primary_entities": [
+      "publications"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "publications"
+    ],
+    "llm_hint": "Summary: List publications.",
+    "yaml_lines": [
+      13943,
+      13989
+    ]
+  },
+  {
+    "path": "/publications/{id}",
+    "method": "GET",
+    "operation_id": "readPublication",
+    "summary": "Fetch a publication",
+    "category": "publications_read",
+    "primary_entities": [
+      "publications"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "publications"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a publication.",
+    "yaml_lines": [
+      13999,
+      14141
+    ]
+  },
+  {
+    "path": "/sample_attribute_types",
+    "method": "GET",
+    "operation_id": "listSampleAttributeTypes",
+    "summary": "List possible sample attribute types",
+    "category": "sample_attribute_types_list",
+    "primary_entities": [
+      "sample_attribute_types"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "sample_attribute_types"
+    ],
+    "llm_hint": "Summary: List possible sample attribute types.",
+    "yaml_lines": [
+      14518,
+      14768
+    ]
+  },
+  {
+    "path": "/sample_types",
+    "method": "GET",
+    "operation_id": "listSampleTypes",
+    "summary": "List sample types",
+    "category": "sample_types_list",
+    "primary_entities": [
+      "sample_types"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "sample_types"
+    ],
+    "llm_hint": "Summary: List sample types.",
+    "yaml_lines": [
+      14923,
+      14957
+    ]
+  },
+  {
+    "path": "/sample_types",
+    "method": "POST",
+    "operation_id": "createSampleType",
+    "summary": "Create a new sample type",
+    "category": "sample_types_create",
+    "primary_entities": [
+      "sample_types"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "sample_types"
+    ],
+    "llm_hint": "Summary: Create a new sample type.",
+    "yaml_lines": [
+      14958,
+      15046
+    ]
+  },
+  {
+    "path": "/sample_types/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteSampleType",
+    "summary": "Delete a sample type",
+    "category": "sample_types_delete",
+    "primary_entities": [
+      "sample_types"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "sample_types"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete a sample type.",
+    "yaml_lines": [
+      15388,
+      15412
+    ]
+  },
+  {
+    "path": "/sample_types/{id}",
+    "method": "GET",
+    "operation_id": "readSampleType",
+    "summary": "Fetch a sample type",
+    "category": "sample_types_read",
+    "primary_entities": [
+      "sample_types"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "sample_types"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a sample type.",
+    "yaml_lines": [
+      15055,
+      15298
+    ]
+  },
+  {
+    "path": "/sample_types/{id}",
+    "method": "PATCH",
+    "operation_id": "updateSampleType",
+    "summary": "Update a sample type",
+    "category": "sample_types_update",
+    "primary_entities": [
+      "sample_types"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "sample_types"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update a sample type.",
+    "yaml_lines": [
+      15299,
+      15387
+    ]
+  },
+  {
+    "path": "/samples",
+    "method": "POST",
+    "operation_id": "createSample",
+    "summary": "Create a new sample",
+    "category": "samples_create",
+    "primary_entities": [
+      "samples"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "samples"
+    ],
+    "llm_hint": "Summary: Create a new sample.",
+    "yaml_lines": [
+      14143,
+      14260
+    ]
+  },
+  {
+    "path": "/samples/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteSample",
+    "summary": "Delete a sample",
+    "category": "samples_delete",
+    "primary_entities": [
+      "samples"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "samples"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete a sample.",
+    "yaml_lines": [
+      14492,
+      14516
+    ]
+  },
+  {
+    "path": "/samples/{id}",
+    "method": "GET",
+    "operation_id": "readSample",
+    "summary": "Fetch a sample",
+    "category": "samples_read",
+    "primary_entities": [
+      "samples"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "samples"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a sample.",
+    "yaml_lines": [
+      14269,
+      14374
+    ]
+  },
+  {
+    "path": "/samples/{id}",
+    "method": "PATCH",
+    "operation_id": "updateSample",
+    "summary": "Update a sample",
+    "category": "samples_update",
+    "primary_entities": [
+      "samples"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "samples"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update a sample.",
+    "yaml_lines": [
+      14375,
+      14491
+    ]
+  },
+  {
+    "path": "/search",
+    "method": "GET",
+    "operation_id": "search",
+    "summary": "Search SEEK for a given query",
+    "category": "search",
+    "primary_entities": [
+      "search"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "search"
+    ],
+    "llm_hint": "Summary: Search SEEK for a given query.",
+    "yaml_lines": [
+      7455,
+      7491
+    ]
+  },
+  {
+    "path": "/sops",
+    "method": "GET",
+    "operation_id": "listSops",
+    "summary": "List sops",
+    "category": "sops_list",
+    "primary_entities": [
+      "sops"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "sops"
+    ],
+    "llm_hint": "Summary: List sops.",
+    "yaml_lines": [
+      15414,
+      15460
+    ]
+  },
+  {
+    "path": "/sops",
+    "method": "POST",
+    "operation_id": "createSop",
+    "summary": "Create a new sop",
+    "category": "sops_create",
+    "primary_entities": [
+      "sops"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "sops"
+    ],
+    "llm_hint": "Summary: Create a new sop.",
+    "yaml_lines": [
+      15461,
+      15588
+    ]
+  },
+  {
+    "path": "/sops/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteSop",
+    "summary": "Delete a sop",
+    "category": "sops_delete",
+    "primary_entities": [
+      "sops"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "sops"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete a sop.",
+    "yaml_lines": [
+      15854,
+      15878
+    ]
+  },
+  {
+    "path": "/sops/{id}",
+    "method": "GET",
+    "operation_id": "readSop",
+    "summary": "Fetch a sop",
+    "category": "sops_read",
+    "primary_entities": [
+      "sops"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "sops"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a sop.",
+    "yaml_lines": [
+      15598,
+      15724
+    ]
+  },
+  {
+    "path": "/sops/{id}",
+    "method": "PATCH",
+    "operation_id": "updateSop",
+    "summary": "Update a sop",
+    "category": "sops_update",
+    "primary_entities": [
+      "sops"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "sops"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update a sop.",
+    "yaml_lines": [
+      15725,
+      15853
+    ]
+  },
+  {
+    "path": "/studies",
+    "method": "GET",
+    "operation_id": "listStudies",
+    "summary": "List studies",
+    "category": "studies_list",
+    "primary_entities": [
+      "studies"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "studies"
+    ],
+    "llm_hint": "Summary: List studies.",
+    "yaml_lines": [
+      15880,
+      15920
+    ]
+  },
+  {
+    "path": "/studies",
+    "method": "POST",
+    "operation_id": "createStudy",
+    "summary": "Create a new study",
+    "category": "studies_create",
+    "primary_entities": [
+      "studies"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "studies"
+    ],
+    "llm_hint": "Summary: Create a new study.",
+    "yaml_lines": [
+      15921,
+      16032
+    ]
+  },
+  {
+    "path": "/studies/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteStudy",
+    "summary": "Delete a study",
+    "category": "studies_delete",
+    "primary_entities": [
+      "studies"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "studies"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete a study.",
+    "yaml_lines": [
+      16264,
+      16288
+    ]
+  },
+  {
+    "path": "/studies/{id}",
+    "method": "GET",
+    "operation_id": "readStudy",
+    "summary": "Fetch a study",
+    "category": "studies_read",
+    "primary_entities": [
+      "studies"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "studies"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a study.",
+    "yaml_lines": [
+      16042,
+      16151
+    ]
+  },
+  {
+    "path": "/studies/{id}",
+    "method": "PATCH",
+    "operation_id": "updateStudy",
+    "summary": "Update a study",
+    "category": "studies_update",
+    "primary_entities": [
+      "studies"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "studies"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update a study.",
+    "yaml_lines": [
+      16152,
+      16263
+    ]
+  },
+  {
+    "path": "/workflows",
+    "method": "GET",
+    "operation_id": "listWorkflows",
+    "summary": "List workflows",
+    "category": "workflows_list",
+    "primary_entities": [
+      "workflows"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "workflows"
+    ],
+    "llm_hint": "Summary: List workflows.",
+    "yaml_lines": [
+      16290,
+      16324
+    ]
+  },
+  {
+    "path": "/workflows",
+    "method": "POST",
+    "operation_id": "createWorkflow",
+    "summary": "Create a new workflow",
+    "category": "workflows_create",
+    "primary_entities": [
+      "workflows"
+    ],
+    "intent_patterns": [
+      "create",
+      "add",
+      "new",
+      "upload",
+      "workflows"
+    ],
+    "llm_hint": "Summary: Create a new workflow.",
+    "yaml_lines": [
+      16325,
+      16486
+    ]
+  },
+  {
+    "path": "/workflows/{id}",
+    "method": "DELETE",
+    "operation_id": "deleteWorkflow",
+    "summary": "Delete a workflow",
+    "category": "workflows_delete",
+    "primary_entities": [
+      "workflows"
+    ],
+    "intent_patterns": [
+      "delete",
+      "remove",
+      "destroy",
+      "workflows"
+    ],
+    "llm_hint": "DESTRUCTIVE \u2014 irreversible on the live repo; dry-run and confirm before writing. Requires the numeric resource id. Summary: Delete a workflow.",
+    "yaml_lines": [
+      16802,
+      16826
+    ]
+  },
+  {
+    "path": "/workflows/{id}",
+    "method": "GET",
+    "operation_id": "readWorkflow",
+    "summary": "Fetch a workflow",
+    "category": "workflows_read",
+    "primary_entities": [
+      "workflows"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "workflows"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a workflow.",
+    "yaml_lines": [
+      16496,
+      16638
+    ]
+  },
+  {
+    "path": "/workflows/{id}",
+    "method": "PATCH",
+    "operation_id": "updateWorkflow",
+    "summary": "Update a workflow",
+    "category": "workflows_update",
+    "primary_entities": [
+      "workflows"
+    ],
+    "intent_patterns": [
+      "update",
+      "edit",
+      "modify",
+      "patch",
+      "workflows"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Update a workflow.",
+    "yaml_lines": [
+      16639,
+      16801
+    ]
+  },
+  {
+    "path": "/workflows/{id}/git/{version}/blob/{path}",
+    "method": "GET",
+    "operation_id": "readGitBlob",
+    "summary": "Fetch a Git blob (file)",
+    "category": "workflows_read",
+    "primary_entities": [
+      "workflows"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "workflows"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a Git blob (file).",
+    "yaml_lines": [
+      16937,
+      17064
+    ]
+  },
+  {
+    "path": "/workflows/{id}/git/{version}/download/{path}",
+    "method": "GET",
+    "operation_id": "downloadGitBlob",
+    "summary": "Download a Git blob (file)",
+    "category": "workflows_read",
+    "primary_entities": [
+      "workflows"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "workflows"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Download a Git blob (file).",
+    "yaml_lines": [
+      17088,
+      17117
+    ]
+  },
+  {
+    "path": "/workflows/{id}/git/{version}/tree/{path}",
+    "method": "GET",
+    "operation_id": "readGitTree",
+    "summary": "Fetch a Git tree (directory)",
+    "category": "workflows_read",
+    "primary_entities": [
+      "workflows"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "workflows"
+    ],
+    "llm_hint": "Requires the numeric resource id. Summary: Fetch a Git tree (directory).",
+    "yaml_lines": [
+      16851,
+      16913
+    ]
+  },
+  {
+    "path": "/{asset_types}/{id}/content_blobs/{blob_id}",
+    "method": "GET",
+    "operation_id": "readContentBlob",
+    "summary": "Fetch information on a content blob",
+    "category": "file_read",
+    "primary_entities": [
+      "content_blobs"
+    ],
+    "intent_patterns": [
+      "get",
+      "fetch",
+      "read",
+      "view",
+      "inspect",
+      "content_blobs"
+    ],
+    "llm_hint": "Requires the numeric resource id. Two-step: resolve the blob link from the parent resource first. Summary: Fetch information on a content blob.",
+    "yaml_lines": [
+      9278,
+      9317
+    ]
+  },
+  {
+    "path": "/{asset_types}/{id}/content_blobs/{blob_id}",
+    "method": "PUT",
+    "operation_id": "uploadAssetContent",
+    "summary": "Upload content to an existing content blob placeholder",
+    "category": "file_read",
+    "primary_entities": [
+      "content_blobs"
+    ],
+    "intent_patterns": [
+      "update",
+      "replace",
+      "content_blobs"
+    ],
+    "llm_hint": "Requires the numeric resource id. Two-step: resolve the blob link from the parent resource first. Summary: Upload content to an existing content blob placeholder.",
+    "yaml_lines": [
+      9255,
+      9277
+    ]
+  },
+  {
+    "path": "/{asset_types}/{id}/content_blobs/{blob_id}/download",
+    "method": "GET",
+    "operation_id": "downloadAssetContent",
+    "summary": "Download content",
+    "category": "file_download",
+    "primary_entities": [
+      "content_blobs"
+    ],
+    "intent_patterns": [
+      "list",
+      "all",
+      "show",
+      "browse",
+      "content_blobs"
+    ],
+    "llm_hint": "Two-step: resolve the blob link from the parent resource first. Summary: Download content.",
+    "yaml_lines": [
+      9341,
+      9368
+    ]
+  }
+]
