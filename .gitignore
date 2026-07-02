@@ -76,3 +76,8 @@ pull.log
 .scratch/
 scratch/
 tmp/
+
+# ============================================================
+# FDH staging scratch (holds a real .env — never commit)
+# ============================================================
+working/
