@@ -24,6 +24,19 @@ Drives the 13-phase metadata curation pipeline used by the MIT DMAC team:
 
 Each phase has a corresponding slash command (`/curate-init`, `/curate-inventory`, ...).
 
+## FairDomHub (standalone, not part of the 13-phase pipeline)
+
+Two independent FDH capabilities ship alongside the pipeline:
+
+- **`/fdh-upload`** — launches the interactive study-upload tool
+  (`scripts/fdh/submit.py`): assays, protocols/SOPs, sample types, samples, publish.
+- **`/fdh-api`** — programmatic API access. Claude reuses an existing generated script
+  or, guided by `context/fdh_api_index.json` (auto-derived from the vendored SEEK
+  OpenAPI spec), writes a new one built on `scripts/fdh/fdh_api.py` — dry-run first for
+  any write. New scripts accrue in `scripts/fdh/generated/` (review-then-commit).
+
+Auth for both: per-project `.env` `FDH_API={"name": "token"}`.
+
 ## Repo layout
 
 ```

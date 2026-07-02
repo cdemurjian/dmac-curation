@@ -2,6 +2,16 @@
 
 All notable changes to dmac-curation will be documented in this file.
 
+## 0.2.0
+
+Added FairDomHub integration as two standalone modules:
+- `/fdh-upload` — ported the interactive `submit.py` study-upload tool into `scripts/fdh/`.
+- `/fdh-api` — self-extending API-access toolkit: `FairDomHubClient` (`scripts/fdh/fdh_api.py`),
+  an auto-generated enriched endpoint index (`context/fdh_api_index.json` via
+  `build_api_index.py`) with `yaml_lines` pointers into the vendored full OpenAPI spec, and a
+  review-then-commit generated-script registry.
+- New `skills/curation/FDH.md` reference; SKILL.md routing hooks.
+
 ## [0.1.0] — 2026-05-27
 
 ### Added

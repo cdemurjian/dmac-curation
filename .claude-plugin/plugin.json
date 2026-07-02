@@ -1,6 +1,6 @@
 {
   "name": "dmac-curation",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Curate research-project metadata for NExtSEEK / FairDomHub via the 13-phase pipeline (inventory → sample tree → build → consolidate → QA → deposit → retrieve → email PI).",
   "author": {
     "name": "Charlie Demurjian",
