@@ -391,9 +391,28 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `scripts/stage_zenodo.py:105-110` (argparse block)
-- Modify: `scripts/apply_zenodo_links.py:91-110` (argparse block)
+- Modify: `scripts/apply_zenodo_links.py:91-110` (argparse block, plus the `--zenodo-record` rename)
+- Modify: `scripts/smb_pull.py:319,353,364,440-441` and its docstring at `:12,22,26`
 - Modify: `commands/curate-deposit.md:20-22,33`
 - Test: `tests/test_deposit_write_safety.py`
+
+> **AMENDED after Task 3 ran.** Task 3's drift test found three things this task
+> was originally scoped against wrongly, all confirmed by grep:
+>
+> 1. **`scripts/smb_pull.py` also registers `--dry-run`** (`:319`, used at `:353`
+>    and `:440-441`, with an error string at `:364` and three docstring mentions).
+>    So **three** scripts need converting, not two. `smb_pull.py` is a transfer
+>    tool, and its `--dry-run` gates an actual network pull — exactly the polarity
+>    trap this task exists to close.
+> 2. **`apply_zenodo_links.py` has `--zenodo-record`, not `--record-id`.**
+>    `commands/curate-deposit.md:22` documents
+>    `apply_zenodo_links.py --write --record-id <N>`, so the doc and the script
+>    disagree on the flag name as well as on write-safety. Fixing `--write` alone
+>    leaves that drift-test row RED with no task owning it. **This task fixes
+>    both.**
+> 3. `apply_geo_accessions.py` already has `--write` (only `--gse` is missing,
+>    which is Task 5), and `consolidate_to_flat.py` already has `--all-in-one`
+>    (only `--assay-sheets` is missing, which is Task 8). Do not re-add those.
 
 **Interfaces:**
 - Consumes: `parsed_flags()` semantics from Task 3 (same regex; do not import across test modules — each test file stands alone)
@@ -420,6 +439,8 @@ DEPOSIT_SCRIPTS = [
     "scripts/apply_zenodo_links.py",
     "scripts/apply_geo_accessions.py",
     "scripts/apply_omero_ids.py",
+    # Added post-Task-3: smb_pull.py also had --dry-run, gating a network pull.
+    "scripts/smb_pull.py",
 ]
 
 _FLAG_RE = re.compile(r'add_argument\(\s*\n?\s*["\'](--[a-z0-9-]+)["\']')
@@ -459,6 +480,32 @@ def test_command_doc_states_the_write_convention():
         "curate-deposit.md still documents --dry-run"
     )
     assert "default to dry-run and require `--write`" in doc
+
+
+def test_zenodo_backfill_flag_matches_its_command_doc():
+    """curate-deposit.md:22 documents --record-id; the script had
+    --zenodo-record. Renamed so the doc and the CLI agree."""
+    flags = _flags("scripts/apply_zenodo_links.py")
+    assert "--record-id" in flags
+    assert "--zenodo-record" not in flags, (
+        "old name still present; a two-name CLI is how drift restarts"
+    )
+
+
+def test_smb_pull_converted_too():
+    """smb_pull.py's --dry-run gated an actual network transfer."""
+    flags = _flags("scripts/smb_pull.py")
+    assert "--write" in flags
+    assert "--dry-run" not in flags
+
+
+def test_no_script_anywhere_still_uses_dry_run():
+    """Repo-wide sweep, so a fourth offender cannot hide."""
+    offenders = [
+        p.relative_to(REPO) for p in (REPO / "scripts").rglob("*.py")
+        if "--dry-run" in _flags(str(p.relative_to(REPO)))
+    ]
+    assert not offenders, f"still using --dry-run: {offenders}"
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -527,7 +574,33 @@ with:
 
 and invert every `args.dry_run` use site to `not args.write`.
 
-- [ ] **Step 6: Make `--write` help text uniform across all four**
+**Also rename this script's record flag.** `commands/curate-deposit.md:22`
+documents `--record-id`, but the script declares `--zenodo-record`. Rename the
+argument to `--record-id` and update its `dest`/use sites. Do **not** keep the
+old name as an alias: a two-name CLI is how this drift restarts.
+
+- [ ] **Step 5b: Convert `scripts/smb_pull.py`**
+
+`smb_pull.py:319` registers `--dry-run`, and unlike the Zenodo pair its flag
+gates an actual **network transfer** (`:353`, `:440-441`). Same conversion:
+
+```python
+    ap.add_argument(
+        "--write", action="store_true",
+        help="Perform the transfer. Omit to build the manifest and size "
+             "estimate only; default is dry-run.",
+    )
+```
+
+Invert `args.dry_run` to `not args.write` at `:353` and `:440-441`. Update the
+error string at `:364` (`"Run --dry-run first"` becomes `"Run without --write
+first"`) and the three docstring mentions at `:12`, `:22` and `:26`.
+
+Note this script's dry-run branch *prints* rather than transferring, so the
+inversion is mechanical — but verify the `--from-manifest` interaction at `:364`
+still reads correctly, since that path assumes a prior manifest-building run.
+
+- [ ] **Step 6: Make `--write` help text uniform across all five**
 
 `apply_geo_accessions.py:190` already reads `help="patch in place (creates .bak); default is dry-run"`. Confirm `apply_omero_ids.py:73` reads:
 
@@ -1499,6 +1572,17 @@ Then in the remainder of that block, replace every `SRC` with `src`, every `ARCH
 ```
 
 - [ ] **Step 4: Fix `qa_flat_sheets.py`**
+
+> **AMENDED after Task 3 ran.** This script currently has **zero long flags** —
+> its only argument is the positional `upload` with `nargs="?"` (`:358`). You are
+> building its entire flag surface from scratch, not extending one.
+>
+> Decide the positional's fate explicitly and say so in your report. Recommended:
+> **keep it as an optional positional alias for `--upload`**, so existing
+> invocations like `qa_flat_sheets.py assay_sheets/ArmA.xlsx` keep working, and
+> error clearly if both a positional and `--upload` are given. The old behaviour
+> of joining a relative positional onto the *plugin* directory (`:364-365`) must
+> go regardless — that is the P1 bug.
 
 Delete lines 42-67 (`REPO`, the `TODO(v0.2)` block, `DEFAULT_UPLOAD`, `PREV_METADATA`, `ALWAYS_ROOT`, `EXPECTED_COUNTS`, `EXPECTED_TOTAL`). These are IntravChip's constants; they move into the config.
 
