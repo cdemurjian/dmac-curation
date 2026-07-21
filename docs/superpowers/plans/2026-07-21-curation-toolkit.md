@@ -575,7 +575,7 @@ with:
 ```python
     ap.add_argument(
         "--write", action="store_true",
-        help="Patch the sheets in place (creates .bak); default is dry-run.",
+        help="Patch the upload sheets; default is dry-run.",
     )
 ```
 
@@ -609,6 +609,19 @@ still reads correctly, since that path assumes a prior manifest-building run.
 
 - [ ] **Step 6: Make `--write` help text uniform across all five**
 
+> **CORRECTED after Task 4 ran.** An earlier draft of this step told you to
+> claim "(creates .bak)" in the help text of `apply_zenodo_links.py` and
+> `apply_omero_ids.py`. **That is false.** Verified: only
+> `apply_geo_accessions.py` creates a backup (it uses `shutil.copy` to a `.bak`).
+> `apply_zenodo_links.py`, `apply_omero_ids.py` and `stage_zenodo.py` mutate
+> without one. Write help text that is true of the script it describes; a
+> curator who believes a rollback exists when it does not is worse off than one
+> who knows there is none.
+>
+> **Recorded as a follow-up risk, not this task's job:** two scripts patch xlsx
+> files in place with no backup. That gap is real but belongs to a later
+> hardening pass, not to a write-safety rename.
+
 `apply_geo_accessions.py:190` already reads `help="patch in place (creates .bak); default is dry-run"`. Confirm `apply_omero_ids.py:73` reads:
 
 ```python
@@ -620,7 +633,7 @@ and change it to end with the exact phrase the test asserts:
 
 ```python
     p.add_argument("--write", action="store_true",
-                   help="Apply changes in place (creates .bak); default is dry-run.")
+                   help="Apply changes in place; default is dry-run.")
 ```
 
 Do the same for `apply_geo_accessions.py:190` so all four `--help` outputs contain the literal string `default is dry-run`.
