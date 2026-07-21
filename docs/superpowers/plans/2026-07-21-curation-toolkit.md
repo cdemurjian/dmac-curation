@@ -542,9 +542,15 @@ with:
 ```python
     ap.add_argument(
         "--write", action="store_true",
-        help="Create the zip files. Omit to preview only; default is dry-run.",
+        help="Move files into staging folders; default is dry-run.",
     )
 ```
+
+> **CORRECTED after Task 4 ran.** An earlier draft said `help="Create the zip
+> files."`. **`stage_zenodo.py` creates no archives.** It imports neither
+> `zipfile` nor `subprocess`, calls no `make_archive`, and its only mutation is
+> `shutil.move()` at `:216-217` into per-bucket *folders*. Describe what the
+> script does, not what the surrounding workflow needs.
 
 Then at every use site, replace `args.dry_run` with `not args.write`. Concretely, a guard that previously read:
 
@@ -649,7 +655,8 @@ In `commands/curate-deposit.md`, replace line 20:
 with:
 
 ```
-1. **Stage**: `<PLUGIN>/scripts/stage_zenodo.py` to preview, then (after confirm) re-run with `--write`. Walk `files/Figure*/` + `files/Source Data/`. Group by figure × sample type. Produce per-bucket zips in `Zenodo_upload/`.
+1. **Stage**: `<PLUGIN>/scripts/stage_zenodo.py` to preview, then (after confirm) re-run with `--write`. Walks `files/Figure*/` + `files/Source Data/`, groups by figure × sample type, and **moves** each group into a per-bucket folder. It does **not** create archives.
+2. **Archive — manual, no script does this.** Create one archive per staged folder, e.g. `zip -r Zenodo_upload/Figure3_D.WES.zip "files/Figure 3/Figure3_D.WES"`. The backfill step reads these archives' member names; skip this and it silently patches nothing.
 ```
 
 and replace line 33:
