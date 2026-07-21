@@ -644,10 +644,34 @@ with:
 - All deposit scripts default to dry-run and require `--write` to mutate anything. Show the user the dry-run output and get confirmation before re-running with `--write`.
 ```
 
+- [ ] **Step 7b: Reword `commands/fdh-api.md` — it names a flag that does not exist**
+
+Task 3's new doc guard fires on `commands/fdh-api.md:17,25` (and the behavioral
+rule at `:37-38`). Investigated: the FDH **generated scripts are already
+correct** — `delete_samples_by_id.py:46`, `delete_samples_by_uid.py:55` and
+`patch_sample_links.py:95` each register only `--write` with
+`help="... (default: dry-run)"`, and `skills/curation/FDH.md:75-76` templates
+exactly that. So this is pure doc sloppiness: the prose says `--dry-run` when it
+means *dry-run by default*, naming a flag no script has.
+
+Reword so no doc instructs a nonexistent flag:
+
+- `:17` — "respecting its `--dry-run` default" becomes "respecting its dry-run
+  default"
+- `:25` — "defaults writes to `--dry-run` (prints a preview)" becomes "defaults
+  to a dry-run preview"
+- `:37-38` — "Destructive ops (DELETE/PATCH) are dry-run first, always" is fine
+  as prose; only ensure the literal string `--dry-run` does not appear.
+
+Do **not** touch the FDH scripts or `FDH.md`'s template — they are already right.
+
 - [ ] **Step 8: Run the tests to verify they pass**
 
 Run: `uv run --with pytest --with openpyxl pytest tests/test_deposit_write_safety.py -v`
 Expected: 13 passed.
+
+Also run the drift suite and confirm `test_no_command_doc_instructs_dry_run` is
+now green: `uv run --with pytest --with openpyxl pytest tests/test_curate_commands_present.py -v -k dry_run`
 
 - [ ] **Step 9: Run the drift test to see it partially recover**
 
@@ -4445,6 +4469,31 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - Produces: `load_retrieve_uids(path) -> set[str] | None`; `diff_retrieve(requested, downloaded, parent_types) -> dict | None` returning `{"missing": [...], "auto_pulled_parents": [...], "extra": [...]}`; CLI flag `--retrieve`
 
 **Context:** `PHASES.md:246` names `RETRIEVE.TXT` as a Phase 12 input and describes the "which requested UIDs are missing" diff, but the script has no `--retrieve` flag, so that diff has never run. Silently ignoring a documented input is the worse failure mode. This is the last RED row in Task 3's drift test.
+
+> **AMENDED after Task 3's review.** The metadata input flag has **three
+> competing names** and this task settles it:
+>
+> | source | name |
+> |---|---|
+> | `scripts/review_metadata_vs_uploads.py:233` | `--metadata-xlsx` |
+> | `commands/curate-validate.md:17` | `--metadata` |
+> | this plan's own Step 5 rewrite, as first written | `--downloaded` |
+>
+> **Decision: standardize on `--metadata-xlsx`**, the name the script already
+> registers. It is descriptive, it is the only one that exists in code, and
+> renaming a working flag purely to match a doc that was wrong is churn. So:
+>
+> - Do **not** introduce `--downloaded`. Where Step 5's command-doc rewrite below
+>   shows `--downloaded <metadata.xlsx>`, write `--metadata-xlsx <PATH>` instead.
+> - Fix `commands/curate-validate.md:17` to say `--metadata-xlsx`.
+> - Update the `curate-validate.md` row in
+>   `tests/test_curate_commands_present.py::CONTRACTS` from `--metadata` to
+>   `--metadata-xlsx`, so the row goes green only when doc and CLI agree.
+> - Same treatment for `--assay-sheets` vs the script's existing `--sheets-dir`
+>   (`:238`): pick one name, make the script, the doc and the CONTRACTS row all
+>   use it, and state which you picked and why in your report. Note Task 8 also
+>   touches this script's paths — if it has already added `--assay-sheets`, keep
+>   that and retire `--sheets-dir` rather than adding a third name.
 
 - [ ] **Step 1: Write the failing test**
 
