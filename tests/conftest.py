@@ -10,9 +10,12 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 
 # Paths that legitimately change during a test run and must not trip the sentinel.
+# `.claude/` and `.superpowers/` are agent-tooling scratch: they exist untracked in
+# this checkout and may be written to *while* the suite runs. A RED-by-design
+# harness must never go red for that reason, so both are ignored.
 SENTINEL_IGNORE_PARTS = {
     ".git", ".pytest_cache", "__pycache__", ".ruff_cache", ".mypy_cache",
-    ".superpowers", "working", ".venv",
+    ".superpowers", ".claude", "working", ".venv",
 }
 
 # Marker stored in the snapshot for a directory entry. Directories have no
@@ -41,6 +44,27 @@ def _snapshot(root: Path) -> dict[str, str]:
     return out
 
 
+def _remove_created(root: Path, created: list[str], snap: dict[str, str]) -> None:
+    """Delete entries that did not exist when the fixture started.
+
+    The harness is RED by design: some cases genuinely provoke a write into the
+    checkout (e.g. nextseek_api.py caching into <plugin>/context/). Leaving that
+    artifact behind would dirty the working tree on every run and would sit in
+    the *next* test's baseline snapshot, silently masking a repeat offence. Only
+    entries absent at setup are removed, so nothing pre-existing can be lost;
+    modifications and deletions are reported but left for `git checkout -- .`.
+    """
+    for rel in sorted(created, key=lambda p: p.count("/"), reverse=True):
+        target = root / rel
+        try:
+            if snap.get(rel) == _DIR_MARKER and target.is_dir():
+                target.rmdir()
+            elif target.is_symlink() or target.is_file():
+                target.unlink()
+        except OSError:
+            pass  # best-effort; the assertion below still reports the entry
+
+
 @pytest.fixture
 def plugin_sentinel():
     """Fail the test if the plugin checkout changed while it ran."""
@@ -54,9 +78,12 @@ def plugin_sentinel():
     def _label(paths, snap):
         return [p + ("/" if snap.get(p) == _DIR_MARKER else "") for p in paths]
 
+    created_labelled = _label(created, after)
+    _remove_created(REPO, created, after)
+
     assert not (created or deleted or modified), (
         "a script wrote inside the plugin checkout:\n"
-        f"  created:  {_label(created, after)}\n"
+        f"  created:  {created_labelled}  (removed by the sentinel)\n"
         f"  deleted:  {_label(deleted, before)}\n"
         f"  modified: {_label(modified, after)}"
     )
