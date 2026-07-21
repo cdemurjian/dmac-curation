@@ -746,94 +746,126 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ### Task 5: Close the remaining documented-flag gaps
 
+> **REWRITTEN after inspecting the real script.** The original version of this
+> task said "`--gse` is a genuine missing feature." **That was wrong**, and
+> implementing it as written would have added a duplicate, worse mechanism.
+> Verified in `scripts/apply_geo_accessions.py`:
+>
+> | plan assumed | reality |
+> |---|---|
+> | no series flag exists | `--gse-bulk` (**required**, `:193`) and `--gse-sptx` (optional, `:206`) both exist |
+> | no series-URL handling | `patch_agex()` (`:127-141`) already writes the series URL to every A.GEX row |
+> | one GSE per submission | bulk and spatial are **separate GEO submissions with separate accessions**, which is why there are two flags |
+>
+> **The real defect is worse than a missing flag: the documented invocation
+> cannot run at all.** `commands/curate-deposit.md:16` says
+> `apply_geo_accessions.py --write --gse <GSE>`, but the script requires both
+> `--gse-bulk` and `--gsm-csv` (`:193`, `:199`). Following the doc literally
+> exits immediately with `error: the following arguments are required:
+> --gse-bulk, --gsm-csv`. The doc invented a simpler CLI than the script has.
+>
+> So this task **reconciles the doc to the script**; it adds no feature.
+
 **Files:**
-- Modify: `scripts/apply_geo_accessions.py` (add `--gse`)
+- Modify: `commands/curate-deposit.md:11,16` (name the real flags)
+- Modify: `skills/curation/PHASES.md:198` (same route heading)
 - Modify: `commands/curate-qa.md` (document the flags Task 8 will add) — **doc only in this task**
 - Modify: `commands/curate-consolidate.md` (align with the flags Task 8 will add)
+- Modify: `tests/test_curate_commands_present.py` (CONTRACTS row + two deferred minors)
 - Test: `tests/test_curate_commands_present.py` (existing, from Task 3)
 
 **Interfaces:**
 - Consumes: `tests/test_curate_commands_present.py::CONTRACTS` from Task 3
-- Produces: `apply_geo_accessions.py --gse GSE######` accepted and threaded into the GSM URL builder
+- Produces: a `curate-deposit.md` GEO route whose invocation actually runs, and a CONTRACTS row naming `--gse-bulk` / `--gsm-csv` instead of the nonexistent `--gse`
 
-**Context:** Of the five drift bugs, `--gse` is a genuine missing feature in a script whose command doc promises it (`curate-deposit.md:16`). The others (`--assay-sheets`, `--upload`, `--master-baseline`, `--expected-counts`) are consequences of the plugin-anchored paths and are fixed properly in Task 8 when those scripts gain a config seam. `--retrieve` is Task 17.
+**Context:** Of the original five drift bugs, this one turned out to be doc fiction rather than a missing feature. `--assay-sheets`, `--upload`, `--master-baseline` and `--expected-counts` are consequences of the plugin-anchored paths and are fixed in Task 8. `--retrieve` and `--metadata-xlsx` are Task 17. **Do not add `--sheets-dir` handling here** — Task 8 owns that flag's retirement.
 
-- [ ] **Step 1: Read the current accession-to-URL path**
+- [ ] **Step 1: Confirm the real CLI before changing any doc**
 
-Run: `grep -n 'GSM_URL\|gsm\|accession' scripts/apply_geo_accessions.py | head -30`
+Run:
 
-Note how the GSM identifier is currently obtained — the script builds `GSM_URL.format(acc)` from `GSM_URL = "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={}"` at line 42.
-
-- [ ] **Step 2: Write the failing test**
-
-Append to `tests/test_curate_commands_present.py`:
-
-```python
-def test_gse_flag_is_threaded_not_just_declared():
-    """--gse must reach the URL builder, not merely be accepted and ignored."""
-    src = (REPO / "scripts" / "apply_geo_accessions.py").read_text()
-    assert "--gse" in src, "no --gse argument"
-    assert "args.gse" in src, "--gse is declared but never read"
-    assert "GSE_URL" in src, (
-        "expected a GSE_URL series-level template alongside GSM_URL"
-    )
+```bash
+uv run --script scripts/apply_geo_accessions.py --help
 ```
 
-- [ ] **Step 3: Run it to verify it fails**
+Record which arguments are **required**. Expect `--gse-bulk` and `--gsm-csv`
+required; `--gse-sptx`, `--sptx-gsm-csv`, `--sheets-dir` and `--write` optional.
+Then confirm the documented invocation genuinely fails:
 
-Run: `uv run --with pytest --with openpyxl pytest tests/test_curate_commands_present.py::test_gse_flag_is_threaded_not_just_declared -v`
-Expected: FAIL with "no --gse argument".
-
-- [ ] **Step 4: Add the series-level URL template**
-
-In `scripts/apply_geo_accessions.py`, immediately after line 42:
-
-```python
-GSM_URL = "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={}"
+```bash
+uv run --script scripts/apply_geo_accessions.py --write --gse GSE000001 ; echo "exit=$?"
 ```
 
-add:
+Expect a non-zero exit and an `unrecognized arguments: --gse` / `required:
+--gse-bulk, --gsm-csv` style error. **Paste that output into your report** — it
+is the evidence that this was doc fiction, not a missing feature.
+
+- [ ] **Step 2: Fix the CONTRACTS row to name flags that exist**
+
+In `tests/test_curate_commands_present.py`, change the `apply_geo_accessions.py`
+entry so it asserts the real flags:
 
 ```python
-# Series-level accession. Used when --gse is supplied: rows whose sample-level
-# GSM is not yet assigned still get a resolvable series link rather than a blank.
-GSE_URL = "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={}"
+    ("curate-deposit.md", "scripts/apply_geo_accessions.py",
+     ["--write", "--gse-bulk", "--gsm-csv"]),
 ```
 
-- [ ] **Step 5: Add the argument**
+Remove `--gse` from wherever it appears in `CONTRACTS` / `PLANNED_CONTRACTS` —
+no task is going to add it, because the two-series design is correct and a
+single `--gse` would be ambiguous between bulk and spatial.
 
-In the `main()` argparse block (starting `scripts/apply_geo_accessions.py:188`), add after the `--write` argument:
+- [ ] **Step 3: Fold in two deferred minors from Task 4's review**
 
-```python
-    ap.add_argument(
-        "--gse", default=None, metavar="GSE######",
-        help="GEO Series accession. Rows with no assigned GSM fall back to the "
-             "series URL instead of being left blank.",
-    )
+Both are in `tests/test_curate_commands_present.py`:
+
+1. Add `--zip-dir` to the `apply_zenodo_links.py` CONTRACTS row. It is newly
+   documented at `commands/curate-deposit.md:23` and exists at
+   `scripts/apply_zenodo_links.py:96-101`, but slipped past the hand-maintained
+   table that exists to catch exactly this.
+2. The comment at roughly `:45-46` still says "curate-deposit.md:20 still says
+   `stage_zenodo.py --dry-run`; --write is target state". Untrue since Task 4.
+   Rewrite it to describe the row's current, passing state.
+
+- [ ] **Step 4: Rewrite the GEO route in `commands/curate-deposit.md`**
+
+Replace the route heading at `:11` and the backfill step at `:16` so that a
+curator can copy-paste and have it work. The heading must stop implying a
+single `--gse`:
+
+```markdown
+### `/curate-deposit geo [--type bulk|spatial]`
 ```
 
-- [ ] **Step 6: Thread it into the row loop**
+and the backfill step must name every required argument:
 
-Find the point where a row's `Link_PrimaryData` is computed from a GSM accession. Where the code currently skips a row lacking a GSM, replace the skip with:
+```markdown
+4. **Backfill (after GEO assigns accessions)**: run once to preview, then with
+   `--write`:
 
-```python
-        if not gsm:
-            if args.gse:
-                new_link = GSE_URL.format(args.gse)
-                print(f"  {uid}: no GSM yet, using series {args.gse}")
-            else:
-                print(f"  {uid}: no GSM and no --gse; leaving Link_PrimaryData unchanged")
-                continue
-        else:
-            new_link = GSM_URL.format(gsm)
+   ```bash
+   uv run --script <PLUGIN>/scripts/apply_geo_accessions.py \
+       --gse-bulk GSE###### --gsm-csv <bulk-gsm-roster.csv> \
+       [--gse-sptx GSE###### --sptx-gsm-csv <spatial-gsm-roster.csv>] \
+       [--write]
+   ```
+
+   Bulk and spatial are **separate GEO submissions with separate series
+   accessions**, which is why there are two pairs of flags. Omit the spatial
+   pair to skip the spatial patch entirely. `--gsm-csv` is a whitespace-
+   delimited roster mapping GSM accession to sample D-id.
 ```
 
-Then use `new_link` where the GSM URL was previously used. Pass `args` into that function if it is not already in scope — change its signature from `def apply(...)` to `def apply(..., args)` and update the call site.
+- [ ] **Step 5: Mirror the heading fix in `skills/curation/PHASES.md:198`**
 
-- [ ] **Step 7: Run the tests to verify they pass**
+That line carries the same `[--gse GSE######]` fiction. Make it match the
+corrected `curate-deposit.md` heading. Do not duplicate the full invocation
+there — point to the command doc.
 
-Run: `uv run --with pytest --with openpyxl pytest tests/test_curate_commands_present.py -v -k "gse or deposit"`
-Expected: `test_gse_flag_is_threaded_not_just_declared` PASSES, and the `curate-deposit.md` / `apply_geo_accessions.py` contract row passes.
+- [ ] **Step 6: Run the tests**
+
+Run: `uv run --with pytest --with openpyxl pytest tests/test_curate_commands_present.py -v`
+Expected: the `apply_geo_accessions.py` row now passes on real flag names. The
+rows owned by Tasks 8 and 17 stay RED. Report the exact remaining set.
 
 - [ ] **Step 8: Align the two command docs with the flags Task 8 will add**
 
