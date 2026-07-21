@@ -203,9 +203,10 @@ Routes by first arg:
 
 ### `/curate-deposit zenodo [--record-id N]`
 
-- Drives `scripts/stage_zenodo.py` to preview, then (after user confirms) re-runs it with `--write`.
-- User uploads zips to Zenodo manually via web UI.
-- After upload: `scripts/apply_zenodo_links.py --write --record-id N` patches `Link_PrimaryData`.
+- Drives `scripts/stage_zenodo.py` to preview, then (after user confirms) re-runs it with `--write`. This **moves** curated non-image files into per-bucket folders `files/Figure {N}/Figure{N}_{SampleType}/`. The script creates no archives.
+- **Manual step, unautomated:** the user creates one archive per bucket folder and drops the `.zip` files into `Zenodo_upload/`. No script in this plugin does the zipping.
+- User uploads those zips to Zenodo manually via web UI.
+- After upload: `scripts/apply_zenodo_links.py --write --record-id N` reads each zip's namelist from `Zenodo_upload/` (or `--zip-dir`) and patches `Link_PrimaryData` by filename.
 
 ### `/curate-deposit omero [--project-id N]`
 
@@ -218,6 +219,7 @@ Routes by first arg:
 - ncftp timeout on big file: script already has retry loop
 - OMERO upload partial: diff `omero_images.csv` against manifest, identify missing IDs
 - Zenodo record not created yet: surface to user, suggest creating record first
+- No `.zip` files in `Zenodo_upload/`: the manual archive step was skipped. `apply_zenodo_links.py` finds nothing to read and patches zero rows without erroring — check for archives before reporting the backfill as done
 
 ---
 

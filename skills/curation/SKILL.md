@@ -86,7 +86,7 @@ Deep reference: `skills/curation/FDH.md` (load on demand). Auth: `.env` `FDH_API
 - **GEO literal validation.** `paired-end` not `paired`; `Illumina NextSeq 500` not `NextSeq 500`. Dropdowns are case- and word-exact.
 - **chat_nextseek auto-pulls parents.** Don't include MUS/TIS/DNA/RNA in `RETRIEVE.TXT`. `build_retrieve.py` defaults exclude them.
 - **NExtSEEK `validate` endpoint is dev-only.** Production credentials don't authenticate against `nextseek-dev.mit.edu`. The endpoint exists; access doesn't.
-- **VPN drops freeze SMB pulls.** `socket.recv()` has no timeout. Resolution: `pkill -f smb_pull.py; find -name '*.partial' -delete; --resume`.
+- **VPN drops freeze SMB pulls.** `socket.recv()` has no timeout. Resolution: `pkill -f smb_pull.py; find -name '*.partial' -delete;` then re-run with `--write --resume`. `--resume` alone is a dry run and transfers nothing — `smb_pull.py` is dry-run by default.
 - **`_NNNN` vs `-NNNN` separators.** Match `[_-]` in regex. Past renamer had a real bug from this.
 - **Year-prefix mouse-ID typos.** `19-XXX` may actually be `20-XXX`. Try sibling year prefixes before declaring missing.
 - **`_Frzn` and other PI suffix noise.** Strip before matching against MUS records.

@@ -17,9 +17,10 @@ Parse `$ARGUMENTS`: first arg routes to sub-target.
 
 ### `/curate-deposit zenodo [--record-id N] [--from-figures]`
 
-1. **Stage**: `<PLUGIN>/scripts/stage_zenodo.py` to preview, then (after confirm) re-run with `--write`. Walk `files/Figure*/` + `files/Source Data/`. Group by figure × sample type. Produce per-bucket zips in `Zenodo_upload/`.
-2. **User uploads** zips manually to Zenodo via web UI. User reports back the record ID.
-3. **Backfill**: `<PLUGIN>/scripts/apply_zenodo_links.py --write --record-id <N>`. Joins zip namelists to upload-sheet rows by filename, patches `Link_PrimaryData`.
+1. **Stage**: `<PLUGIN>/scripts/stage_zenodo.py` to preview, then (after confirm) re-run with `--write`. Walks `files/Figure*/` + `files/Source Data/`, groups by figure × sample type, and **moves** each curated non-image file into a per-bucket *folder* `files/Figure {N}/Figure{N}_{SampleType}/`. It moves files only — it does **not** create archives.
+2. **Archive — manual, no script does this.** The curator creates one archive per bucket folder (e.g. `zip -r Zenodo_upload/Figure3_D.WES.zip "files/Figure 3/Figure3_D.WES"`) and puts the `.zip` files in `Zenodo_upload/`. Tell the user this step is theirs; do not claim staging produced zips.
+3. **User uploads** those zips manually to Zenodo via web UI. User reports back the record ID.
+4. **Backfill**: `<PLUGIN>/scripts/apply_zenodo_links.py --write --record-id <N>`. Reads each `.zip` in `Zenodo_upload/` (override with `--zip-dir`), joins its namelist to upload-sheet rows by filename, patches `Link_PrimaryData`. If step 2 was skipped there are no archives to read and the backfill patches nothing.
 
 ### `/curate-deposit omero [--project-id N]`
 
