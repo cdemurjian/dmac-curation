@@ -20,6 +20,12 @@ secrets.*
 *_token*
 *_secret*
 *_password*
+# ...but the guard tests for those rules must stay tracked. Without this
+# negation `git add tests/test_no_plaintext_secrets.py` is silently refused
+# (it matches `*_secret*`) and the guard disappears from a fresh clone.
+!tests/test_no_*secret*.py
+!tests/test_no_*token*.py
+!tests/test_no_*password*.py
 *.kdbx
 
 # ============================================================
