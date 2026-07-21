@@ -415,7 +415,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 >    (only `--assay-sheets` is missing, which is Task 8). Do not re-add those.
 
 **Interfaces:**
-- Consumes: `parsed_flags()` semantics from Task 3 (same regex; do not import across test modules — each test file stands alone)
+- Consumes: `parsed_flags()` **imported from** `tests/test_curate_commands_present.py` (Task 3). Do **not** re-declare the regex — see the note in the test snippet below.
 - Produces: every deposit script exposes `--write: bool` and performs no filesystem mutation when it is absent
 
 **Context — the actual trap:** `apply_geo_accessions.py:190` and `apply_omero_ids.py:73` already default to dry-run and require `--write`. `stage_zenodo.py:107` and `apply_zenodo_links.py:93` use `--dry-run`, so **omitting the flag writes**. `commands/curate-deposit.md:33` claims all four default to dry-run. Two of the four have been documented backwards.
@@ -443,11 +443,18 @@ DEPOSIT_SCRIPTS = [
     "scripts/smb_pull.py",
 ]
 
-_FLAG_RE = re.compile(r'add_argument\(\s*\n?\s*["\'](--[a-z0-9-]+)["\']')
+# Import the hardened detector rather than re-declaring a regex here.
+# The naive `add_argument\(\s*["\'](--[a-z0-9-]+)` form FAILS OPEN on a
+# short-form-first declaration -- `add_argument("-n", "--dry-run")` parses as
+# [] -- which would make this file, where write-safety is the entire subject,
+# ship with a guard that silently passes. Task 3's reviewer proved that against
+# 13 declaration forms. pytest puts the tests dir on sys.path, so this import
+# works without packaging.
+from test_curate_commands_present import parsed_flags  # noqa: E402
 
 
 def _flags(rel: str) -> set[str]:
-    return set(_FLAG_RE.findall((REPO / rel).read_text()))
+    return parsed_flags(REPO / rel)
 
 
 @pytest.mark.parametrize("rel", DEPOSIT_SCRIPTS)
@@ -664,6 +671,27 @@ Reword so no doc instructs a nonexistent flag:
   as prose; only ensure the literal string `--dry-run` does not appear.
 
 Do **not** touch the FDH scripts or `FDH.md`'s template — they are already right.
+
+- [ ] **Step 7c: Purge `--dry-run` from every other doc and docstring that instructs it**
+
+Task 3's reviewer found three more places that will still tell an operator to
+pass a flag this task deletes. None was owned by any task:
+
+| location | current text | fix |
+|---|---|---|
+| `skills/curation/PHASES.md:206` | "Drives `scripts/stage_zenodo.py --dry-run` then (after user confirms) without `--dry-run`" | rewrite as: run it to preview, then re-run with `--write` |
+| `scripts/fdh/generated/REGISTRY.md:6` | same `--dry-run` wording | reword to "dry-run by default; `--write` to apply" |
+| `scripts/stage_zenodo.py:17` and `:207` | usage docstring shows `--dry-run` | update to `--write` |
+| `scripts/apply_zenodo_links.py:15` | usage docstring shows `--dry-run` | update to `--write` |
+
+The script-side guard only detects `add_argument`-shaped occurrences, so
+deleting the three `add_argument("--dry-run")` lines turns it green while these
+usage headers keep advertising the dead flag. That is the same class of drift
+this whole task exists to close.
+
+**Do not touch** `docs/superpowers/specs/2026-05-27-*.md` — that is a historical
+spec recording what the plugin looked like then, and rewriting history to match
+the present is worse than the drift.
 
 - [ ] **Step 8: Run the tests to verify they pass**
 
@@ -1805,6 +1833,11 @@ Add `--assay-sheets` to `review_metadata_vs_uploads.py`'s parser (the drift test
 ```
 
 and resolve `sheets = Path(args.assay_sheets).resolve() if args.assay_sheets else cfg.assay_sheets`.
+
+**Retire the old `--sheets-dir` (`:238`) in the same edit** — do not leave both.
+A two-name CLI is how the `--record-id`/`--zenodo-record` drift started, and
+Task 17 is explicitly told this is yours to settle. Update any use site of
+`args.sheets_dir` to `sheets`.
 
 - [ ] **Step 7: Fix `smb_pull.py`**
 
@@ -4489,11 +4522,12 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 > - Update the `curate-validate.md` row in
 >   `tests/test_curate_commands_present.py::CONTRACTS` from `--metadata` to
 >   `--metadata-xlsx`, so the row goes green only when doc and CLI agree.
-> - Same treatment for `--assay-sheets` vs the script's existing `--sheets-dir`
->   (`:238`): pick one name, make the script, the doc and the CONTRACTS row all
->   use it, and state which you picked and why in your report. Note Task 8 also
->   touches this script's paths — if it has already added `--assay-sheets`, keep
->   that and retire `--sheets-dir` rather than adding a third name.
+> - `--assay-sheets` vs the script's existing `--sheets-dir` (`:238`) is
+>   **Task 8's** to settle, not this task's — Task 8 Step 6 already adds
+>   `--assay-sheets` to this script as part of the path re-anchoring. By the time
+>   you run, `--assay-sheets` should exist and `--sheets-dir` should be gone. If
+>   both are present, that is a Task 8 miss: retire `--sheets-dir` and say so in
+>   your report. Do not add a third name.
 
 - [ ] **Step 1: Write the failing test**
 
