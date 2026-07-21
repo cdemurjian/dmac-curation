@@ -11,5 +11,6 @@ def test_help_runs():
         capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
-    for flag in ["--dry-run", "--resume", "--from-manifest", "--rows"]:
+    # --write, not --dry-run: omitting the flag must be the safe (no-transfer) path.
+    for flag in ["--write", "--resume", "--from-manifest", "--rows"]:
         assert flag in result.stdout, f"flag {flag} not in --help output"

@@ -70,7 +70,8 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("xlsx", type=Path)
     p.add_argument("--omero-csv", type=Path, default=Path("omero_images.csv"))
-    p.add_argument("--write", action="store_true", help="Apply changes (default is dry-run)")
+    p.add_argument("--write", action="store_true",
+                   help="Apply changes in place; default is dry-run.")
     args = p.parse_args()
     return apply(args.xlsx, args.omero_csv, dry_run=not args.write)
 

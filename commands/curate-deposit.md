@@ -17,7 +17,7 @@ Parse `$ARGUMENTS`: first arg routes to sub-target.
 
 ### `/curate-deposit zenodo [--record-id N] [--from-figures]`
 
-1. **Stage**: `<PLUGIN>/scripts/stage_zenodo.py --dry-run` then (after confirm) without dry-run. Walk `files/Figure*/` + `files/Source Data/`. Group by figure × sample type. Produce per-bucket zips in `Zenodo_upload/`.
+1. **Stage**: `<PLUGIN>/scripts/stage_zenodo.py` to preview, then (after confirm) re-run with `--write`. Walk `files/Figure*/` + `files/Source Data/`. Group by figure × sample type. Produce per-bucket zips in `Zenodo_upload/`.
 2. **User uploads** zips manually to Zenodo via web UI. User reports back the record ID.
 3. **Backfill**: `<PLUGIN>/scripts/apply_zenodo_links.py --write --record-id <N>`. Joins zip namelists to upload-sheet rows by filename, patches `Link_PrimaryData`.
 
@@ -30,7 +30,7 @@ Parse `$ARGUMENTS`: first arg routes to sub-target.
 
 ## Behavioral rules
 
-- All scripts default to `--dry-run`. Confirm before applying writes.
+- All deposit scripts default to dry-run and require `--write` to mutate anything. Show the user the dry-run output and get confirmation before re-running with `--write`.
 - GEO has lots of literal-validation gotchas — surface them in the report.
 - OMERO requires MIT VPN.
 - Never log credentials. Read from `.env` via python-dotenv.

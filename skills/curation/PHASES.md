@@ -203,7 +203,7 @@ Routes by first arg:
 
 ### `/curate-deposit zenodo [--record-id N]`
 
-- Drives `scripts/stage_zenodo.py --dry-run` then (after user confirms) without `--dry-run`.
+- Drives `scripts/stage_zenodo.py` to preview, then (after user confirms) re-runs it with `--write`.
 - User uploads zips to Zenodo manually via web UI.
 - After upload: `scripts/apply_zenodo_links.py --write --record-id N` patches `Link_PrimaryData`.
 

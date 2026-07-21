@@ -9,7 +9,7 @@ Reads source paths from a manifest (--from-manifest) or builds a manifest
 by planning against the live SMB share. Streams each file via smbprotocol,
 pipes through `pigz -c`, and writes gzipped output to the local destination.
 Resumable (--resume), supports row slicing (--rows N-M or --rows-from FILE),
-and dry-run mode (--dry-run).
+and is dry-run by default (pass --write to actually transfer).
 
 Credentials read from .env via python-dotenv:
   MIT_USER (e.g. cdemu@mit.edu - domain embedded in the username)
@@ -19,11 +19,11 @@ Credentials read from .env via python-dotenv:
 VPN required for MIT BMC server.
 
 Usage:
-  uv run scripts/smb_pull.py --dry-run        # build manifest + size estimate, no transfer
-  uv run scripts/smb_pull.py                  # actually pull; streams SMB -> pigz -> .fastq.gz
-  uv run scripts/smb_pull.py --resume         # skip already-completed outputs
-  uv run scripts/smb_pull.py --from-manifest  # skip planning, read jobs from manifest.tsv
-  uv run scripts/smb_pull.py --dry-run --batch 200710Eng   # one batch only
+  uv run scripts/smb_pull.py                  # build manifest + size estimate, no transfer (default)
+  uv run scripts/smb_pull.py --write          # actually pull; streams SMB -> pigz -> .fastq.gz
+  uv run scripts/smb_pull.py --write --resume # skip already-completed outputs
+  uv run scripts/smb_pull.py --write --from-manifest  # skip planning, read jobs from manifest.tsv
+  uv run scripts/smb_pull.py --batch 200710Eng        # one batch only, preview
 
 Originally consolidated from pull_spatial.py + pull_bulk_rna.py in the
 srp/lee curation session. The sample-planning functions (load_manuscript_samples,
@@ -316,8 +316,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument(
-        "--dry-run", action="store_true",
-        help="build manifest only, do not transfer any files",
+        "--write", action="store_true",
+        help="Perform the transfer; default is dry-run "
+             "(manifest + size estimate only).",
     )
     ap.add_argument(
         "--batch",
@@ -350,7 +351,7 @@ def main():
         )
 
     # Verify pigz is available before any SMB work — fail fast on a missing tool
-    if not args.dry_run and subprocess.call(
+    if args.write and subprocess.call(
         ["which", "pigz"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     ) != 0:
         sys.exit("pigz not found; install it (e.g. sudo dnf install pigz) and retry.")
@@ -361,7 +362,7 @@ def main():
         # --from-manifest: read the plan locally; skip SMB planning entirely.
         # register_session is deferred until we actually start pulling below.
         if not MANIFEST.exists():
-            sys.exit(f"--from-manifest requires {MANIFEST} to exist. Run --dry-run first.")
+            sys.exit(f"--from-manifest requires {MANIFEST} to exist. Run without --write first.")
         jobs_all = load_jobs_from_manifest()
         print(f"Loaded {len(jobs_all)} jobs from manifest (planning skipped)")
         for j in jobs_all:
@@ -437,8 +438,8 @@ def main():
         for j in errs[:10]:
             print(f"  {j['error']}")
 
-    if args.dry_run:
-        print("\nDry run only — no files transferred. Inspect manifest.tsv before re-running without --dry-run.")
+    if not args.write:
+        print("\nDry run only — no files transferred. Inspect manifest.tsv before re-running with --write.")
         return
 
     if errs:

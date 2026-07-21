@@ -12,8 +12,8 @@ For each zip in Zenodo_upload/ (or --zip-dir):
   - Write the zip's URL into Link_PrimaryData for that UID's row in the right upload sheet
 
 Usage:
-  uv run scripts/apply_zenodo_links.py --zenodo-record 12345678 --dry-run
-  uv run scripts/apply_zenodo_links.py --zenodo-record 12345678
+  uv run scripts/apply_zenodo_links.py --record-id 12345678            # preview (default)
+  uv run scripts/apply_zenodo_links.py --record-id 12345678 --write    # patch the sheets
 """
 from __future__ import annotations
 
@@ -90,9 +90,12 @@ def discover_sheet_map(assay_dir: Path) -> dict[str, Path]:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--dry-run", action="store_true")
     ap.add_argument(
-        "--zenodo-record",
+        "--write", action="store_true",
+        help="Patch the upload sheets; default is dry-run.",
+    )
+    ap.add_argument(
+        "--record-id",
         required=True,
         metavar="RECORD_ID",
         help="Zenodo record ID (e.g. 12345678)",
@@ -110,7 +113,7 @@ def main():
     )
     args = ap.parse_args()
 
-    url_template = f"https://zenodo.org/records/{args.zenodo_record}/files/{{zipname}}?download=1&preview=1"
+    url_template = f"https://zenodo.org/records/{args.record_id}/files/{{zipname}}?download=1&preview=1"
 
     meta = find_metadata_xlsx(args.metadata_xlsx)
     idx = load_curation_index(meta)
@@ -153,7 +156,7 @@ def main():
     total_updated = 0
     for sheet_path, updates in updates_by_sheet.items():
         print(f"\n{sheet_path.name}: {len(updates)} updates")
-        if args.dry_run:
+        if not args.write:
             continue
         wb = load_workbook(sheet_path)
         try:
@@ -184,8 +187,8 @@ def main():
         finally:
             wb.close()
 
-    if args.dry_run:
-        print("\nDry run — no sheets modified.")
+    if not args.write:
+        print("\nDry run — no sheets modified. Re-run with --write to apply.")
     else:
         print(f"\nDone. {total_updated} rows updated across {len(updates_by_sheet)} sheets.")
 

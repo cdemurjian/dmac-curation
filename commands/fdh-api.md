@@ -14,7 +14,7 @@ Parse `$ARGUMENTS`:
 ## The reuse-or-generate loop
 
 1. **Check the library first.** Read `<PLUGIN>/scripts/fdh/generated/REGISTRY.md`. If a
-   script already covers the task, run it (respecting its `--dry-run` default).
+   script already covers the task, run it (respecting its dry-run default).
 2. **Else consult the index.** Read `<PLUGIN>/context/fdh_api_index.json`. Match the task
    against `intent_patterns` / `category` / `llm_hint`; pick the endpoint(s).
 3. **Pull only the relevant YAML.** `Read` `<PLUGIN>/context/full-fdh-openapi-spec.yaml`
@@ -22,7 +22,7 @@ Parse `$ARGUMENTS`:
 4. **Generate + run.** Write a PEP 723 script under `<PLUGIN>/scripts/fdh/generated/`
    using the template in FDH.md: it imports `FairDomHubClient` from `../fdh_api.py`
    (i.e. `<PLUGIN>/scripts/fdh/fdh_api.py`),
-   defaults writes to `--dry-run` (prints a preview), and requires `--write` +
+   defaults to a dry-run preview, and requires `--write` +
    confirmation before mutating anything.
 5. **Contribute back.** Add a `REGISTRY.md` row, show the user the diff, and commit on approval.
 

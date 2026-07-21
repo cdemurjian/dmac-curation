@@ -187,7 +187,8 @@ def patch_asptx(path: Path, gsm_map: dict[str, str], write: bool) -> None:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--write", action="store_true", help="patch in place (creates .bak); default is dry-run")
+    ap.add_argument("--write", action="store_true",
+                    help="Patch in place, creates .bak; default is dry-run.")
     ap.add_argument(
         "--gse-bulk",
         required=True,

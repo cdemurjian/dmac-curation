@@ -14,8 +14,8 @@ Image sample types (D.IMG, A.IMG, SLD, A.SPTX) are excluded — those go to OMER
 files/Figures/ is skipped — it may have duplicate blot files already in Source Data/.
 
 Usage:
-  uv run scripts/stage_zenodo.py --dry-run                           # report what would happen
-  uv run scripts/stage_zenodo.py                                     # actually move files
+  uv run scripts/stage_zenodo.py                                     # report what would happen (default)
+  uv run scripts/stage_zenodo.py --write                             # actually move files
   uv run scripts/stage_zenodo.py --metadata-xlsx path/to/metadata.xlsx
 """
 from __future__ import annotations
@@ -104,7 +104,10 @@ def already_staged(p: Path) -> bool:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--write", action="store_true",
+        help="Move files into staging folders; default is dry-run.",
+    )
     ap.add_argument(
         "--metadata-xlsx",
         metavar="XLSX",
@@ -203,8 +206,8 @@ def main():
         for src, dst in collisions[:10]:
             print(f"    {src.relative_to(FILES)} → {dst.relative_to(FILES)}")
 
-    if args.dry_run:
-        print("\nDry run — no files moved. Re-run without --dry-run to execute.")
+    if not args.write:
+        print("\nDry run — no files moved. Re-run with --write to execute.")
         return
 
     print(f"\nMoving {len(plan)} files...")
