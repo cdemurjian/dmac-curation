@@ -1871,6 +1871,23 @@ For each of `stage_zenodo.py` (line 33), `apply_zenodo_links.py` (line 29), `app
 | `apply_zenodo_links.py` | `glob(ROOT/"previous_metadata"/"*All*.xlsx")` | `cfg.master_workbook` |
 | `apply_zenodo_links.py` | `--zip-dir` default `ROOT / "Zenodo_upload"` | `cfg.root / "Zenodo_upload"` |
 | `apply_geo_accessions.py` | `SHEETS = ROOT / "assay_sheets"` | `cfg.assay_sheets` |
+
+**While you are in `apply_geo_accessions.py`, fix its self-contradicting module
+docstring.** Found during Task 5 and left unfixed there because that task was
+doc-only and this file lives under `scripts/`:
+
+- `:11` prose says *"Reads a GEO accession CSV (two columns: **sample_id,
+  gsm_accession**)"* — reversed.
+- `:16-17`'s own example shows `GSM9751823    sample_title_ending_in_D123456`,
+  i.e. GSM first.
+- `parse_gsm_csv()` reads `gsm = parts[0]`, `title = parts[1]` — GSM first.
+
+So the prose contradicts both the example directly beneath it and the parser.
+A curator who builds a roster from the prose gets every row dropped by the
+D-id regex, a screenful of `WARNING: could not extract D-id`, and an empty
+patch set. Correct `:11` to describe column 1 as the GSM accession and column 2
+as the sample title from which the D-id is extracted. `commands/curate-deposit.md`
+already documents this correctly as of Task 5 — match it.
 | `review_metadata_vs_uploads.py` | `SHEETS = ROOT / "assay_sheets"` | `cfg.assay_sheets` |
 | `review_metadata_vs_uploads.py` | `glob(ROOT/"previous_metadata"/"*All*.xlsx")` | `cfg.master_workbook` |
 
