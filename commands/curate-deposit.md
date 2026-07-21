@@ -8,12 +8,32 @@ Parse `$ARGUMENTS`: first arg routes to sub-target.
 
 ## Sub-routes
 
-### `/curate-deposit geo [--type bulk|spatial] [--gse GSE######]`
+### `/curate-deposit geo [--type bulk|spatial]`
 
 1. **Build**: invoke `<PLUGIN>/scripts/deposit/geo_build_xlsx.py` to render `GEO/BULK_filled.xlsx` or `GEO/SPTX_filled.xlsx` from `previous_metadata/*_AllMetadata*.xlsx`.
 2. **Upload**: invoke `<PLUGIN>/scripts/upload_geo_ncftp.sh GEO/<subfolder>/`. Reads `.env` for `NCFTP_*` creds. Resilient with retry loop.
 3. **Validate**: ask user to validate at submit.ncbi.nlm.nih.gov/geo/submission. Note common gotchas — `paired-end` (not `paired`); `Illumina NextSeq 500` (not `NextSeq 500`); processed-file cols must come before raw-file cols.
-4. **Backfill (after GSE assigned)**: `<PLUGIN>/scripts/apply_geo_accessions.py --write --gse <GSE>`.
+4. **Backfill (after GEO assigns accessions)**: run once to preview, then again with `--write`:
+
+   ```bash
+   uv run --script <PLUGIN>/scripts/apply_geo_accessions.py \
+       --gse-bulk GSE###### --gsm-csv <bulk-gsm-roster.txt> \
+       [--gse-sptx GSE###### --sptx-gsm-csv <spatial-gsm-roster.txt>] \
+       [--write]
+   ```
+
+   Bulk and spatial are **separate GEO submissions with separate series accessions**, which is why there are two pairs of flags. `--gse-bulk` and `--gsm-csv` are both required. Omitting `--gse-sptx` skips the A.SPTX patch entirely; `--sptx-gsm-csv` is optional even when `--gse-sptx` is given, in which case the bulk roster is reused and filtered to `D##-####` tokens.
+
+   The roster passed to `--gsm-csv` is **whitespace-delimited with no header** (despite the `csv` in the flag name): column 1 is the GSM accession, column 2 is the sample title. The sample D-id is *extracted from the title*, not given as its own column — bulk matches a trailing `_D######`, spatial matches a bracketed `(D##-####)`. Blank lines and `#` comments are skipped; a title with no D-token is warned about and dropped.
+
+   ```
+   GSM9751823    P12_tumor_RNA_D123456
+   GSM9751824    P12_normal_RNA_D123457
+   ```
+
+   Patches applied: D.SEQ gets `Accession` = GSM and `Link_PrimaryData` = the per-sample GSM URL; A.GEX gets `Link_PrimaryData` = the bulk **series** URL on every row; A.SPTX gets per-sample GSM URLs. Each patched sheet gets a `.bak` alongside it.
+
+   **D.SEQ is all-or-nothing:** if any D.SEQ row's D-id is missing from the roster the script prints the unmapped rows and refuses to save that sheet even under `--write`. Fix the roster and re-run rather than patching by hand.
 
 ### `/curate-deposit zenodo [--record-id N] [--from-figures]`
 

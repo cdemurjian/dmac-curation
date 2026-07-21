@@ -21,7 +21,7 @@ always tell a *drift bug* from a *planned addition*:
    `--dry-run`. Both halves are needed -- flipping only the scripts leaves the
    docs telling operators to pass a flag that no longer exists.
 
-The suite is expected to be RED until Tasks 4, 5, 8 and 17 land.
+The suite is expected to be RED until Tasks 8 and 17 land (4 and 5 have landed).
 """
 import re
 import subprocess
@@ -36,18 +36,23 @@ COMMANDS = REPO / "commands"
 CONTRACTS = [
     ("curate-consolidate.md", "scripts/consolidate_to_flat.py",
      ["--assay-sheets", "--all-in-one"]),
-    # curate-qa.md documents no flags at all; see PLANNED_CONTRACTS.
+    # curate-qa.md now names --upload/--master-baseline/--expected-counts, but
+    # all three are Task 8 additions and are asserted in PLANNED_CONTRACTS with
+    # that owner. This row stays empty rather than duplicating them as CONTRACTS
+    # failures, which would double-count one gap as two.
     ("curate-qa.md", "scripts/qa_flat_sheets.py", []),
     ("curate-retrieve.md", "scripts/build_retrieve.py", ["--include-parents"]),
     ("curate-validate.md", "scripts/review_metadata_vs_uploads.py",
      ["--metadata", "--retrieve"]),
-    # curate-deposit.md:20 still says `stage_zenodo.py --dry-run`; --write is
-    # target state, so it lives in PLANNED_CONTRACTS.
+    # curate-deposit.md:20 now correctly says `stage_zenodo.py` ... `--write`,
+    # and the script grew --write in Task 4. That pairing is already asserted by
+    # the PLANNED_CONTRACTS row below (owner Task 4, green since Task 4 landed),
+    # so this row stays empty rather than duplicating it.
     ("curate-deposit.md", "scripts/stage_zenodo.py", []),
     ("curate-deposit.md", "scripts/apply_zenodo_links.py",
-     ["--write", "--record-id"]),
+     ["--write", "--record-id", "--zip-dir"]),
     ("curate-deposit.md", "scripts/apply_geo_accessions.py",
-     ["--write", "--gse"]),
+     ["--write", "--gse-bulk", "--gsm-csv"]),
     ("curate-deposit.md", "scripts/apply_omero_ids.py", ["--write"]),
     ("curate-resolve-assays.md", "scripts/nextseek_api.py", ["--project-id"]),
 ]

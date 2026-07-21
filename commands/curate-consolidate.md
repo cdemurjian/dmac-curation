@@ -11,7 +11,7 @@ The user wants Phase 6 — consolidate the per-sample-type 4-sheet xlsx files in
 
 ## Steps
 
-1. Invoke `uv run --script <PLUGIN>/scripts/consolidate_to_flat.py [--assay-sheets ./assay_sheets] [--all-in-one <NAME>]`.
+1. Invoke `uv run --script <PLUGIN>/scripts/consolidate_to_flat.py --assay-sheets assay_sheets [--all-in-one NAME]`.
 2. Verify per-arm xlsx files written to `assay_sheets/`.
 3. If `context/assay_ids_cache.json` exists, the script populates the `assay_ids` column. Report resolution stats.
 4. If `assay_ids` is mostly empty, suggest `/curate-resolve-assays --project-id N`.

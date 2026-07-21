@@ -195,11 +195,11 @@ Embedded in Phase 7 flow. SKILL.md instructs: read `assay_ids_cache.json`, compa
 
 Routes by first arg:
 
-### `/curate-deposit geo [--type bulk|spatial] [--gse GSE######]`
+### `/curate-deposit geo [--type bulk|spatial]`
 
 - Drives `scripts/deposit/geo_build_xlsx.py` to render BULK_filled.xlsx or SPTX_filled.xlsx from filled metadata.
 - Drives `scripts/upload_geo_ncftp.sh` for upload.
-- After GEO acceptance (manual confirmation): `scripts/apply_geo_accessions.py --write` patches D.SEQ/A.GEX/A.SPTX with GSM URLs.
+- After GEO acceptance (manual confirmation): `scripts/apply_geo_accessions.py` patches D.SEQ/A.GEX/A.SPTX with GSM and series URLs. Bulk and spatial are separate GEO submissions with separate series accessions, so the script takes a flag pair per submission. See `commands/curate-deposit.md` for the full invocation and roster format.
 
 ### `/curate-deposit zenodo [--record-id N]`
 

@@ -10,7 +10,7 @@ The user wants Phase 9 — QA pass on the consolidated upload sheets.
 
 ## Steps
 
-1. Invoke `uv run --script <PLUGIN>/scripts/qa_flat_sheets.py`.
+1. Invoke `uv run --script <PLUGIN>/scripts/qa_flat_sheets.py --upload assay_sheets/Arm{X}.xlsx [--master-baseline previous_metadata/<master>.xlsx] [--expected-counts <sampletype>=<n>,...]`.
 2. Read the script's report. The script outputs raw `[BLOCKER]` / `[INFO]` findings. Categorize each row CLEAN / SOFT_FLAG / HARD_REJECT.
 3. Print per-arm summary table:
    ```
