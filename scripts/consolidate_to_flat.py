@@ -54,7 +54,7 @@ from openpyxl.utils import get_column_letter
 from collections import defaultdict
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _config import add_config_args, config_from_args, plugin_context  # noqa: E402
+from _config import add_config_args, config_from_args, plugin_root  # noqa: E402
 from _config import ProjectRootError  # noqa: E402
 
 HDR_FILL = PatternFill("solid", fgColor="D9E1F2")
@@ -272,6 +272,23 @@ def build_arm_flat(arm_name, source_files, out_dir, lookup, synonyms):
     wb.save(out)
     return out, total
 
+# ─── Guard ────────────────────────────────────────────────────────────────
+
+def _is_inside_plugin(path, plugin=None):
+    """True if `path` is the plugin checkout itself or lives inside its tree.
+
+    The consolidate step DELETES every underscore-free ``.xlsx`` from its target
+    directory (and moves originals around), so it must refuse a target that is
+    the plugin root or anything under it — e.g. a curator who points
+    ``--assay-sheets`` at the plugin's own ``assay_sheets`` from a legitimate
+    project cwd, where ``find_project_root`` would not otherwise raise. The path
+    is resolved first so ``..`` / symlink dodges still land inside the subtree.
+    """
+    plugin = (plugin_root() if plugin is None else Path(plugin)).resolve()
+    path = Path(path).resolve()
+    return path == plugin or plugin in path.parents
+
+
 # ─── Main ───────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -300,6 +317,16 @@ if __name__ == "__main__":
 
     src = Path(args.assay_sheets).resolve() if args.assay_sheets else cfg.assay_sheets
     arch = src / "4sheet_originals"
+
+    # Refuse to touch the plugin checkout. This script DELETES underscore-free
+    # .xlsx from `src` and moves originals around, so a `src` at or under the
+    # plugin root (e.g. --assay-sheets <plugin>/assay_sheets, run from a real
+    # project so ProjectRootError never fired) must be rejected up-front, before
+    # any filesystem mutation. (Replaces a tautological assert; see Task 8 review.)
+    if _is_inside_plugin(src):
+        print(f"error: refusing to operate inside the plugin checkout ({src})",
+              file=sys.stderr)
+        raise SystemExit(2)
 
     if not src.is_dir():
         print(f"ERROR: {src} is not a directory", file=sys.stderr)
@@ -341,8 +368,7 @@ if __name__ == "__main__":
             by_arm[arm].append(str(source_dir / f))
 
     # Clean any prior consolidated outputs so we don't mix old + new.
-    # Guarded: never delete outside the resolved project's assay-sheets dir.
-    assert src != plugin_context("").parent, "refusing to clean inside the plugin"
+    # (A `src` at or under the plugin checkout was already rejected up-front.)
     for f in os.listdir(src):
         if f.endswith(".xlsx") and "_" not in f:
             os.remove(src / f)
