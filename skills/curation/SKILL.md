@@ -1,6 +1,6 @@
 ---
 name: dmac-curation
-description: Curate research-project metadata for NExtSEEK / FairDomHub via the 13-phase pipeline (inventory → sample tree → build → consolidate → QA → deposit → retrieve → email PI). Activate when working in a directory containing files/, manuscript/, previous_metadata/, or any .dmac-curation.json lockfile.
+description: Curator's workbench for NExtSEEK / FairDomHub metadata. Human-in-the-loop, PI-facing. Modes: pipeline (13 commands, 11 phases: inventory to sample tree to build to consolidate to QA to deposit to retrieve to email PI), fdh (FairDomHub upload and direct API), schema (sample type authoring and controlled vocabulary), report (GEO / SRA / PRIDE submission artifacts). Activate when working in a directory containing files/, manuscript/, previous_metadata/, or any .dmac-curation.json lockfile, or when the user mentions NExtSEEK, FairDomHub, curation, sample types, or a GEO/SRA/PRIDE submission.
 ---
 
 # DMAC Curation

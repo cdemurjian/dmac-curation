@@ -1,0 +1,27 @@
+{
+  "name": "dmac",
+  "owner": {
+    "name": "Charlie Demurjian",
+    "email": "cdemurjian@gmail.com"
+  },
+  "metadata": {
+    "description": "Charlie Demurjian's personal Claude Code marketplace (DMAC tooling)."
+  },
+  "plugins": [
+    {
+      "name": "dmac-curation",
+      "source": "./",
+      "description": "Curator's workbench for NExtSEEK / FairDomHub metadata. Human-in-the-loop, PI-facing. Modes: pipeline (13 commands, 11 phases: inventory to sample tree to build to consolidate to QA to deposit to retrieve to email PI), fdh (FairDomHub upload and direct API), schema (sample type authoring and controlled vocabulary), report (GEO / SRA / PRIDE submission artifacts). Activate when working in a directory containing files/, manuscript/, previous_metadata/, or any .dmac-curation.json lockfile, or when the user mentions NExtSEEK, FairDomHub, curation, sample types, or a GEO/SRA/PRIDE submission.",
+      "version": "0.3.0",
+      "author": {
+        "name": "Charlie Demurjian",
+        "email": "cdemurjian@gmail.com"
+      },
+      "homepage": "https://github.com/cdemurjian/dmac-curation",
+      "repository": "https://github.com/cdemurjian/dmac-curation",
+      "license": "MIT",
+      "keywords": ["nextseek", "fairdomhub", "metadata-curation", "geo", "sra", "pride", "ontology", "mit", "dmac", "claude-code-plugin"],
+      "category": "workflow"
+    }
+  ]
+}
