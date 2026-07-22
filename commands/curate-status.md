@@ -1,43 +1,42 @@
 ---
-description: Show pipeline state (any phase)
+description: Show toolkit state per mode (any mode, any phase)
 ---
 
-The user wants to know where the project is in the 13-phase pipeline.
+The user wants to know the state of this working directory across all four
+dmac-curation modes.
 
 ## Steps
 
-1. Read `.dmac-curation.json` (lockfile). If missing, advise `/curate-init`.
-2. Check for presence of artifact files (per phase):
-   - Phase 1: `FILE_INDEX.md`
-   - Phase 2: `SAMPLE_TREE.md`
-   - Phase 3: `QUESTIONS_FOR_PI.md` (with open vs resolved count)
-   - Phase 5: `assay_sheets/4sheet_originals/*.xlsx` (count)
-   - Phase 6: `assay_sheets/Arm*.xlsx` (excluding 4sheet_originals/)
-   - Phase 7: `context/assay_ids_cache.json` + `context/assay_synonyms.json`
-   - Phase 11: `RETRIEVE.TXT` (line count)
-   - Phase 13: `EMAIL_TO_PI.md`
-3. Read `assay_sheets/` for upload-new sheets vs upload sheets; report counts.
-4. Print a status table:
+1. Run the status collector:
 
+   ```bash
+   uv run --script <PLUGIN>/scripts/status.py
    ```
-   Project: marie (KAM) — initialized 2026-05-27
-   Lockfile: plugin SHA abc123, schema vintage 2026-05-08
 
-   Phase 1 Inventory:     ✓  FILE_INDEX.md (4.2 KB)
-   Phase 2 Sample tree:   ✓  SAMPLE_TREE.md (8 arms)
-   Phase 3 Questions:     ✓  12 open, 8 resolved
-   Phase 5 Build:         ✓  6/8 arms built (20 4sheet files)
-   Phase 6 Consolidate:   ✗
-   Phase 7 Resolve:       ✗
-   ...
-   Phase 13 Email:        ✗
+   Add `--project-root DIR` to inspect a directory other than cwd, or `--json`
+   for a machine-readable dump.
 
-   Suggested next: /curate-build (arms C, G still pending)
-   ```
-5. Make a suggestion for next command based on current state.
+2. Present the output as-is. It is already terse and needs no reformatting.
+
+3. If the lockfile is missing entirely, note that `pipeline` mode needs
+   `/curate-init` but `schema` and `report` do not - they run from any cwd.
+
+## What each mode reports
+
+| mode | reported state |
+|---|---|
+| `pipeline` | per-phase artifact presence (phases 1, 2, 3, 5, 6, 7, 9, 10, 11, 12, 13), plus lab / pi / project id from the lockfile |
+| `fdh` | whether `FDH_API` or `FDH_TOKEN` is configured, and from where. **Never the value.** |
+| `schema` | sample types with a `schema/<TYPE>.review.md` in cwd |
+| `report` | formats with a `report/<FORMAT>.mapping.json` in cwd |
+
+Phases 4 and 8 are retired and are not reported; see `PHASES.md`.
 
 ## Behavioral rules
 
-- Be honest about partial state (e.g., 6/8 arms).
-- Don't reformat — terse table is fine.
-- Always end with a single-line "Suggested next: …".
+- Be honest about partial state (e.g. "6/8 arms built").
+- Never print a credential value, and never read `.env` for anything but the
+  presence of a key name.
+- Always end with a single-line "Suggested next: ...". The script already does.
+- If the lockfile is malformed, the script warns on stderr and continues with
+  empty modes. Surface that warning rather than swallowing it.
