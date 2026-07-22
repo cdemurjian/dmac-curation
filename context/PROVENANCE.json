@@ -88,6 +88,13 @@
       "vendored_date": "2026-07-22",
       "local_divergence": "none",
       "sha256": "58ec12d1c97149ae03996b0b32bb693839a016bee32b4408d9167aa30b74c0e3"
+    },
+    "scripts/report/validate_artifact.py": {
+      "source_repo": "dmac-assistant",
+      "source_path": "tools/hibayes/artifact_validator.py",
+      "commit_sha": "dcca50c187890dc93659e5594810179793bb94eb",
+      "vendored_date": "2026-07-22",
+      "local_divergence": "SUBSET plus extension. Upstream is 897 lines and imports tools.hibayes.enums and tools.hibayes.exporter; most of it is a 29-column evidence-CSV harness (run_stage_a, CSV_HEADER_29, rebase_artifact_path, classify_artifact_kind, the nf-core and SVG validators) that this plugin has no use for. Taken: ArtifactStatus, ValidatorResult, the GEO two-part required-field check, and the single-pass read-only-workbook discipline. Added: SRA (libraries and biosamples sections) and PRIDE (tab-delimited px, not xlsx), plus a DISPOSITION map onto CLEAN/SOFT_FLAG/HARD_REJECT."
     }
   }
 }
