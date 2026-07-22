@@ -22,3 +22,6 @@ The user wants Phase 6 — consolidate the per-sample-type 4-sheet xlsx files in
 - Check for manual edits in `assay_sheets/Arm*.xlsx` before regenerating. If files exist with mtime newer than `4sheet_originals/`, diff first; ask user.
 - Idempotent — safe to re-run.
 - Move `D.REF` or other pending-schema rows to `assay_sheets/pending_schema/`.
+- Flat format has no Ontology sheet, so any controlled vocabulary in the 4-sheet
+  originals is dropped here. That is expected. Tell the user which format they
+  are uploading and why, rather than letting the loss be silent.

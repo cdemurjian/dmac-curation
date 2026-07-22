@@ -134,11 +134,12 @@ overwrites what exists.
 - File doesn't exist yet: create from template on first `add`
 - ID collision: increment until unique
 
----
+### Task-plan guidance (formerly Phase 4)
 
-## Phase 4 — Task plan
-
-Uses `TaskCreate` directly. No standalone command. SKILL.md instructs Claude to create one task per arm with `blockedBy` dependencies (e.g., Arm G blocked by Arm E + Arm F).
+Use `TaskCreate` to record one task per arm, with `blockedBy` dependencies (e.g.
+Arm G blocked by Arm E plus Arm F). This is good practice, not a pipeline stage
+- it has no command, no script and no artifact, which is why it is no longer
+numbered.
 
 ---
 
@@ -146,26 +147,66 @@ Uses `TaskCreate` directly. No standalone command. SKILL.md instructs Claude to 
 
 **Command:** `/curate-build [<arm>]`
 
-**Inputs:** `SAMPLE_TREE.md`, `previous_metadata/*.xlsx` (master), `manuscript/`, `CLAUDE.md` (lab + pi)
+**Inputs:** `SAMPLE_TREE.md`, `previous_metadata/*.xlsx` (master), `manuscript/`, `.dmac-curation.json` (lab + pi)
+
+**Output:** `assay_sheets/4sheet_originals/<arm>_<sampletype>.xlsx`, one per sample
+type, plus the generated `./scripts/build_<arm>.py` that produced them.
+
+### The 4-sheet output is a review artifact, not a build intermediate
+
+This is the single most important thing to know about Phases 5 and 6, and it is
+invisible in the code.
+
+The obvious challenge is: why build 4-sheet at all, when flat is what NExtSEEK
+ingests? There is a hard technical reason for two formats, stated in
+`consolidate_to_flat.py:19-21` - multiple sample types in one file are **only
+allowed in flat format**, so a per-arm file mixing types must be flat. But that
+alone would still allow building flat directly.
+
+**The deciding reason is human: curators review the per-sample-type 4-sheet
+files before consolidation.** The per-type split is what makes eyeballing
+tractable. A future reader without this will re-derive the challenge and reach
+the wrong conclusion, as the 2026-07-21 pipeline review nearly did.
+
+So: Phase 5's output is what a person looks at. Phase 6's output is what a
+machine ingests. Neither replaces the other.
+
+### The Ontology sheet is where controlled vocabulary lives
+
+`_common.write_4sheet_xlsx` accepts `ontology={fieldname: [allowed values]}`,
+writes a real Ontology sheet, and declares those fields `Controlled Ontology` on
+the Instructions sheet. **Ontology validation is strict in this format and
+violations reject the file** - and this is the *only* upload format where that
+is true (see Phase 6).
+
+Because Phase 5's output is a review artifact, populating the Ontology sheet
+puts the allowed values in front of the curator at exactly the moment they are
+checking the data. `schema` mode produces `schema/<TYPE>.ontology.json` in
+precisely the shape `write_4sheet_xlsx(ontology=...)` expects.
+
+The generated `build_<arm>.py` should pass `ontology=` when a
+`schema/<TYPE>.ontology.json` exists in the project. Historically no caller ever
+passed it, so the mechanism existed and nothing populated it.
 
 **Action:**
 1. Identify arm. If not supplied, list arms from `SAMPLE_TREE.md` and `AskUserQuestion`.
 2. Read sample types and counts for the arm.
-3. Read master to identify existing parent UIDs.
-4. Read manuscript for protocol section names, instrument details.
+3. Read master to identify existing parent UIDs. Workbook precedent beats the schema (hard rule 4).
+4. Read manuscript for protocol section names and instrument details.
 5. Generate `./scripts/build_<arm>.py`:
    - PEP 723 inline deps (openpyxl)
    - `sys.path.insert(0, "<PLUGIN_PATH>/scripts")`
-   - `from _common import mint_uid, write_4sheet_xlsx, ...`
+   - `from _common import mint_uid, write_4sheet_xlsx, schema_column_order, placeholder`
+   - Per-project constants come from `./scripts/_project_constants.py` (copy `<PLUGIN>/scripts/_project_constants.py.example`), never from `_common`
    - Mint UIDs `<TYPE>-YYMMDD<LAB>-N`
-   - Write 4-sheet xlsx (`Instructions / Samples / Assay / Ontology`) per sample type → `assay_sheets/4sheet_originals/<arm>_<sampletype>.xlsx`
+   - Write one 4-sheet xlsx (`Instructions / Samples / Assay / Ontology`) per sample type into `assay_sheets/4sheet_originals/`
 6. Run the script. Report row counts.
-7. Suggest next arm or `/curate-consolidate`.
+7. Suggest the next arm, or `/curate-consolidate`.
 
 **Edge cases:**
-- Missing manifest data (e.g., 27 phospho rows have no file paths): use placeholder markers
-- Sample type new to schema: write to `assay_sheets/pending_schema/`
-- Mid-arm scope ambiguity: stop, add to QUESTIONS, propose to user
+- Missing manifest data: use `placeholder("<what is missing>")`, never a blank.
+- Sample type new to the schema: write to `assay_sheets/pending_schema/`.
+- Mid-arm scope ambiguity: stop, add to `QUESTIONS_FOR_PI.md`, propose to the user.
 
 ---
 
@@ -175,16 +216,49 @@ Uses `TaskCreate` directly. No standalone command. SKILL.md instructs Claude to 
 
 **Inputs:** `assay_sheets/4sheet_originals/*.xlsx`, optional `context/assay_ids_cache.json` + `context/assay_synonyms.json`
 
+**Output:** `assay_sheets/Arm{X}.xlsx`, flat format, one per arm.
+
+### Flat cannot carry controlled vocabulary
+
+Verified against `context/NExtSEEK_API.yaml`:
+
+| upload mode | ontology enforcement |
+|---|---|
+| direct rows (JSON) | "Ontology validation is not performed in rows mode" |
+| flat xlsx (this phase's output) | **none** - the format has no Ontology sheet |
+| 4-sheet xlsx (Phase 5's output) | "Validation is strict; violations reject the file" |
+
+So this phase converts the format that **can** enforce vocabulary into the one
+that cannot. That costs nothing while nothing populates the Ontology sheet; it
+becomes a live loss the moment `schema` mode does.
+
+**Adding an ontology column to a flat sheet does not work.** `InputRowModel`'s
+complete field set is `UID, SampleType, json_metadata, assay_ids, project_id,
+study_title, study_id, sop_id, assay_titles, original_row_index` - no ontology
+field. The model is `additionalProperties: true` and unknown columns are
+"ignored, with a warning", so the column would be **accepted and
+silently discarded**. That is a worse failure than rejection.
+
+**Decision: keep both formats and let the curator choose per upload.** 4-sheet
+when vocabulary enforcement is wanted, flat for convenience and for multi-type
+files. Multiple sample types in one file are **only allowed in flat format**
+(`consolidate_to_flat.py:19-21`), which is why per-arm files are flat.
+
+**Verify before relying on this.** The table above is read from
+`context/NExtSEEK_API.yaml`, bundled **2026-05-27**.
+Confirm with the NExtSEEK API owner that flat still lacks ontology support
+before designing anything new around it.
+
 **Action:**
-1. Invoke `scripts/consolidate_to_flat.py`.
-2. Archive 4-sheet originals if not already in `4sheet_originals/`.
-3. Per arm: produce flat-format xlsx with `Samples` sheet (cols: uid, sampletype, name, parent, notes_summary, assay_titles, assay_ids, json_metadata) + `README` sheet.
-4. Report per-arm row counts.
+1. Invoke `scripts/consolidate_to_flat.py --assay-sheets assay_sheets`.
+2. Archive 4-sheet originals into `4sheet_originals/` if not already there.
+3. Per arm, produce a flat xlsx with a `Samples` sheet (`uid, sampletype, name, parent, notes_summary, assay_titles, assay_ids, json_metadata`) and a `README` sheet.
+4. Report per-arm row counts and assay-ID resolution coverage.
 
 **Edge cases:**
-- Cache or synonyms missing: leave `assay_ids` blank, suggest `/curate-resolve-assays`
-- Pending-schema sample types: write to `assay_sheets/pending_schema/Arm<X>.xlsx`
-- D.REF leak-back on re-run: warn user
+- Cache or synonyms missing: leave `assay_ids` blank, suggest `/curate-resolve-assays`.
+- Pending-schema sample types: write to `assay_sheets/pending_schema/Arm<X>.xlsx`.
+- Re-run: prior consolidated outputs in the target dir are deleted first, so a stale arm file cannot survive. That deletion is scoped to the resolved project's assay-sheets dir and refuses to run inside the plugin checkout.
 
 ---
 
@@ -206,11 +280,21 @@ Uses `TaskCreate` directly. No standalone command. SKILL.md instructs Claude to 
 - Pagination hang: `nextseek_api.py` already fixed (next-link-only termination)
 - Project has zero assays: warn, ask user to verify project ID
 
----
+### `assay_synonyms.json` (formerly Phase 8)
 
-## Phase 8 — Synonyms (no command, LLM-driven)
+Synonym curation is part of this phase, not a separate one - same command, same
+invocation. It existed as its own number only because it produces a second
+artifact, and artifacts are not phases.
 
-Embedded in Phase 7 flow. SKILL.md instructs: read `assay_ids_cache.json`, compare against `assay_titles` columns in `assay_sheets/Arm*.xlsx`, propose mappings, ask user to confirm. Write `context/assay_synonyms.json` with `_README` + `synonyms` keys, each entry annotated with a `_notes` block.
+After the cache is written: read `context/assay_ids_cache.json`, compare against
+the `assay_titles` column in `assay_sheets/Arm*.xlsx`, propose mappings for
+cited titles that did not resolve, and ask the user to confirm. Write
+`context/assay_synonyms.json` with `_README` and `synonyms_by_cited_name` keys,
+each entry annotated with a `_notes` block explaining the reasoning.
+
+Assay IDs are **project-scoped**: the same title maps to different IDs across
+projects. Re-run the fetch and re-review the synonyms whenever switching
+projects.
 
 ---
 

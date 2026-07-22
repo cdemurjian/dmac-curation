@@ -36,3 +36,9 @@ Parse `$ARGUMENTS`: optional `<arm>` (letter or short name). If omitted, list ar
 - Pre-assigned UIDs (no auto-gen). Format `<TYPE>-YYMMDD<LAB>-N`.
 - Don't include parent-tier records that already exist — `/curate-retrieve` auto-pulls them.
 - If the arm has new sample types not in `sampletypes_db.json` (e.g., `D.REF`), write to `assay_sheets/pending_schema/` and note in `QUESTIONS_FOR_PI.md`.
+- The 4-sheet files you write are a **curator review artifact**, not a build
+  intermediate. They are what a person eyeballs per sample type before
+  `/curate-consolidate` collapses them. Do not propose skipping them.
+- If `schema/<TYPE>.ontology.json` exists in the project, pass it to
+  `write_4sheet_xlsx(ontology=...)`. The Ontology sheet is the only place
+  NExtSEEK enforces controlled vocabulary.

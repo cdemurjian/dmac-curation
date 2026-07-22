@@ -36,3 +36,6 @@ Parse `$ARGUMENTS`: `--project-id N` (required).
 - Auth fail (401): re-prompt for `.env` values; never log.
 - Don't auto-map heuristically. Curate per-row with user input (this is the LLM-judgment step Charlie explicitly carved out).
 - Note explicitly-unmapped assays (e.g., "Mouse Challenge" not registered as project-10 assay).
+- Synonym curation is part of this command, not a separate phase. After writing
+  the cache, propose `context/assay_synonyms.json` entries for unresolved cited
+  titles and ask the user to confirm each.
