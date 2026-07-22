@@ -1,19 +1,31 @@
 {
-  "bundled_date": "2026-05-27",
-  "bundled_date_meaning": "Date these snapshots were assembled into the dmac-curation plugin. Individual source files may have been fetched earlier — see data_provenance below.",
-  "source": "Charlie Demurjian's working curation projects (intravchip + srp/lee)",
+  "bundled_date": "2026-07-22",
+  "bundled_date_meaning": "Date these snapshots were assembled into the dmac-curation plugin. Per-file provenance, including source commit and sha256, is in context/PROVENANCE.json.",
+  "source": "chat_nextseek context exports (src/chat_nextseek/context/), commit 367d72732da3ffcc099a367b0ff6f87eaea0bed7",
+  "instance": {
+    "neo4j_schema.json": "PRODUCTION (nextseek.mit.edu), fetched_at 2026-05-11. The 2026-05-27 bundle shipped a DEV snapshot with 23 Sample properties; the live production schema has 85.",
+    "neo4j_assay-sample-conn.json": "PRODUCTION, fetched_at 2026-05-11 (163 allowed edges; the prior DEV bundle carried 176)",
+    "sampletypes_db.json": "PRODUCTION (byte-identical to the live chat_nextseek export)",
+    "assays_db.json": "PRODUCTION (byte-identical to the live chat_nextseek export)",
+    "projects_db.json": "PRODUCTION (byte-identical to the live chat_nextseek export)"
+  },
+  "neo4j_schema_vintages_seen": {
+    "note": "chat_nextseek's context/ holds THREE schema files with very different Sample-property counts. The bundled copy is the 85-property LIVE file, chosen because chat_nextseek's own config.py _ensure_neo4j_schema()/_fetch_neo4j_schema loads exactly neo4j_schema.json and overwrites it from the production graph on each fetch -- so that file is what the running system actually reads. Do NOT 'upgrade' to the 200-property dump.",
+    "neo4j_schema.json": "23 Sample properties in the DEV snapshot fetched 2026-03-26; 85 in the LIVE production copy fetched 2026-05-11 (bundled here).",
+    "neo4j_schema_dev.json": "23 Sample properties, fetched 2026-03-26 -- the stale DEV snapshot; byte-identical to what this plugin shipped through 2026-05-27. This was the bug.",
+    "neo4j_schema_prod.json": "200 Sample properties, fetched 2026-03-26 -- an OLDER, uncurated/flattened raw dump that the live system does NOT load. Its overlap with the live 85-prop file is only 27 properties: a different shape, not a newer version. NOT bundled."
+  },
   "files": {
     "sampletypes_db.json": "101 sample types",
     "assays_db.json": "217 assays",
     "projects_db.json": "10 projects: Break Through Cancer, CSBC, GBM, Griffith, Impact, MetNet, PUBLISHED, RMS-NGC, Shoulders, SRP",
-    "neo4j_schema.json": "Neo4j labels and relationships",
-    "neo4j_assay-sample-conn.json": "176 allowed (assay, parent_type, child_type) edges (wrapper has {fetched_at, connections})",
-    "min_api_endpoints_enriched.json": "13 enriched API endpoint records",
-    "NExtSEEK_API.yaml": "OpenAPI spec for nextseek.mit.edu"
+    "neo4j_schema.json": "Neo4j labels and relationships (85 Sample properties, PRODUCTION)",
+    "neo4j_assay-sample-conn.json": "163 allowed (assay, parent_type, child_type) edges (wrapper has {fetched_at, connections})",
+    "min_api_endpoints_enriched.json": "13 enriched API endpoint records (hand-maintained; not auto-refreshed)",
+    "NExtSEEK_API.yaml": "OpenAPI spec for nextseek.mit.edu (hand-maintained; not auto-refreshed)",
+    "fdh_api_index.json": "FairDomHub API intent index with yaml_lines back-pointers (hand-maintained)",
+    "full-fdh-openapi-spec.yaml": "FairDomHub OpenAPI spec (640KB; never read whole, use the index; hand-maintained)"
   },
-  "data_provenance": {
-    "neo4j_assay-sample-conn.json": "fetched_at field inside file: 2026-04-23T15:51:40Z",
-    "other_files": "no embedded fetch timestamps; assumed fetched circa 2026-04-23 to 2026-05-08 across the source projects"
-  },
-  "note": "Refresh via tools/refresh_context.py (planned, not yet implemented). Lockfile in each curation project records which bundled_date was used at /curate-init."
+  "refresh": "uv run --script scripts/refresh_context.py --check   (report staleness)   |   uv run --script scripts/refresh_context.py --from-dir <DIR> --write   (apply). Per-file provenance is in context/PROVENANCE.json.",
+  "note": "Each curation project's lockfile records which bundled_date was used at /curate-init. NExtSEEK_API.yaml is NOT auto-refreshed; its claim that the flat upload format lacks ontology support is dated 2026-05-27 and must be confirmed with the API owner before anything new is designed around it."
 }

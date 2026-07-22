@@ -1,5 +1,5 @@
 {
-  "fetched_at": "2026-04-23T15:51:40.717684+00:00",
+  "fetched_at": "2026-05-11T16:20:36.286103+00:00",
   "connections": [
     {
       "assay": "Agglutination Assay",
@@ -182,11 +182,6 @@
       "child_type": "A.COMC"
     },
     {
-      "assay": "Copy Number Variation Analysis",
-      "parent_type": "D.SEQ",
-      "child_type": "A.CNV"
-    },
-    {
       "assay": "Crystallography",
       "parent_type": "CHM",
       "child_type": "D.XRS"
@@ -297,6 +292,11 @@
       "child_type": "D.FCS"
     },
     {
+      "assay": "Flow Cytometry",
+      "parent_type": "D.SPC",
+      "child_type": "A.SPC"
+    },
+    {
       "assay": "Flow Cytometry - Data Linked",
       "parent_type": "ABP",
       "child_type": "D.FCS"
@@ -310,6 +310,11 @@
       "assay": "Flow Cytometry Analysis",
       "parent_type": "D.FLOW",
       "child_type": "A.FLOW"
+    },
+    {
+      "assay": "Flow Cytometry Analysis",
+      "parent_type": "CHM",
+      "child_type": "D.SPC"
     },
     {
       "assay": "Flow Cytometry Analysis - Data Linked",
@@ -358,22 +363,12 @@
     },
     {
       "assay": "Imaging",
-      "parent_type": "SLD",
-      "child_type": "D.IMG"
-    },
-    {
-      "assay": "Imaging",
       "parent_type": "CHM",
       "child_type": "D.IMG"
     },
     {
       "assay": "Imaging",
       "parent_type": "D.XRS",
-      "child_type": "D.IMG"
-    },
-    {
-      "assay": "Imaging",
-      "parent_type": "TIS",
       "child_type": "D.IMG"
     },
     {
@@ -405,11 +400,6 @@
       "assay": "Imaging Analysis",
       "parent_type": "D.IMG",
       "child_type": "A.CTSC"
-    },
-    {
-      "assay": "Imaging Analysis",
-      "parent_type": "D.IMG",
-      "child_type": "A.CYCF"
     },
     {
       "assay": "Imaging Analysis",
@@ -453,11 +443,6 @@
     },
     {
       "assay": "Library Prep",
-      "parent_type": "DNA",
-      "child_type": "DNA"
-    },
-    {
-      "assay": "Library Prep",
       "parent_type": "RNA",
       "child_type": "DNA"
     },
@@ -475,11 +460,6 @@
       "assay": "Library Prep - Metadata",
       "parent_type": "BAC",
       "child_type": "DNA"
-    },
-    {
-      "assay": "Long Read Sequencing",
-      "parent_type": "DNA",
-      "child_type": "D.SEQ"
     },
     {
       "assay": "Luminex",
@@ -544,17 +524,7 @@
     {
       "assay": "Mass Spectrometry Proteomics Analysis",
       "parent_type": "D.MSP",
-      "child_type": "A.IMP"
-    },
-    {
-      "assay": "Mass Spectrometry Proteomics Analysis",
-      "parent_type": "D.MSP",
       "child_type": "A.MSP"
-    },
-    {
-      "assay": "Mass Spectrometry Proteomics Analysis",
-      "parent_type": "D.MSP",
-      "child_type": "A.PHP"
     },
     {
       "assay": "Microfluidic Network Formation - Metadata",
@@ -687,16 +657,6 @@
       "child_type": "A.MSP"
     },
     {
-      "assay": "Proximity Extension Assay",
-      "parent_type": "TIS",
-      "child_type": "D.PEX"
-    },
-    {
-      "assay": "RNA Extraction",
-      "parent_type": "TIS",
-      "child_type": "RNA"
-    },
-    {
       "assay": "RNA Extraction",
       "parent_type": "CEL",
       "child_type": "RNA"
@@ -767,34 +727,9 @@
       "child_type": "A.SCXP"
     },
     {
-      "assay": "Single Cell Expression Matrix Analysis",
-      "parent_type": "A.ALN",
-      "child_type": "A.SCXP"
-    },
-    {
       "assay": "Single Cell Sequencing",
       "parent_type": "DNA",
       "child_type": "D.SEQ"
-    },
-    {
-      "assay": "Spatial Proteomics",
-      "parent_type": "TIS",
-      "child_type": "D.IMG"
-    },
-    {
-      "assay": "Spatial Proteomics",
-      "parent_type": "TIS",
-      "child_type": "D.MSP"
-    },
-    {
-      "assay": "Spatial Transcriptomics Analysis",
-      "parent_type": "D.IMG",
-      "child_type": "A.SPTX"
-    },
-    {
-      "assay": "Spatial Transcriptomics Analysis",
-      "parent_type": "D.SEQ",
-      "child_type": "A.SPTX"
     },
     {
       "assay": "Spectroscopy",

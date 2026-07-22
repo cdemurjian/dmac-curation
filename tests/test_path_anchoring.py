@@ -114,9 +114,23 @@ PLUGIN_ANCHORED = [
 # Scripts that must not compute a *project* path from their own location.
 # scripts/fdh/generated/* are excluded: their parent.parent is a sys.path
 # insert for the sibling fdh package, not a project path.
+#
+# MAINTENANCE_SCRIPTS are excluded for a different reason. refresh_context.py is
+# the one plugin-MAINTENANCE script: a maintainer runs it *against* the plugin to
+# refresh context/ from a fresh chat_nextseek export, so it legitimately anchors
+# at, and writes into, the plugin's own context/ dir -- precisely the pattern
+# this static check forbids for *curation* scripts. It never receives a project
+# path (its only inputs are --check and an explicit --from-dir), so it has no
+# project-path-anchoring defect to catch, and it is deliberately absent from
+# PLUGIN_ANCHORED / the plugin_sentinel families because writing the checkout is
+# its whole job. Excluding it here removes no protection from any curation
+# script. See scripts/refresh_context.py, context/PROVENANCE.json, and Task 18.
+MAINTENANCE_SCRIPTS = frozenset({"refresh_context.py"})
+
 PROJECT_SCRIPTS = sorted(
     p for p in REPO.glob("scripts/**/*.py")
     if "generated" not in p.relative_to(REPO).parts
+    and p.name not in MAINTENANCE_SCRIPTS
 )
 
 # Top-level names that belong to the *plugin install* and may legitimately be
