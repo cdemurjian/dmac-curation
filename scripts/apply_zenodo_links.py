@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 import zipfile
 from collections import defaultdict
@@ -78,7 +79,7 @@ def main():
     add_config_args(ap)
     ap.add_argument(
         "--write", action="store_true",
-        help="Patch the upload sheets; default is dry-run.",
+        help="Patch the upload sheets in place, creates .bak; default is dry-run.",
     )
     ap.add_argument(
         "--record-id",
@@ -177,6 +178,7 @@ def main():
                 if uid in uid_to_url:
                     ws.cell(row=row, column=i_link).value = uid_to_url[uid]
                     applied += 1
+            shutil.copy(sheet_path, sheet_path.with_suffix(sheet_path.suffix + ".bak"))
             wb.save(sheet_path)
             print(f"  wrote {applied} Link_PrimaryData values")
             total_updated += applied

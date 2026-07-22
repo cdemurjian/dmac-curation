@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import shutil
 import sys
 from pathlib import Path
 
@@ -59,6 +60,7 @@ def apply(xlsx_path: Path, omero_csv: Path, dry_run: bool) -> int:
             print(f"  {'(dry-run) ' if dry_run else ''}{fname} → {link}")
 
         if not dry_run and patched > 0:
+            shutil.copy(xlsx_path, xlsx_path.with_suffix(xlsx_path.suffix + ".bak"))
             wb.save(xlsx_path)
         print(f"\n{'Would patch' if dry_run else 'Patched'} {patched} rows in {xlsx_path}")
         return 0
@@ -71,7 +73,7 @@ def main() -> int:
     p.add_argument("xlsx", type=Path)
     p.add_argument("--omero-csv", type=Path, default=Path("omero_images.csv"))
     p.add_argument("--write", action="store_true",
-                   help="Apply changes in place; default is dry-run.")
+                   help="Patch in place, creates .bak; default is dry-run.")
     args = p.parse_args()
     return apply(args.xlsx, args.omero_csv, dry_run=not args.write)
 
