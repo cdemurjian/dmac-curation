@@ -1530,7 +1530,28 @@ Every script in the list gains this immediately after its stdlib imports. `_conf
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _config import add_config_args, config_from_args, plugin_context  # noqa: E402
+from _config import ProjectRootError  # noqa: E402
 ```
+
+> **ADDED after Task 7's review.** `config_from_args()` calls
+> `find_project_root()`, which now **raises `ProjectRootError`** when it is run
+> from the plugin checkout (or a plugin subdir) with no lockfile — the deliberate
+> refusal that stops a script from treating the plugin as a project. This is a
+> contract change: callers that expect a `Path` will otherwise surface a raw
+> traceback. In **each** script's `main()`, wrap the config resolution so the
+> refusal reads as a clean error, not a stack trace:
+>
+> ```python
+>     try:
+>         cfg = config_from_args(args)
+>     except ProjectRootError as exc:
+>         print(f"error: {exc}", file=sys.stderr)
+>         return 2
+> ```
+>
+> (Use `sys.exit(2)` instead of `return 2` in scripts whose `main` is not called
+> for its return value.) This only fires from inside the plugin with no project;
+> an ordinary non-project cwd still resolves to cwd, verified in Task 7.
 
 - [ ] **Step 3: Fix `consolidate_to_flat.py`**
 
