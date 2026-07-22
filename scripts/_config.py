@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -46,18 +48,42 @@ def plugin_template(name: str) -> Path:
     return _PLUGIN_ROOT / "templates" / name
 
 
+class ProjectRootError(Exception):
+    """No curation project found and the only fallback would be the plugin.
+
+    Raised by ``find_project_root`` when there is no lockfile at or above the
+    starting directory and that directory is the plugin checkout (or lives
+    inside it). Silently adopting the plugin as "the project" is the P1
+    read/write-inside-the-checkout bug, so we refuse loudly instead.
+    """
+
+
 def find_project_root(start: Path | None = None) -> Path:
     """Nearest ancestor holding a lockfile; else `start` itself.
 
-    Never returns the plugin checkout: a mode may legitimately run from any
-    cwd, and silently adopting the plugin as "the project" is the P1 bug.
+    Never returns the plugin checkout (or anything inside it) as a project. An
+    explicit ``.dmac-curation.json`` at or above ``start`` always wins, even
+    inside a plugin subtree — someone deliberately made a project there. But
+    when there is no lockfile anywhere above ``start`` and the fallback would be
+    the plugin (a developer running a script straight from the checkout, or
+    from a plugin subdir), we raise ``ProjectRootError`` rather than resolve
+    every project path inside the install directory (the P1 bug).
     """
     start = Path(start).resolve() if start is not None else Path.cwd().resolve()
+    # A real lockfile at or above `start` is honoured unconditionally, including
+    # the pathological case where it sits inside the plugin subtree.
     for candidate in (start, *start.parents):
-        if candidate == _PLUGIN_ROOT:
-            break
         if (candidate / LOCKFILE_NAME).is_file():
             return candidate
+    # No lockfile found. Falling back to `start` is safe only when `start` is
+    # not the plugin checkout or a directory inside it.
+    if start == _PLUGIN_ROOT or _PLUGIN_ROOT in start.parents:
+        raise ProjectRootError(
+            f"no {LOCKFILE_NAME} found at or above {start}, and the fallback "
+            f"would be the plugin checkout ({_PLUGIN_ROOT}). cd into a curation "
+            f"project (a directory with a {LOCKFILE_NAME}, or one you scaffold "
+            f"with /curate-init) or pass --project-root."
+        )
     return start
 
 
@@ -143,11 +169,56 @@ def _read_lockfile_pipeline(root: Path) -> dict:
     return {k: v for k, v in raw.items() if not k.startswith("plugin_")}
 
 
-def _find_master_workbook(previous_metadata: Path) -> Path | None:
-    """Most recently modified ``*All*.xlsx`` in previous_metadata/, or None.
+def _embedded_date(name: str) -> tuple[int, int, int] | None:
+    """A ``(yy, mm, dd)`` tuple from a 6-digit ``YYMMDD`` token in ``name``, else None.
 
-    Matches the existing glob in stage_zenodo.py:52, apply_zenodo_links.py:46
-    and review_metadata_vs_uploads.py:57 — but rooted at the PROJECT.
+    Only a *standalone* 6-digit run counts — ``(?<!\\d)\\d{6}(?!\\d)`` — so an
+    8-digit ``YYYYMMDD`` or a longer serial does not match, and the month/day
+    are range-checked. Version tokens (``v1``, ``vFinal``), free-text names, and
+    stray digit runs therefore parse to None and fall through to the mtime path.
+    This deliberately UNDER-matches: a name we cannot confidently date is dated
+    by mtime rather than by a guessed token. When several standalone tokens are
+    valid dates (not seen in the real corpus), the last one wins, since the date
+    conventionally trails the name (``MetNet All 260527.xlsx``).
+
+    Note the two-digit year is compared as-is (26 > 25), so ``(yy, mm, dd)``
+    ordering is only meaningful within the same century — fine for the corpus,
+    which is entirely 25xxxx/26xxxx.
+    """
+    best: tuple[int, int, int] | None = None
+    for match in re.finditer(r"(?<!\d)(\d{6})(?!\d)", name):
+        tok = match.group(1)
+        yy, mm, dd = int(tok[:2]), int(tok[2:4]), int(tok[4:6])
+        if 1 <= mm <= 12 and 1 <= dd <= 31:
+            best = (yy, mm, dd)  # last valid token wins (date trails the name)
+    return best
+
+
+def _find_master_workbook(previous_metadata: Path) -> Path | None:
+    """Select the master ``*All*.xlsx`` in previous_metadata/, or None.
+
+    DELIBERATE BEHAVIOUR CHANGE from the inline helpers this replaces
+    (stage_zenodo.py:52, apply_zenodo_links.py:46, review_metadata_vs_uploads.py:57).
+    Those all do ``sorted(glob("*All*.xlsx"))[0]`` — alphabetically FIRST, with
+    no lock-file exclusion. For date-stamped names (``Lab All 260527.xlsx``)
+    alphabetically-first picks the OLDEST-dated workbook, a latent bug. This
+    function instead selects, and additionally:
+
+      * globs the same ``*All*.xlsx`` pattern, but excludes Excel ``~$`` lock
+        files (a name starting with ``~``);
+      * SELECTS newest by embedded ``YYMMDD`` date when a filename carries one
+        (robust for the common date-named single-master case), else newest by
+        mtime (graceful for version-named files like ``*_AllMetadata_v1.xlsx``
+        that have no parseable date). A dated candidate outranks an undated one.
+      * SURFACES AMBIGUITY: when more than one candidate survives the glob it
+        prints a warning to stderr listing every candidate and the one selected,
+        because auto-picking one master silently baselines the whole pipeline
+        (SKILL.md: surface ambiguity, don't guess). The curator can override
+        with an explicit ``--master-baseline`` path.
+
+    Task 8, deleting the three inline helpers and routing through here, must
+    treat this as an intentional change of selection semantics, NOT a pure
+    refactor.
     """
     if not previous_metadata.is_dir():
         return None
@@ -157,7 +228,30 @@ def _find_master_workbook(previous_metadata: Path) -> Path | None:
     ]
     if not candidates:
         return None
-    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+    def _rank(p: Path) -> tuple[int, tuple[int, int, int], float]:
+        date = _embedded_date(p.name)
+        # dated files outrank undated; newest date wins; mtime breaks ties and
+        # decides among undated (version-named) files.
+        return (1 if date is not None else 0,
+                date or (0, 0, 0),
+                p.stat().st_mtime)
+
+    selected = max(candidates, key=_rank)
+
+    if len(candidates) > 1:
+        listing = "\n".join(
+            f"    - {p.name}{'  <- selected' if p == selected else ''}"
+            for p in sorted(candidates, key=lambda p: p.name)
+        )
+        print(
+            f"[_config] {len(candidates)} master workbooks match "
+            f"'*All*.xlsx' in {previous_metadata}; selected '{selected.name}'. "
+            f"If that is the wrong baseline, pass an explicit master path "
+            f"(e.g. --master-baseline).\n{listing}",
+            file=sys.stderr,
+        )
+    return selected
 
 
 def load_config(root: Path | None = None, **overrides) -> ProjectConfig:
