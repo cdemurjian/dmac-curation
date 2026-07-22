@@ -111,11 +111,21 @@ overwrites what exists.
 5. Render ASCII trees per arm.
 6. Surface open structural questions (Q1, Q2, …) at the bottom.
 7. Render `templates/SAMPLE_TREE.md.j2` → `./SAMPLE_TREE.md`.
+8. Write `./sample_tree.json` — one node per sample type (with `count` = rows to create), one edge
+   per parent→child assay connection, carrying manuscript quotes and rationale. Omit `clade`; it is
+   derived from the assay's `Parent Clade Type` / `Child Clade Type`.
+9. Run `scripts/build_sample_tree_html.py` → `./SAMPLE_TREE.html`, the interactive review view.
+
+**Outputs:** `SAMPLE_TREE.md` (narrative, edited by hand), `sample_tree.json` (source of truth for
+the graph), `SAMPLE_TREE.html` (build artifact — regenerate, never edit). All three describe one
+tree derived once; they must not disagree.
 
 **Edge cases:**
-- New sample type not in `sampletypes_db.json` (e.g., proposed D.REF): mark as PENDING_SCHEMA, add admin question
+- New sample type not in `sampletypes_db.json` (e.g., proposed D.REF): mark as PENDING_SCHEMA, add admin question, and set `"match_type": "proposed_new"` so the viewer draws it dashed
 - Manuscript has no Methods section: pull from email + supplementary docs; flag as a question
 - Parent type ambiguous (e.g., D.IMG.Parent = OOC vs CEL/CHM/TIS): follow PI precedent in master, document the deviation
+- Clade warning on render: the declared clade contradicts the assay definition, or no assay covers the edge. Fix the model — don't suppress the warning
+- No organism-tier type for the study system (e.g., insects): fold organism attributes onto the tissue node, leave `Parent` a placeholder, and raise a vocabulary question
 
 ---
 
