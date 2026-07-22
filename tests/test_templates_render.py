@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 jinja2 = pytest.importorskip("jinja2")
 
-TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+REPO = Path(__file__).resolve().parent.parent
+TEMPLATES_DIR = REPO / "templates"
 
 ENV = jinja2.Environment(
     loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
@@ -106,3 +107,48 @@ def test_template_renders_with_values(template_name, context):
     result = template.render(**context)
     assert isinstance(result, str)
     assert len(result) > 0
+
+
+def _render_claude_md(**ctx):
+    from jinja2 import Environment, FileSystemLoader, StrictUndefined
+    env = Environment(loader=FileSystemLoader(str(REPO / "templates")),
+                      undefined=StrictUndefined)
+    base = {"lab": "kam", "pi_name": "marie", "init_date": "2026-07-21"}
+    base.update(ctx)
+    return env.get_template("CLAUDE.md.j2").render(**base)
+
+
+def test_claude_md_renders_pipeline_steps_when_pipeline_mode():
+    out = _render_claude_md(modes=["pipeline"])
+    assert "/curate-inventory" in out
+    assert "/curate-consolidate" in out
+    assert "Modes enabled" in out
+
+
+def test_claude_md_omits_pipeline_steps_for_schema_only():
+    out = _render_claude_md(modes=["schema"])
+    assert "/curate-inventory" not in out
+    assert "/curate-sampletype" in out
+
+
+def test_claude_md_defaults_to_pipeline_when_modes_absent():
+    """Backward compatibility: an old caller passing no `modes` still works."""
+    assert "/curate-inventory" in _render_claude_md()
+
+
+def test_claude_md_lists_eleven_pipeline_steps():
+    import re
+    out = _render_claude_md(modes=["pipeline"])
+    block = out.split("Suggested order:", 1)[1].split("\n\n", 1)[0]
+    numbered = re.findall(r"^\s*(\d+)\. ", block, flags=re.M)
+    assert len(numbered) == 11, f"expected 11 steps, got {numbered}"
+
+
+def test_claude_md_records_why_both_sheet_formats_exist():
+    out = _render_claude_md(modes=["pipeline"])
+    assert "review artifact" in out
+
+
+def test_claude_md_has_no_em_dashes():
+    """Charlie's style rule; this file is read by the PI's collaborators."""
+    assert "—" not in (REPO / "templates" / "CLAUDE.md.j2").read_text()
