@@ -14,8 +14,8 @@ import _lockfile  # noqa: E402
 
 CANONICAL_DESCRIPTION = (
     "Curator's workbench for NExtSEEK / FairDomHub metadata. Human-in-the-loop, "
-    "PI-facing. Modes: pipeline (13 commands, 11 phases: inventory to sample tree "
-    "to build to consolidate to QA to deposit to retrieve to email PI), fdh "
+    "PI-facing. Modes are pipeline (13 commands, 11 phases from inventory through "
+    "sample tree, build, consolidate, QA, deposit, retrieve, to email PI), fdh "
     "(FairDomHub upload and direct API), schema (sample type authoring and "
     "controlled vocabulary), report (GEO / SRA / PRIDE submission artifacts). "
     "Activate when working in a directory containing files/, manuscript/, "
