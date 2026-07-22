@@ -127,6 +127,16 @@ def test_adapt_curated_sheet_survives_malformed_json(tmp_path):
     assert got.samples[0].metadata.get("_json_metadata_error")
 
 
+def test_adapt_curated_sheet_survives_non_dict_json(tmp_path):
+    """Valid JSON that is not an object degrades, it does not crash the sheet."""
+    p = tmp_path / "ArmA.xlsx"
+    _xlsx(p, {"Samples": (["uid", "sampletype", "json_metadata"],
+                          [["D.SEQ-1", "D.SEQ", "[1,2,3]"]])})
+    got = ad.adapt_curated_sheet(p)
+    assert got.samples[0].uid == "D.SEQ-1"
+    assert got.samples[0].metadata.get("_json_metadata_error")
+
+
 def test_adapt_tabular_csv(tmp_path):
     p = tmp_path / "anything.csv"
     p.write_text("SampleName,Organism\nS1,Homo sapiens\nS2,Homo sapiens\n")

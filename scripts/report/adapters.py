@@ -145,6 +145,8 @@ def adapt_curated_sheet(path: Path) -> NormalizedInput:
                     meta = json.loads(raw)
                 except (TypeError, ValueError) as exc:
                     meta = {"_json_metadata_error": f"{type(exc).__name__}: {exc}"}
+                if not isinstance(meta, dict):
+                    meta = {"_json_metadata_error": f"non-object JSON: {type(meta).__name__}"}
             # Denormalized columns fill anything json_metadata lacks.
             for col, key in (("name", "Name"), ("parent", "Parent")):
                 if rec.get(col) and not meta.get(key):
