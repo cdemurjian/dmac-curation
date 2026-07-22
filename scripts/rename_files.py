@@ -51,9 +51,14 @@ from typing import Iterable, NamedTuple
 # Configuration
 # ---------------------------------------------------------------------------
 
-# TODO(v0.2): These constants are IntravChip-specific. For other projects,
-# fork the script or load from a per-project YAML config file.
-FIGURE_DIRS = [f"Figure {n}" for n in range(1, 8)]
+def parse_figure_dirs(spec: str) -> list[str]:
+    """'Figure 1..7' -> ['Figure 1', ..., 'Figure 7']; else a comma list."""
+    spec = (spec or "").strip()
+    if ".." in spec:
+        prefix, _, rng = spec.rpartition(" ")
+        lo, _, hi = rng.partition("..")
+        return [f"{prefix} {n}" for n in range(int(lo), int(hi) + 1)]
+    return [s.strip() for s in spec.split(",") if s.strip()]
 
 # Canonical case restoration. After path components are lowercased + whitespace
 # is hyphenized, walk this dict and replace each variant with the canonical form.
@@ -574,11 +579,11 @@ def _target_relpath(figure: int, target_filename: str, target_storage: str) -> s
     return ""
 
 
-def cmd_walk(root: Path, manifest_path: Path) -> None:
+def cmd_walk(root: Path, manifest_path: Path, figure_dirs: list[str]) -> None:
     rows: list[dict] = []
     next_id = 1
     for fig_dir in sorted(root.iterdir()):
-        if not fig_dir.is_dir() or fig_dir.name not in FIGURE_DIRS:
+        if not fig_dir.is_dir() or fig_dir.name not in figure_dirs:
             continue
         for path in sorted(fig_dir.rglob("*")):
             if not path.is_file():
@@ -704,7 +709,8 @@ def cmd_checksums(root: Path, manifest_path: Path, workers: int) -> None:
 # ---------------------------------------------------------------------------
 
 
-def cmd_apply(root: Path, manifest_path: Path, delete_fig7_dupes: bool) -> None:
+def cmd_apply(root: Path, manifest_path: Path, delete_fig7_dupes: bool,
+              figure_dirs: list[str]) -> None:
     rows = manifest_load(manifest_path)
 
     # Safety: every non-skip row must have an md5
@@ -747,7 +753,7 @@ def cmd_apply(root: Path, manifest_path: Path, delete_fig7_dupes: bool) -> None:
 
     # Clean up emptied subdirectories under each Figure N/
     for fig_dir in sorted(root.iterdir()):
-        if not fig_dir.is_dir() or fig_dir.name not in FIGURE_DIRS:
+        if not fig_dir.is_dir() or fig_dir.name not in figure_dirs:
             continue
         # Walk bottom-up so empty parents are removed too
         removed = 0
@@ -822,35 +828,48 @@ def main() -> None:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    def _add_figure_dirs(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument(
+            "--figure-dirs", default="Figure 1..7",
+            help="Figure directory names to walk, as 'Figure 1..7' or a comma list "
+                 "('Fig A,Fig B'). Default: Figure 1..7",
+        )
+
     pw = sub.add_parser("walk", help="parse files/ and emit manifest")
     pw.add_argument("--root", type=Path, default=Path("files"))
     pw.add_argument("--manifest", type=Path, default=Path("manifest.csv"))
+    _add_figure_dirs(pw)
 
     pc = sub.add_parser("checksums", help="compute MD5s into the manifest")
     pc.add_argument("--root", type=Path, default=Path("files"))
     pc.add_argument("--manifest", type=Path, default=Path("manifest.csv"))
     pc.add_argument("--workers", type=int, default=8)
+    _add_figure_dirs(pc)
 
     pa = sub.add_parser("apply", help="rename + flatten in place")
     pa.add_argument("--root", type=Path, default=Path("files"))
     pa.add_argument("--manifest", type=Path, default=Path("manifest.csv"))
     pa.add_argument("--delete-fig7-dupes", action="store_true")
+    _add_figure_dirs(pa)
 
     pv = sub.add_parser("verify", help="check fs against manifest")
     pv.add_argument("--root", type=Path, default=Path("files"))
     pv.add_argument("--manifest", type=Path, default=Path("manifest.csv"))
+    _add_figure_dirs(pv)
 
     pr = sub.add_parser("rollback", help="reverse an apply")
     pr.add_argument("--root", type=Path, default=Path("files"))
     pr.add_argument("--manifest", type=Path, default=Path("manifest.csv"))
+    _add_figure_dirs(pr)
 
     args = p.parse_args()
     if args.cmd == "walk":
-        cmd_walk(args.root, args.manifest)
+        cmd_walk(args.root, args.manifest, parse_figure_dirs(args.figure_dirs))
     elif args.cmd == "checksums":
         cmd_checksums(args.root, args.manifest, args.workers)
     elif args.cmd == "apply":
-        cmd_apply(args.root, args.manifest, args.delete_fig7_dupes)
+        cmd_apply(args.root, args.manifest, args.delete_fig7_dupes,
+                  parse_figure_dirs(args.figure_dirs))
     elif args.cmd == "verify":
         cmd_verify(args.root, args.manifest)
     elif args.cmd == "rollback":

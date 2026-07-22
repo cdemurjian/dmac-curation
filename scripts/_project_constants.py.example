@@ -1,0 +1,34 @@
+"""Template for a project-local constants module.
+
+Copy to your curation project as ``scripts/_project_constants.py`` and import
+it from your generated ``build_<arm>.py``. This is where everything that used
+to sit in the plugin's ``_common.py`` now lives — per project, in the project.
+
+Nothing here ships with the plugin. That is the point: _common.py used to
+carry one project's scientist name, master filename, cell-line UID table and
+manuscript section titles, and every importer inherited them (toolkit spec P3).
+"""
+
+# The curator/scientist recorded on rows this project mints.
+SCIENTIST = "Firstname Lastname"
+
+# Existing UIDs this project's new rows cite as Parent, keyed by whatever
+# natural identifier the PI's data uses.
+PARENT_UID_REUSE = {
+    # "HUVEC": "CEL-241211KAM-1",
+}
+
+# Manuscript section headers used verbatim as `Protocol` field values.
+MS_PROTOCOL = {
+    # "cell_culture": "Cell culture",
+}
+
+# Per-sampletype row counts you expect after consolidation. Also settable in
+# the lockfile under modes.pipeline.expected_counts, which /curate-qa reads
+# without needing this file.
+EXPECTED_COUNTS = {
+    # "OOC": 122,
+}
+
+# Sample types with no biological parent in this project's chain.
+ALWAYS_ROOT = {"CEL", "MDL"}
