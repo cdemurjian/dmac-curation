@@ -60,6 +60,8 @@ def sample_property_count(schema_path: Path) -> int:
         doc = json.loads(Path(schema_path).read_text())
     except (OSError, json.JSONDecodeError):
         return 0
+    if not isinstance(doc, dict):  # a top-level-list export: layout changed
+        return 0
     for key in ("labels", "nodes", "node_properties", "schema"):
         container = doc.get(key)
         if isinstance(container, dict) and hasattr(container.get("Sample"), "__len__"):

@@ -115,8 +115,8 @@ PLUGIN_ANCHORED = [
 # scripts/fdh/generated/* are excluded: their parent.parent is a sys.path
 # insert for the sibling fdh package, not a project path.
 #
-# MAINTENANCE_SCRIPTS are excluded for a different reason. refresh_context.py is
-# the one plugin-MAINTENANCE script: a maintainer runs it *against* the plugin to
+# MAINTENANCE_SCRIPTS are excluded for a different reason. scripts/refresh_context.py
+# is the one plugin-MAINTENANCE script: a maintainer runs it *against* the plugin to
 # refresh context/ from a fresh chat_nextseek export, so it legitimately anchors
 # at, and writes into, the plugin's own context/ dir -- precisely the pattern
 # this static check forbids for *curation* scripts. It never receives a project
@@ -125,12 +125,17 @@ PLUGIN_ANCHORED = [
 # PLUGIN_ANCHORED / the plugin_sentinel families because writing the checkout is
 # its whole job. Excluding it here removes no protection from any curation
 # script. See scripts/refresh_context.py, context/PROVENANCE.json, and Task 18.
-MAINTENANCE_SCRIPTS = frozenset({"refresh_context.py"})
+#
+# The allowlist is pinned to the exact repo-relative *path*, not the basename:
+# the glob below is recursive, so matching on p.name alone would silently drop
+# any future curation script that happened to be named refresh_context.py in
+# some subdir (e.g. scripts/report/refresh_context.py) from the static check.
+MAINTENANCE_SCRIPTS = frozenset({"scripts/refresh_context.py"})
 
 PROJECT_SCRIPTS = sorted(
     p for p in REPO.glob("scripts/**/*.py")
     if "generated" not in p.relative_to(REPO).parts
-    and p.name not in MAINTENANCE_SCRIPTS
+    and str(p.relative_to(REPO)) not in MAINTENANCE_SCRIPTS
 )
 
 # Top-level names that belong to the *plugin install* and may legitimately be
@@ -413,6 +418,29 @@ def test_static_check_tracks_the_defect_not_the_variable_name():
     assert _anchor_hits("buggy.py", buggy), "rename defeats the static check"
     assert not _anchor_hits("fixed.py", fixed), "cwd-anchored root falsely flagged"
     assert not _anchor_hits("ok.py", plugin_read), "plugin context/ read flagged"
+
+
+def test_maintenance_allowlist_is_path_pinned():
+    """The maintenance exclusion must match a full repo-relative path, not a
+    bare basename.
+
+    The glob feeding PROJECT_SCRIPTS is recursive, so a basename allowlist would
+    silently exempt any future curation script named refresh_context.py in a
+    subdir. Assert every entry carries a directory component (contains "/") and
+    that the real script is still excluded while a same-named sibling would not
+    be.
+    """
+    assert all("/" in entry for entry in MAINTENANCE_SCRIPTS), (
+        "MAINTENANCE_SCRIPTS must hold repo-relative paths, not basenames: "
+        f"{sorted(MAINTENANCE_SCRIPTS)}"
+    )
+    assert "scripts/refresh_context.py" in MAINTENANCE_SCRIPTS
+    # The genuine maintenance script stays out of the static check...
+    project_rels = {str(p.relative_to(REPO)) for p in PROJECT_SCRIPTS}
+    assert "scripts/refresh_context.py" not in project_rels
+    # ...but a hypothetical same-named curation script in a subdir would not be
+    # exempted by a basename match.
+    assert "scripts/report/refresh_context.py" not in MAINTENANCE_SCRIPTS
 
 
 def test_reference_implementations_are_already_clean(curation_project,
