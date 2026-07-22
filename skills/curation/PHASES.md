@@ -378,9 +378,12 @@ Routes by first arg:
 **Inputs:** downloaded `*_AllMetadata.xlsx` from `chat_nextseek`, current `RETRIEVE.TXT`, upload sheets
 
 **Action:**
-1. Invoke `scripts/review_metadata_vs_uploads.py`.
-2. Diff: which RETRIEVE UIDs are missing from the download; which upload-sheet field values differ from the round-tripped values; which parents auto-pulled.
-3. Report.
+1. Invoke `scripts/review_metadata_vs_uploads.py --metadata-xlsx <xlsx> --retrieve RETRIEVE.TXT --assay-sheets assay_sheets`.
+2. Report three diffs:
+   - which upload-sheet field values differ from the round-tripped values
+   - which `RETRIEVE.TXT` UIDs are missing from the download
+   - which downloaded rows were auto-pulled parents (expected) vs genuinely unexpected
+3. `--retrieve` defaults to `<project-root>/RETRIEVE.TXT` when present, and is skipped with a printed note when absent.
 
 **Edge cases:**
 - Auto-pulled parents count: subtract from "extra rows" before alarming

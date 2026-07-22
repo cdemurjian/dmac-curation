@@ -7,9 +7,11 @@ always tell a *drift bug* from a *planned addition*:
 
 1. `CONTRACTS` -- flags a command doc promises **today**. A failure here is a
    real drift bug: an operator following the doc would pass a flag the script
-   does not accept. (Root cause: `/curate-validate` documents `--metadata` and
-   `--retrieve`; the script has `--metadata-xlsx` and no retrieve support at
-   all, so RETRIEVE.TXT was silently ignored.)
+   does not accept. (The historical drift this row caught: `/curate-validate`
+   documented `--metadata` and `--retrieve` while the script had `--metadata-xlsx`
+   and no retrieve support at all, so RETRIEVE.TXT was silently ignored. Task 17
+   settled the flag on `--metadata-xlsx` and added `--retrieve`, so the row now
+   names `--metadata-xlsx`, `--retrieve`, `--assay-sheets` and is green.)
 2. `PLANNED_CONTRACTS` -- flags no doc promises yet, that a **named task** in
    docs/superpowers/plans/2026-07-21-curation-toolkit.md will add. These are
    RED on purpose until that task lands; each row carries its owning task.
@@ -21,7 +23,8 @@ always tell a *drift bug* from a *planned addition*:
    `--dry-run`. Both halves are needed -- flipping only the scripts leaves the
    docs telling operators to pass a flag that no longer exists.
 
-The suite is expected to be RED until Tasks 8 and 17 land (4 and 5 have landed).
+The suite was RED until Tasks 8 and 17 landed (4 and 5 landed earlier); it is
+green now that all of them have.
 """
 import re
 import subprocess
@@ -43,7 +46,7 @@ CONTRACTS = [
     ("curate-qa.md", "scripts/qa_flat_sheets.py", []),
     ("curate-retrieve.md", "scripts/build_retrieve.py", ["--include-parents"]),
     ("curate-validate.md", "scripts/review_metadata_vs_uploads.py",
-     ["--metadata", "--retrieve"]),
+     ["--metadata-xlsx", "--retrieve", "--assay-sheets"]),
     # curate-deposit.md:20 now correctly says `stage_zenodo.py` ... `--write`,
     # and the script grew --write in Task 4. That pairing is already asserted by
     # the PLANNED_CONTRACTS row below (owner Task 4, green since Task 4 landed),
@@ -63,8 +66,9 @@ PLANNED_CONTRACTS = [
     ("curate-qa.md", "scripts/qa_flat_sheets.py", "--upload", 8),
     ("curate-qa.md", "scripts/qa_flat_sheets.py", "--master-baseline", 8),
     ("curate-qa.md", "scripts/qa_flat_sheets.py", "--expected-counts", 8),
-    ("curate-validate.md", "scripts/review_metadata_vs_uploads.py",
-     "--assay-sheets", 8),
+    # curate-validate.md's --assay-sheets (Task 8) is now documented by the doc
+    # AND registered by the script, so it graduated to CONTRACTS above rather
+    # than being double-counted here.
     ("curate-deposit.md", "scripts/stage_zenodo.py", "--write", 4),
 ]
 

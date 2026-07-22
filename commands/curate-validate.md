@@ -14,16 +14,31 @@ Parse `$ARGUMENTS`: `<metadata.xlsx>` (path to downloaded file).
 
 ## Steps
 
-1. Invoke `uv run --script <PLUGIN>/scripts/review_metadata_vs_uploads.py --metadata <PATH> --retrieve RETRIEVE.TXT`.
-2. Read the diff report:
-   - Missing UIDs (in RETRIEVE but not in download)
-   - Extra UIDs (auto-pulled parents — expected; count separately)
-   - Field drift per sample type (compare upload-sheet values to round-tripped values)
-3. Print a summary table.
-4. Surface any field drift to the user for resolution.
+1. Invoke the reviewer:
+
+   ```bash
+   uv run --script <PLUGIN>/scripts/review_metadata_vs_uploads.py \
+       --metadata-xlsx <PATH> \
+       --retrieve RETRIEVE.TXT \
+       --assay-sheets assay_sheets
+   ```
+
+   `--retrieve` defaults to `<project-root>/RETRIEVE.TXT` when it exists. Pass
+   it explicitly when validating a download from a different retrieve set.
+
+2. Read the three sections of the report:
+   - **Field drift** - upload-sheet values vs the round-tripped values
+   - **RETRIEVE round trip** - requested UIDs missing from the download, plus
+     auto-pulled parents (expected) and unexpected extras
+   - **Counts**
+
+3. Distinguish formatting drift (whitespace, case) from semantic drift (a
+   genuinely different value). Only the latter is a problem.
+
+4. Auto-pulled parents are **expected**. `chat_nextseek` walks lineage upward,
+   so MUS/TIS/DNA/RNA/PAT/PAV/CHM/CEL rows appear in the download without being
+   requested. Subtract them before alarming about extra rows.
 
 ## Behavioral rules
 
-- Auto-pulled parents are expected — don't flag as missing.
-- Whitespace / case differences in fields = formatting only, soft note. Different values = real drift, hard flag.
-- Don't auto-fix drift. Surface to user.
+- Don't auto-fix drift. Surface it to the user for resolution.

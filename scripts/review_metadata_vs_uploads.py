@@ -41,6 +41,46 @@ COMPARE_COLS = [
     "Accession", "Checksum_PrimaryData",
 ]
 
+# Sample types chat_nextseek auto-pulls when resolving lineage. Their presence
+# in a download is expected, not "extra rows" worth alarming about.
+AUTO_PULLED_PARENT_TYPES = {"MUS", "TIS", "DNA", "RNA", "PAT", "PAV", "CHM", "CEL"}
+
+
+def load_retrieve_uids(path):
+    """Read RETRIEVE.TXT into a set of UIDs. None when the file is absent.
+
+    PHASES.md named this as a Phase 12 input while the script had no flag to
+    read it, so the documented diff never ran.
+    """
+    path = Path(path)
+    if not path.is_file():
+        return None
+    return {line.strip() for line in path.read_text().splitlines() if line.strip()}
+
+
+def diff_retrieve(requested, downloaded, parent_types=AUTO_PULLED_PARENT_TYPES):
+    """Classify the round trip.
+
+    Args:
+      requested:    UIDs from RETRIEVE.TXT, or None to skip entirely.
+      downloaded:   UIDs present in the downloaded workbook.
+      parent_types: sample-type prefixes auto-pulled by lineage.
+
+    Returns:
+      None when `requested` is None, else
+      {"missing": [...],              # asked for, not in the download
+       "auto_pulled_parents": [...],  # in the download, expected, not asked for
+       "extra": [...]}                # in the download, unexpected
+    """
+    if requested is None:
+        return None
+    missing = sorted(requested - downloaded)
+    unrequested = downloaded - requested
+    auto = sorted(u for u in unrequested if u.split("-", 1)[0] in parent_types)
+    extra = sorted(u for u in unrequested if u.split("-", 1)[0] not in parent_types)
+    return {"missing": missing, "auto_pulled_parents": auto, "extra": extra}
+
+
 # TODO(v0.2): support a project-level ACTIVE_UPLOADS JSON override to handle
 # multi-sheet merges (e.g. D.IMG has 4 upload sheets). Auto-discovery uses
 # a simple stype -> single sheet mapping.
@@ -227,6 +267,12 @@ def main():
         metavar="DIR",
         help="Directory of upload sheets (default: <project-root>/assay_sheets)",
     )
+    ap.add_argument(
+        "--retrieve", type=Path, default=None,
+        help="RETRIEVE.TXT of requested UIDs. Reports which were requested but "
+             "absent from the download (default: <project-root>/RETRIEVE.TXT "
+             "when present)",
+    )
     args = ap.parse_args()
 
     try:
@@ -250,13 +296,26 @@ def main():
     for stype, files in sorted(active_uploads.items()):
         compare_sheet(meta, sheets_dir, stype, files)
 
-    # Check for metadata sheets with no corresponding upload sheet
+    # Check for metadata sheets with no corresponding upload sheet, and collect
+    # every UID present in the downloaded workbook (all sheets) for the RETRIEVE
+    # round-trip diff below.
+    downloaded_uids: set[str] = set()
     wb = load_workbook(meta, read_only=True, data_only=True)
     try:
         for sname in wb.sheetnames:
+            ws = wb[sname]
+            rows = list(ws.iter_rows(values_only=True))
+            if rows:
+                hdr = [str(c) if c is not None else "" for c in rows[0]]
+                uid_i = hdr.index("UID") if "UID" in hdr else None
+                if uid_i is not None:
+                    for r in rows[1:]:
+                        if not r or not r[0] or uid_i >= len(r):
+                            continue
+                        u = r[uid_i]
+                        if u is not None and str(u).strip():
+                            downloaded_uids.add(str(u).strip())
             if sname not in active_uploads:
-                ws = wb[sname]
-                rows = list(ws.iter_rows(values_only=True))
                 n = sum(1 for r in rows[1:] if r and r[0])
                 if n > 0:
                     print(f"\n{'='*78}")
@@ -265,6 +324,34 @@ def main():
                     print(f"  metadata rows: {n}")
     finally:
         wb.close()
+
+    # RETRIEVE round trip: PHASES.md named RETRIEVE.TXT as a Phase 12 input, but
+    # the script never read it. --retrieve defaults to the project's RETRIEVE.TXT
+    # when present, and is skipped with a printed note when absent.
+    retrieve_path = args.retrieve or (cfg.root / "RETRIEVE.TXT")
+    requested = load_retrieve_uids(retrieve_path)
+    if requested is None:
+        print(f"\nRETRIEVE round trip: skipped (no {retrieve_path})")
+    else:
+        d = diff_retrieve(requested, downloaded_uids)
+        print("\n" + "-" * 60)
+        print("RETRIEVE ROUND TRIP")
+        print("-" * 60)
+        print(f"Source: {retrieve_path}")
+        print(f"Requested: {len(requested)}   Downloaded: {len(downloaded_uids)}")
+        print(f"  auto-pulled parents (expected): {len(d['auto_pulled_parents'])}")
+        if d["missing"]:
+            print(f"  REQUESTED BUT MISSING: {len(d['missing'])}")
+            for u in d["missing"][:20]:
+                print(f"      - {u}")
+            if len(d["missing"]) > 20:
+                print(f"      ... and {len(d['missing']) - 20} more")
+        else:
+            print("  every requested UID is present")
+        if d["extra"]:
+            print(f"  unexpected extra rows: {len(d['extra'])}")
+            for u in d["extra"][:20]:
+                print(f"      - {u}")
 
     collect_protocols(meta)
 
