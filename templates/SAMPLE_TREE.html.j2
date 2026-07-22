@@ -1,0 +1,239 @@
+{#
+  Interactive sample-tree viewer. Rendered by scripts/build_sample_tree_html.py
+  from a project's sample_tree.json.
+
+  EDITOR NOTE: this template is JS/CSS heavy. Jinja treats a doubled open-brace
+  as the start of a variable, so never introduce that sequence literally into the
+  script or style blocks (a doubled close-brace on its own is harmless). The build
+  script asserts none survives the render, so a mistake fails loudly rather than
+  shipping broken HTML. This block is a Jinja comment: it is stripped from the
+  output and is safe to edit.
+#}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <script src="https://unpkg.com/cytoscape@3/dist/cytoscape.min.js"></script>
+    <script src="https://unpkg.com/dagre@0.8/dist/dagre.min.js"></script>
+    <script src="https://unpkg.com/cytoscape-dagre@2/cytoscape-dagre.js"></script>
+<style>
+:root {
+    --bg:#FFFFFF; --surface:#F8F6FC; --text:#1a1a2e;
+    --text-muted:#6b7280; --text-light:#9ca3af; --accent:#A31F34;
+    --border:#e5e7eb; --border-light:#f3f4f6;
+    --font-body:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --transition-fast:150ms ease;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;}
+body{font-family:var(--font-body);font-size:16px;line-height:1.6;color:var(--text);background:var(--bg);display:flex;flex-direction:column;}
+.page-header{padding:20px 32px 12px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.page-header h1{font-size:1.5rem;font-weight:700;margin-bottom:2px;}
+.page-header .subtitle{font-size:0.9rem;color:var(--text-muted);}
+.stats-bar{display:flex;gap:24px;padding:12px 32px;border-bottom:1px solid var(--border-light);background:var(--surface);flex-shrink:0;flex-wrap:wrap;align-items:center;}
+.stat-item{display:flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--text-muted);}
+.stat-value{font-weight:700;color:var(--text);}
+.stat-badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:0.75rem;font-weight:600;}
+.stat-badge.confirmed{background:#dcfce7;color:#166534;}
+.stat-badge.proposed{background:#fef3c7;color:#92400e;}
+.hint{margin-left:auto;font-size:0.8rem;color:var(--text-light);font-style:italic;}
+.graph-area{flex:1;display:flex;flex-direction:column;padding:16px 32px 20px;min-height:0;}
+.graph-container{flex:1;position:relative;border:1px solid var(--border);border-radius:12px;background:#FAFAFA;min-height:0;}
+.cy-container{width:100%;height:100%;position:absolute;inset:0;}
+.zoom-controls{position:absolute;top:12px;right:12px;display:flex;flex-direction:column;gap:4px;z-index:10;}
+.zoom-btn{width:32px;height:32px;border:1px solid var(--border);border-radius:6px;background:white;cursor:pointer;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:center;color:var(--text-muted);transition:all var(--transition-fast);}
+.zoom-btn:hover{background:var(--surface);color:var(--text);border-color:var(--accent);}
+.graph-legend{position:absolute;bottom:12px;right:12px;background:rgba(255,255,255,0.95);border:1px solid var(--border);border-radius:8px;padding:10px 14px;z-index:10;font-size:11px;}
+.legend-title{font-weight:600;font-size:11px;margin-bottom:6px;color:var(--text);}
+.legend-item{display:flex;align-items:center;gap:6px;margin-bottom:3px;color:var(--text-muted);}
+.legend-shape{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;}
+.legend-shape.source{background:#2E7D32;border-radius:50%;}
+.legend-shape.processed{background:#E65100;border-radius:4px;}
+.legend-shape.raw{background:#42A5F5;transform:rotate(45deg);width:12px;height:12px;margin:0 2px;}
+.legend-shape.analyzed{background:#1565C0;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);}
+.legend-divider{border-top:1px solid var(--border);margin:4px 0;}
+.legend-dash{display:inline-block;width:16px;height:2px;border-top:2px dashed #FFB300;}
+.detail-panel{display:none;position:absolute;top:12px;left:12px;background:rgba(255,255,255,0.98);border:1px solid var(--border);border-radius:10px;padding:14px 18px;z-index:20;width:420px;max-width:calc(100% - 60px);max-height:calc(100% - 24px);overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,0.12);}
+.detail-panel.visible{display:block;}
+.dp-close{position:absolute;top:10px;right:12px;cursor:pointer;color:var(--text-light);font-size:18px;line-height:1;border:none;background:none;}
+.dp-close:hover{color:var(--accent);}
+.dp-code{font-weight:700;font-size:16px;margin-bottom:1px;padding-right:20px;}
+.dp-label{color:var(--text-muted);margin-bottom:8px;font-size:13px;}
+.dp-row{display:flex;gap:8px;margin-bottom:3px;font-size:12px;}
+.dp-key{color:var(--text-light);min-width:74px;flex-shrink:0;}
+.dp-val{font-weight:500;}
+.dp-badge{display:inline-block;padding:1px 7px;border-radius:8px;font-size:11px;font-weight:600;background:#e5e7eb;color:#374151;}
+.dp-badge.strong{background:#dcfce7;color:#166534;}
+.dp-badge.moderate{background:#fef3c7;color:#92400e;}
+.dp-badge.weak{background:#fee2e2;color:#991b1b;}
+.dp-badge.existing_nextseek{background:#dcfce7;color:#166534;}
+.dp-badge.proposed_new{background:#fef3c7;color:#92400e;}
+.dp-section-title{font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-light);margin:12px 0 4px;}
+.dp-quote{font-size:12px;color:var(--text);background:var(--surface);border-left:3px solid var(--accent);padding:6px 10px;margin-bottom:5px;border-radius:0 4px 4px 0;font-style:italic;}
+.dp-rationale{font-size:12px;color:var(--text-muted);line-height:1.5;}
+.dp-flag{background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:6px 10px;font-size:11.5px;color:#9a3412;margin-top:8px;}
+.dp-empty{font-size:12px;color:var(--text-light);font-style:italic;}
+.page-footer{padding:8px 32px;border-top:1px solid var(--border-light);font-size:0.75rem;color:var(--text-light);text-align:center;flex-shrink:0;}
+</style>
+</head>
+<body>
+<div class="page-header">
+    <h1>{{ title }}</h1>
+    <p class="subtitle">{{ subtitle }}</p>
+</div>
+<div class="stats-bar"></div>
+<div class="graph-area">
+    <div class="graph-container">
+        <div class="cy-container" id="cy"></div>
+        <div class="zoom-controls">
+            <button class="zoom-btn" onclick="zoomGraph(1.2)" title="Zoom in">+</button>
+            <button class="zoom-btn" onclick="zoomGraph(0.8)" title="Zoom out">&minus;</button>
+            <button class="zoom-btn" onclick="resetGraph()" title="Reset view" style="font-size:12px;">&#x21BA;</button>
+        </div>
+        <div class="graph-legend">
+            <div class="legend-title">Sample Clades</div>
+            <div class="legend-item"><span class="legend-shape source"></span> Source</div>
+            <div class="legend-item"><span class="legend-shape processed"></span> Processed</div>
+            <div class="legend-item"><span class="legend-shape raw"></span> Raw Data</div>
+            <div class="legend-item"><span class="legend-shape analyzed"></span> Analyzed</div>
+            <div class="legend-divider"></div>
+            <div class="legend-item"><span class="legend-dash"></span> Proposed New</div>
+        </div>
+        <div class="detail-panel" id="detail">
+            <button class="dp-close" onclick="closeDetail()">&times;</button>
+            <div id="dp-body"></div>
+        </div>
+    </div>
+</div>
+<div class="page-footer">{{ footer }}</div>
+<script>
+var GRAPH_DATA = {{ graph_json }};
+var CLADE_STYLES = {
+    Source:{bg:'#2E7D32',shape:'ellipse',textColor:'#FFFFFF'},
+    Processed:{bg:'#E65100',shape:'round-rectangle',textColor:'#FFFFFF'},
+    Raw:{bg:'#42A5F5',shape:'diamond',textColor:'#FFFFFF'},
+    Analyzed:{bg:'#1565C0',shape:'hexagon',textColor:'#FFFFFF'}
+};
+var cy=null;
+function truncate(s,m){if(!s)return '';return s.length>m?s.substring(0,m-1)+'…':s;}
+function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function has(a){return Array.isArray(a)&&a.length>0;}
+var NODE_BY_ID={};
+GRAPH_DATA.nodes.forEach(function(n){NODE_BY_ID[n.id]=n;});
+function initGraph(){
+    var container=document.getElementById('cy');
+    var elements=[];
+    GRAPH_DATA.nodes.forEach(function(n){
+        var cs=CLADE_STYLES[n.clade]||CLADE_STYLES.Source;
+        var borderStyle='solid',borderColor=cs.bg,borderWidth=1;
+        if(n.match_type==='proposed_new'){borderStyle='dashed';borderColor='#FFB300';borderWidth=3;}
+        else if(n.match_type==='novel'){borderStyle='dashed';borderColor='#FF6F00';borderWidth=3;}
+        var head=(n.display_code||n.id)+(n.count?' ×'+n.count:'');
+        var sub=n.process_label||n.label;
+        elements.push({group:'nodes',data:{
+            id:n.id,label:head+'\n'+truncate(sub,22),
+            bgColor:cs.bg,shape:cs.shape,textColor:cs.textColor,
+            borderStyle:borderStyle,borderColor:borderColor,borderWidth:borderWidth
+        }});
+    });
+    GRAPH_DATA.edges.forEach(function(e){
+        var assayLabel='';
+        if(has(e.assays)){assayLabel=(e.from===e.to)?e.assays[0]:truncate(e.assays[0],25);if(e.assays.length>1)assayLabel+=' +'+(e.assays.length-1);}
+        var lineStyle='solid',lineColor='#999999';
+        if(e.match_type==='proposed_new'||e.match_type==='novel'){lineStyle='dashed';lineColor='#FF6F00';}
+        elements.push({group:'edges',data:{
+            id:'e_'+e.from+'__'+e.to,source:e.from,target:e.to,label:assayLabel,
+            lineStyle:lineStyle,lineColor:lineColor
+        }});
+    });
+    cy=cytoscape({
+        container:container,elements:elements,
+        style:[
+            {selector:'node',style:{
+                'background-color':'data(bgColor)','shape':'data(shape)','label':'data(label)',
+                'text-valign':'center','text-halign':'center','color':'data(textColor)',
+                'font-size':'10px','font-weight':'bold','text-wrap':'wrap','text-max-width':'90px',
+                'width':'96px','height':'62px','border-style':'data(borderStyle)','border-color':'data(borderColor)',
+                'border-width':'data(borderWidth)','text-outline-color':'data(bgColor)','text-outline-width':'1px','padding':'6px'}},
+            {selector:'edge',style:{
+                'width':1.5,'line-color':'data(lineColor)','target-arrow-color':'data(lineColor)',
+                'target-arrow-shape':'triangle','arrow-scale':0.9,'curve-style':'bezier','line-style':'data(lineStyle)',
+                'label':'data(label)','font-size':'11px','color':'#333333','text-rotation':'autorotate',
+                'text-background-color':'#FFFFFF','text-background-opacity':0.9,'text-background-padding':'3px',
+                'text-outline-color':'#FFFFFF','text-outline-width':'2px','text-margin-y':'-10px'}},
+            {selector:'edge:loop',style:{'curve-style':'bezier','loop-direction':'-90deg','loop-sweep':'-45deg','control-point-step-size':'150px','width':2,'text-rotation':'none','text-margin-x':'-24px','text-margin-y':'0px','font-size':'11px','font-weight':'bold','color':'#1a1a1a','text-background-color':'#FFFFFF','text-background-opacity':1,'text-background-padding':'5px','text-background-shape':'roundrectangle','text-border-color':'#8a6d00','text-border-width':1,'text-border-opacity':1,'text-outline-width':0}},
+            {selector:'node:selected',style:{'border-color':'#A31F34','border-width':4,'overlay-color':'#A31F34','overlay-opacity':0.15}},
+            {selector:'edge:selected',style:{'line-color':'#A31F34','target-arrow-color':'#A31F34','width':3}}
+        ],
+        layout:{name:'dagre',rankDir:'TB',rankSep:85,nodeSep:45,edgeSep:18,padding:30,animate:false},
+        minZoom:0.25,maxZoom:3,wheelSensitivity:0.3
+    });
+    cy.on('tap','node',function(evt){showNode(evt.target.id());});
+    cy.on('tap','edge',function(evt){var d=evt.target.data();showEdge(d.source,d.target);});
+    cy.on('tap',function(evt){if(evt.target===cy)closeDetail();});
+}
+function badge(cls,txt){return '<span class="dp-badge '+cls+'">'+esc(txt)+'</span>';}
+function quotesHtml(qs){return qs.map(function(q){return '<div class="dp-quote">&ldquo;'+esc(q)+'&rdquo;</div>';}).join('');}
+function flagHtml(rat){
+    var m=(rat||'').match(/(NOTE FOR CURATOR|FLAG FOR CURATOR)[\s\S]*/i);
+    return m?'<div class="dp-flag">&#9873; '+esc(m[0])+'</div>':'';
+}
+function row(k,v){return '<div class="dp-row"><span class="dp-key">'+k+'</span><span class="dp-val">'+esc(v)+'</span></div>';}
+function evidenceHtml(o){
+    var h='';
+    if(has(o.sources))h+=row('Sources',o.sources.join('; '));
+    if(has(o.quotes))h+='<div class="dp-section-title">Evidence quotes</div>'+quotesHtml(o.quotes);
+    var rat=Array.isArray(o.rationale)?o.rationale.join(' '):(o.rationale||'');
+    if(rat)h+='<div class="dp-section-title">Rationale</div><div class="dp-rationale">'+esc(rat)+'</div>';
+    h+=flagHtml(rat);
+    if(!h)h='<div class="dp-section-title">Evidence</div><div class="dp-empty">No evidence recorded yet for this node.</div>';
+    return h;
+}
+function showNode(id){
+    var n=NODE_BY_ID[id];if(!n)return;
+    var h='<div class="dp-code">'+esc(n.display_code||n.id)+(n.count?' &times;'+n.count:'')+'</div>';
+    h+='<div class="dp-label">'+esc(n.label||'')+'</div>';
+    if(n.clade)h+=row('Clade',n.clade);
+    if(n.count)h+=row('Rows',String(n.count));
+    if(n.match_type)h+='<div class="dp-row"><span class="dp-key">Match</span>'+badge(n.match_type,n.match_type.replace(/_/g,' '))+'</div>';
+    if(n.evidence_strength)h+='<div class="dp-row"><span class="dp-key">Evidence</span>'+badge(n.evidence_strength,n.evidence_strength)+'</div>';
+    h+=evidenceHtml(n);
+    openDetail(h);
+}
+function showEdge(from,to){
+    var e=GRAPH_DATA.edges.find(function(x){return x.from===from&&x.to===to;});if(!e)return;
+    var h='<div class="dp-code">'+esc(from)+' &rarr; '+esc(to)+'</div>';
+    h+='<div class="dp-label">'+esc(has(e.assays)?e.assays.join(', '):'')+'</div>';
+    if(e.assay_id)h+=row('Assay ID',String(e.assay_id));
+    if(e.match_type)h+='<div class="dp-row"><span class="dp-key">Match</span>'+badge(e.match_type,e.match_type.replace(/_/g,' '))+'</div>';
+    if(e.evidence_strength)h+='<div class="dp-row"><span class="dp-key">Evidence</span>'+badge(e.evidence_strength,e.evidence_strength)+'</div>';
+    h+=evidenceHtml(e);
+    openDetail(h);
+}
+function openDetail(html){document.getElementById('dp-body').innerHTML=html;document.getElementById('detail').classList.add('visible');}
+function closeDetail(){document.getElementById('detail').classList.remove('visible');if(cy)cy.$(':selected').unselect();}
+function zoomGraph(f){if(cy){var z=cy.zoom();cy.zoom({level:z*f,renderedPosition:{x:cy.width()/2,y:cy.height()/2}});}}
+function resetGraph(){if(cy)cy.fit(undefined,30);}
+function renderStats(){
+  var g=GRAPH_DATA,ns=g.nodes,es=g.edges,cl={};
+  ns.forEach(function(n){cl[n.clade]=(cl[n.clade]||0)+1;});
+  function c(x){return cl[x]||0;}
+  var existing=ns.filter(function(n){return n.match_type==='existing_nextseek';}).length;
+  var created=ns.filter(function(n){return n.type_status==='created';}).length;
+  var instances=ns.reduce(function(a,n){return a+(n.count||0);},0);
+  var it=['<div class="stat-item"><span class="stat-value">'+ns.length+'</span> Nodes</div>',
+          '<div class="stat-item"><span class="stat-value">'+es.length+'</span> Edges</div>'];
+  if(instances)it.push('<div class="stat-item"><span class="stat-value">'+instances+'</span> Rows</div>');
+  if(existing)it.push('<div class="stat-item"><span class="stat-badge confirmed">'+existing+' Existing</span></div>');
+  if(created)it.push('<div class="stat-item"><span class="stat-badge proposed">'+created+' Created this session</span></div>');
+  ['Source','Processed','Raw','Analyzed'].forEach(function(k){
+      if(c(k))it.push('<div class="stat-item">'+k+': <span class="stat-value">'+c(k)+'</span></div>');
+  });
+  it.push('<div class="hint">Click any box or arrow for its evidence &amp; rationale</div>');
+  var bar=document.querySelector('.stats-bar');if(bar)bar.innerHTML=it.join('');
+}
+window.addEventListener('DOMContentLoaded',function(){renderStats();initGraph();});
+</script>
+</body>
+</html>

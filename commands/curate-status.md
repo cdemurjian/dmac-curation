@@ -9,7 +9,8 @@ The user wants to know where the project is in the 13-phase pipeline.
 1. Read `.dmac-curation.json` (lockfile). If missing, advise `/curate-init`.
 2. Check for presence of artifact files (per phase):
    - Phase 1: `FILE_INDEX.md`
-   - Phase 2: `SAMPLE_TREE.md`
+   - Phase 2: `SAMPLE_TREE.md`, plus `sample_tree.json` and `SAMPLE_TREE.html`. Report the HTML as
+     stale if it is older than the JSON — it is a build artifact and must be regenerated.
    - Phase 3: `QUESTIONS_FOR_PI.md` (with open vs resolved count)
    - Phase 5: `assay_sheets/4sheet_originals/*.xlsx` (count)
    - Phase 6: `assay_sheets/Arm*.xlsx` (excluding 4sheet_originals/)
@@ -24,7 +25,7 @@ The user wants to know where the project is in the 13-phase pipeline.
    Lockfile: plugin SHA abc123, schema vintage 2026-05-08
 
    Phase 1 Inventory:     ✓  FILE_INDEX.md (4.2 KB)
-   Phase 2 Sample tree:   ✓  SAMPLE_TREE.md (8 arms)
+   Phase 2 Sample tree:   ✓  SAMPLE_TREE.md (8 arms) + SAMPLE_TREE.html (18 types, 22 edges)
    Phase 3 Questions:     ✓  12 open, 8 resolved
    Phase 5 Build:         ✓  6/8 arms built (20 4sheet files)
    Phase 6 Consolidate:   ✗
