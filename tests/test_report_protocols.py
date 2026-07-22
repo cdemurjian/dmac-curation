@@ -1,8 +1,10 @@
 """Protocol resolution and additive NExtSEEK enrichment."""
 import io
 import sys
+import types
 import zipfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -86,6 +88,22 @@ def test_fairdata_urls_are_redirected_to_the_nextseek_base():
 def test_fairdomhub_urls_stay_off_host():
     url = "https://fairdomhub.org/sops/9"
     assert pr.resolve_host(url, nextseek_base_url=BASE) == url
+
+
+def test_fairdomhub_allowlist_matches_the_host_not_a_netloc_suffix():
+    """The trap: a netloc-suffix check lets `evilfairdomhub.org` go off-host
+    with the FDH_API bearer token. Match the parsed HOST instead."""
+    # A spoofed lookalike is NOT fairdomhub.org -> redirected on-host.
+    out = pr.resolve_host(
+        "https://evilfairdomhub.org/nextseek_api/sops/9/",
+        nextseek_base_url=BASE)
+    assert urlparse(out).hostname == "nextseek.mit.edu"
+    assert urlparse(out).hostname != "evilfairdomhub.org"
+    # The genuine host and its subdomains stay off-host, unchanged.
+    genuine = "https://fairdomhub.org/sops/9"
+    sub = "https://sub.fairdomhub.org/sops/9"
+    assert pr.resolve_host(genuine, nextseek_base_url=BASE) == genuine
+    assert pr.resolve_host(sub, nextseek_base_url=BASE) == sub
 
 
 def test_a_relative_ref_is_joined_onto_the_nextseek_base():
@@ -189,6 +207,29 @@ def test_resolve_protocols_survives_a_fetch_error():
         _input({"Protocol": "P.A-1"}), fetch_sop=boom, nextseek_base_url=BASE)
     assert resolved == {}
     assert any("P.A-1" in n for n in notes)
+
+
+def test_resolve_protocols_survives_a_malformed_pdf_with_PyPDF2_present(monkeypatch):
+    """Never gates output: a bad PDF blob degrades to a note even when PyPDF2
+    IS installed and its reader raises a non-PdfSupportError."""
+    def _raise(*a, **k):
+        raise ValueError("bad pdf")
+
+    stub = types.SimpleNamespace(PdfReader=_raise)
+    monkeypatch.setitem(sys.modules, "PyPDF2", stub)
+
+    def fetch_sop(sop_id):
+        return {"id": sop_id, "title": "t",
+                "content_blobs": [{"url": f"{BASE}/blob/1",
+                                   "content_type": "application/pdf"}]}
+
+    resolved, notes = pr.resolve_protocols(
+        _input({"Protocol": "P.A-1"}),
+        fetch_sop=fetch_sop,
+        fetch_blob=lambda u: b"%PDF-1.4 malformed",
+        nextseek_base_url=BASE)
+    assert "P.A-1" in resolved
+    assert any("P.A-1" in n and "PDF extraction failed" in n for n in notes)
 
 
 # ---- enrichment -----------------------------------------------------------

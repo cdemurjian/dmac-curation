@@ -82,7 +82,8 @@ def resolve_host(url: str, *, nextseek_base_url: str) -> str:
     parsed = urlparse(url)
     if not parsed.scheme:
         return nextseek_base_url.rstrip("/") + "/" + url.lstrip("/")
-    if parsed.netloc.endswith("fairdomhub.org"):
+    host = (parsed.hostname or "").lower()
+    if host == "fairdomhub.org" or host.endswith(".fairdomhub.org"):
         return url
     base = urlparse(nextseek_base_url)
     return urlunparse((base.scheme, base.netloc, parsed.path,
@@ -181,6 +182,10 @@ def resolve_protocols(normalized, *, fetch_sop=None, fetch_blob=None,
                     text_parts.append(extract_pdf_text(data))
                 except PdfSupportError as exc:
                     notes.append(f"protocol {ref}: {exc}")
+                except Exception as exc:  # noqa: BLE001 -- malformed PDF, PyPDF2 present; degrade, don't crash
+                    notes.append(
+                        f"protocol {ref}: PDF extraction failed "
+                        f"({type(exc).__name__})")
             else:
                 notes.append(f"protocol {ref}: unhandled content type {ctype!r}")
 
