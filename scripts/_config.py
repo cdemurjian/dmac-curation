@@ -156,17 +156,13 @@ class ProjectConfig:
 
 def _read_lockfile_pipeline(root: Path) -> dict:
     """Pipeline-mode settings from a v0 or v1 lockfile. Never raises."""
-    path = root / LOCKFILE_NAME
-    if not path.is_file():
-        return {}
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _lockfile import LockfileError, mode, read
     try:
-        raw = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
+        return mode(read(root), "pipeline")
+    except LockfileError:
         return {}
-    if raw.get("schema_version") == 1:
-        return dict(raw.get("modes", {}).get("pipeline", {}))
-    # v0: flat keys ARE the pipeline mode's settings.
-    return {k: v for k, v in raw.items() if not k.startswith("plugin_")}
 
 
 def _embedded_date(name: str) -> tuple[int, int, int] | None:
