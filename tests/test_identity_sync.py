@@ -4,6 +4,7 @@ Toolkit spec section 1: the description is what skill activation matches on,
 so a pipeline-only description makes schema and report modes invisible.
 """
 import json
+import pytest
 import sys
 from pathlib import Path
 
@@ -61,6 +62,28 @@ def test_marketplace_description_is_canonical():
 
 def test_skill_description_is_canonical():
     assert _skill_frontmatter()["description"] == CANONICAL_DESCRIPTION
+
+
+def test_description_is_yaml_safe_frontmatter():
+    """The SKILL.md description lives in unquoted YAML frontmatter, which the
+    skill loader parses. A mid-string ': ' (colon-space) is read by YAML as a
+    mapping and makes the whole frontmatter fail to load -- the skill then does
+    not activate at all. The hand-rolled parser in _skill_frontmatter() splits
+    on the first colon and so CANNOT catch this; an earlier canonical string
+    ('Modes: pipeline', '11 phases: inventory') passed every other test here
+    while being YAML-invalid. This guards that exact regression.
+    """
+    assert ": " not in CANONICAL_DESCRIPTION, (
+        "canonical description contains a colon-space; unquoted YAML frontmatter "
+        "would read it as a mapping and fail to load"
+    )
+    yaml = pytest.importorskip("yaml")
+    fm = (REPO / "skills" / "curation" / "SKILL.md").read_text().split("---")[1]
+    loaded = yaml.safe_load(fm)
+    assert loaded["description"] == CANONICAL_DESCRIPTION, (
+        "strict yaml.safe_load did not recover the canonical description from "
+        "SKILL.md frontmatter"
+    )
 
 
 def test_versions_agree_across_plugin_marketplace_and_lockfile():
