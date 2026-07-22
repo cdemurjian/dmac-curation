@@ -33,6 +33,54 @@
       "local_divergence": "none",
       "sha256": "110da7b411e4cb73c5adb5b7324c871de6b40a26c3cfa5084a17437aab672619"
     },
+    "context/report_templates/GEO-updated.json": {
+      "source_repo": "chat_nextseek",
+      "source_path": "src/chat_nextseek/reports/templates/GEO-updated.json",
+      "commit_sha": "367d72732da3ffcc099a367b0ff6f87eaea0bed7",
+      "vendored_date": "2026-07-22",
+      "local_divergence": "none; byte-identical to dmac-assistant's tools/hibayes/resources/GEO-updated.json (sha256 4ce6bc4c2193951ab3e594a48feea663cba6d5d44bfa3b10932459e26048578f), so report-spec open question 1 (which GEO-updated.json is authoritative) is moot -- the choice is arbitrary. Supersedes chat_nextseek geo.json (adds the SRA-derived controlled vocabulary), which was NOT vendored.",
+      "sha256": "4ce6bc4c2193951ab3e594a48feea663cba6d5d44bfa3b10932459e26048578f"
+    },
+    "context/report_templates/GEO_template.xlsx": {
+      "source_repo": "chat_nextseek",
+      "source_path": "src/chat_nextseek/reports/templates/GEO_template.xlsx",
+      "commit_sha": "367d72732da3ffcc099a367b0ff6f87eaea0bed7",
+      "vendored_date": "2026-07-22",
+      "local_divergence": "none",
+      "sha256": "7442023ed0455c62633cf43bd1831740806c89121741c5af10a08ec5369d59d9"
+    },
+    "context/report_templates/SRA.json": {
+      "source_repo": "chat_nextseek",
+      "source_path": "src/chat_nextseek/reports/templates/SRA.json",
+      "commit_sha": "367d72732da3ffcc099a367b0ff6f87eaea0bed7",
+      "vendored_date": "2026-07-22",
+      "local_divergence": "none; two row-bearing sections -- `libraries` feeds SRA_metadata.xlsx, `biosamples` feeds SRA_biosample.xlsx.",
+      "sha256": "b8fc0ed674a78357f64a0904fa211c43648dc479188725c2835f82480d3d0b2d"
+    },
+    "context/report_templates/SRA_biosample.xlsx": {
+      "source_repo": "chat_nextseek",
+      "source_path": "src/chat_nextseek/reports/templates/SRA_biosample.xlsx",
+      "commit_sha": "367d72732da3ffcc099a367b0ff6f87eaea0bed7",
+      "vendored_date": "2026-07-22",
+      "local_divergence": "none; renders the SRA.json `biosamples` section.",
+      "sha256": "75508fe2a43ce15640e39aabb6a5478d420624673c52e159d8bef6cdec79aec0"
+    },
+    "context/report_templates/SRA_metadata.xlsx": {
+      "source_repo": "chat_nextseek",
+      "source_path": "src/chat_nextseek/reports/templates/SRA_metadata.xlsx",
+      "commit_sha": "367d72732da3ffcc099a367b0ff6f87eaea0bed7",
+      "vendored_date": "2026-07-22",
+      "local_divergence": "none; renders the SRA.json `libraries` section.",
+      "sha256": "fad933280fefe0e5e93130b86ed85b81e27694c0be6e5a6adfa5335edacb8883"
+    },
+    "context/report_templates/pride.json": {
+      "source_repo": "chat_nextseek",
+      "source_path": "src/chat_nextseek/reports/templates/pride.json",
+      "commit_sha": "367d72732da3ffcc099a367b0ff6f87eaea0bed7",
+      "vendored_date": "2026-07-22",
+      "local_divergence": "none; NOT a spreadsheet -- declares a tab-delimited ProteomeXchange Submission Summary File (submission.px) with MTD/FMH/FME/SMH/SME/COM line prefixes, not an xlsx. No pride.xlsx is vendored.",
+      "sha256": "5508e6edfcf9184c299a03861b8860901ad44bfa56def819ab12236ca52b4844"
+    },
     "context/sampletypes_db.json": {
       "source_repo": "chat_nextseek",
       "source_path": "src/chat_nextseek/context/sampletypes_db.json",
