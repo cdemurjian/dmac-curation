@@ -52,24 +52,26 @@ Neither number is reused.
 
 ## Phase 0 — Init
 
-**Command:** `/curate-init [--lab CODE] [--pi NAME]`
+**Command:** `/curate-init [--lab CODE] [--pi NAME] [--mode NAME]`
 
-**Inputs:** flags. Optionally an empty cwd.
+**Inputs:** flags. Any cwd - empty, populated with PI inputs, or an existing
+curation project.
 
-**Action:**
-1. Verify cwd is empty (or contains only PI inputs — no `scripts/`, no `context/`, no `CLAUDE.md`). Refuse if not, unless `--force`.
-2. Render `templates/CLAUDE.md.j2` → `./CLAUDE.md` with `{lab, pi, init_date}`.
-3. Render `templates/env.example.j2` → `./.env.example`.
-4. Render `templates/gitignore.j2` → `./.gitignore`.
-5. Render `templates/pyproject.toml.j2` → `./pyproject.toml`.
-6. Create empty dirs: `files/ manuscript/ previous_metadata/ assay_sheets/ scripts/`.
-7. Write `./.dmac-curation.json` lockfile with plugin SHA + schema vintage + lab + pi.
-8. Report status.
+**Action:** the command is **additive**. It creates what is missing and never
+overwrites what exists.
+
+1. Create any missing directories: `files/ manuscript/ previous_metadata/ assay_sheets/ scripts/`.
+2. Render any missing templates (`CLAUDE.md`, `.env.example`, `.gitignore`, `pyproject.toml`). Existing files are reported and left alone.
+3. Merge the requested mode into `./.dmac-curation.json` via `scripts/_lockfile.py`, which also migrates a v0 lockfile to v1 in place.
+4. Report what was created, what was skipped, and which modes the lockfile records.
 
 **Edge cases:**
-- cwd not empty: prompt for `--force` or abort
-- `--lab` or `--pi` missing: use `AskUserQuestion`, don't guess
-- plugin git dir unreadable (no SHA): record `"plugin_sha": null` and warn
+- Existing project: adding a mode is the normal path, not an error. Prior mode sections are preserved.
+- v0 lockfile (no `schema_version`): flat keys migrate into `modes.pipeline`. No data is lost.
+- `--lab` or `--pi` missing for pipeline mode: use `AskUserQuestion`, don't guess. A wrong lab code contaminates every minted UID.
+- `schema` / `report` mode: no scaffold and no lab/pi needed. These modes must work from any cwd.
+- Plugin git dir unreadable: record `"plugin_sha": null` and warn.
+- A `.env` in cwd: report it, continue, never read or print it.
 
 ---
 
