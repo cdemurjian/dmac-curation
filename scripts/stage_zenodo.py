@@ -21,7 +21,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import glob
 import re
 import shutil
 import sys
@@ -30,33 +29,15 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-ROOT = Path(__file__).resolve().parent.parent
-FILES = ROOT / "files"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _config import add_config_args, config_from_args  # noqa: E402
+from _config import ProjectRootError  # noqa: E402
 
 IMAGE_TYPES = {"D.IMG", "A.IMG", "SLD", "A.SPTX"}
 
 # Default figure assignment for shared sample types whose files don't live in a Figure N/ dir.
 # TODO(v0.2): make this configurable per-project (e.g. via a JSON sidecar).
 SHARED_FIGURE_DEFAULT: dict[str, int] = {}
-
-
-def find_metadata_xlsx(explicit: str | None) -> Path:
-    """Resolve the metadata XLSX path: explicit arg > glob > error."""
-    if explicit:
-        p = Path(explicit)
-        if not p.exists():
-            print(f"ERROR: --metadata-xlsx path does not exist: {p}", file=sys.stderr)
-            sys.exit(1)
-        return p
-    # Try a sensible glob under previous_metadata/
-    candidates = sorted(glob.glob(str(ROOT / "previous_metadata" / "*All*.xlsx")))
-    if candidates:
-        return Path(candidates[0])
-    print(
-        "ERROR: no metadata xlsx found. Pass --metadata-xlsx <path>.",
-        file=sys.stderr,
-    )
-    sys.exit(1)
 
 
 def load_curation_index(meta: Path) -> dict[str, tuple[str, str]]:
@@ -84,9 +65,9 @@ def load_curation_index(meta: Path) -> dict[str, tuple[str, str]]:
         wb.close()
 
 
-def figure_for_path(p: Path) -> int | None:
+def figure_for_path(p: Path, files_dir: Path) -> int | None:
     """Extract figure number from a path under files/Figure N/."""
-    parts = p.relative_to(FILES).parts
+    parts = p.relative_to(files_dir).parts
     if not parts:
         return None
     if parts[0].startswith("Figure ") and len(parts[0].split()) > 1:
@@ -104,6 +85,7 @@ def already_staged(p: Path) -> bool:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_config_args(ap)
     ap.add_argument(
         "--write", action="store_true",
         help="Move files into staging folders; default is dry-run.",
@@ -111,11 +93,22 @@ def main():
     ap.add_argument(
         "--metadata-xlsx",
         metavar="XLSX",
-        help="Path to All-Metadata workbook (default: previous_metadata/*All*.xlsx glob)",
+        help="Path to All-Metadata workbook (default: newest previous_metadata/*All*.xlsx)",
     )
     args = ap.parse_args()
 
-    meta = find_metadata_xlsx(args.metadata_xlsx)
+    try:
+        cfg = config_from_args(args)
+    except ProjectRootError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    FILES = cfg.files
+    meta = Path(args.metadata_xlsx).resolve() if args.metadata_xlsx else cfg.master_workbook
+    if meta is None or not meta.exists():
+        print("ERROR: no metadata xlsx found. Pass --metadata-xlsx <path>.", file=sys.stderr)
+        sys.exit(1)
+    print(f"Project root: {cfg.root}")
     print(f"Loading curation index from {meta.name}...")
     idx = load_curation_index(meta)
     print(f"  {len(idx)} curated filenames\n")
@@ -150,7 +143,7 @@ def main():
                 skipped_image.append((p, stype))
                 continue
             # Determine target figure
-            fig = figure_for_path(p)
+            fig = figure_for_path(p, FILES)
             if fig is None:
                 # Shared / outside Figure N dir — use default mapping
                 fig = SHARED_FIGURE_DEFAULT.get(stype)

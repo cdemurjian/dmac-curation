@@ -18,7 +18,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import glob
 import sys
 import zipfile
 from collections import defaultdict
@@ -26,28 +25,14 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-ROOT = Path(__file__).resolve().parent.parent
-ASSAY = ROOT / "assay_sheets"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _config import add_config_args, config_from_args  # noqa: E402
+from _config import ProjectRootError  # noqa: E402
 
 # TODO(v0.2): support loading SHEET_FOR_TYPE from a project-level config file.
 # The default below is empty; callers must supply assay sheet paths via --sheet-map
 # or rely on the auto-discovery glob (any *-upload*.xlsx in assay_sheets/).
 SHEET_FOR_TYPE: dict[str, Path] = {}
-
-
-def find_metadata_xlsx(explicit: str | None) -> Path:
-    """Resolve the metadata XLSX path: explicit arg > glob > error."""
-    if explicit:
-        p = Path(explicit)
-        if not p.exists():
-            print(f"ERROR: --metadata-xlsx path does not exist: {p}", file=sys.stderr)
-            sys.exit(1)
-        return p
-    candidates = sorted(glob.glob(str(ROOT / "previous_metadata" / "*All*.xlsx")))
-    if candidates:
-        return Path(candidates[0])
-    print("ERROR: no metadata xlsx found. Pass --metadata-xlsx <path>.", file=sys.stderr)
-    sys.exit(1)
 
 
 def load_curation_index(meta: Path) -> dict[str, tuple[str, str]]:
@@ -90,6 +75,7 @@ def discover_sheet_map(assay_dir: Path) -> dict[str, Path]:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_config_args(ap)
     ap.add_argument(
         "--write", action="store_true",
         help="Patch the upload sheets; default is dry-run.",
@@ -103,31 +89,41 @@ def main():
     ap.add_argument(
         "--zip-dir",
         type=Path,
-        default=ROOT / "Zenodo_upload",
+        default=None,
         help="Directory containing .zip files to process (default: <project>/Zenodo_upload/)",
     )
     ap.add_argument(
         "--metadata-xlsx",
         metavar="XLSX",
-        help="Path to All-Metadata workbook (default: previous_metadata/*All*.xlsx glob)",
+        help="Path to All-Metadata workbook (default: newest previous_metadata/*All*.xlsx)",
     )
     args = ap.parse_args()
 
+    try:
+        cfg = config_from_args(args)
+    except ProjectRootError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(2)
+
     url_template = f"https://zenodo.org/records/{args.record_id}/files/{{zipname}}?download=1&preview=1"
 
-    meta = find_metadata_xlsx(args.metadata_xlsx)
+    zip_dir = args.zip_dir if args.zip_dir else (cfg.root / "Zenodo_upload")
+    meta = Path(args.metadata_xlsx).resolve() if args.metadata_xlsx else cfg.master_workbook
+    if meta is None or not meta.exists():
+        print("ERROR: no metadata xlsx found. Pass --metadata-xlsx <path>.", file=sys.stderr)
+        sys.exit(1)
     idx = load_curation_index(meta)
     print(f"Loaded {len(idx)} curated filenames from {meta.name}\n")
 
-    sheet_map = discover_sheet_map(ASSAY)
+    sheet_map = discover_sheet_map(cfg.assay_sheets)
     if not sheet_map:
-        print(f"WARNING: no upload sheets found in {ASSAY}", file=sys.stderr)
+        print(f"WARNING: no upload sheets found in {cfg.assay_sheets}", file=sys.stderr)
 
     # For each zip: collect (UID, URL) pairs
     updates_by_sheet: dict[Path, list[tuple[str, str, str, str]]] = defaultdict(list)
     # (uid, url, source_filename, zip_name)
 
-    for zip_path in sorted(args.zip_dir.glob("*.zip")):
+    for zip_path in sorted(zip_dir.glob("*.zip")):
         url = url_template.format(zipname=zip_path.name)
         print(f"--- {zip_path.name} ---")
         print(f"  URL: {url}")

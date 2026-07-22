@@ -26,15 +26,15 @@ Output is a single readable report on stdout.
 """
 from __future__ import annotations
 import argparse
-import glob
 import re
 import sys
 from pathlib import Path
 from collections import Counter
 from openpyxl import load_workbook
 
-ROOT = Path(__file__).resolve().parent.parent
-SHEETS = ROOT / "assay_sheets"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _config import add_config_args, config_from_args  # noqa: E402
+from _config import ProjectRootError  # noqa: E402
 
 COMPARE_COLS = [
     "File_PrimaryData", "Link_PrimaryData", "Parent",
@@ -44,21 +44,6 @@ COMPARE_COLS = [
 # TODO(v0.2): support a project-level ACTIVE_UPLOADS JSON override to handle
 # multi-sheet merges (e.g. D.IMG has 4 upload sheets). Auto-discovery uses
 # a simple stype -> single sheet mapping.
-
-
-def find_metadata_xlsx(explicit: str | None) -> Path:
-    """Resolve the metadata XLSX path: explicit arg > glob > error."""
-    if explicit:
-        p = Path(explicit)
-        if not p.exists():
-            print(f"ERROR: --metadata-xlsx path does not exist: {p}", file=sys.stderr)
-            sys.exit(1)
-        return p
-    candidates = sorted(glob.glob(str(ROOT / "previous_metadata" / "*All*.xlsx")))
-    if candidates:
-        return Path(candidates[0])
-    print("ERROR: no metadata xlsx found. Pass --metadata-xlsx <path>.", file=sys.stderr)
-    sys.exit(1)
 
 
 def discover_active_uploads(sheets_dir: Path) -> dict[str, list[str]]:
@@ -229,22 +214,32 @@ def collect_protocols(meta: Path) -> dict[str, int]:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_config_args(ap)
     ap.add_argument(
         "--metadata-xlsx",
         metavar="XLSX",
-        help="Path to All-Metadata workbook (default: previous_metadata/*All*.xlsx glob)",
+        help="Path to All-Metadata workbook (default: newest previous_metadata/*All*.xlsx)",
     )
     ap.add_argument(
-        "--sheets-dir",
+        "--assay-sheets",
         type=Path,
-        default=SHEETS,
+        default=None,
         metavar="DIR",
-        help="Directory containing upload sheets (default: <project>/assay_sheets/)",
+        help="Directory of upload sheets (default: <project-root>/assay_sheets)",
     )
     args = ap.parse_args()
 
-    meta = find_metadata_xlsx(args.metadata_xlsx)
-    sheets_dir = args.sheets_dir
+    try:
+        cfg = config_from_args(args)
+    except ProjectRootError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    meta = Path(args.metadata_xlsx).resolve() if args.metadata_xlsx else cfg.master_workbook
+    if meta is None or not meta.exists():
+        print("ERROR: no metadata xlsx found. Pass --metadata-xlsx <path>.", file=sys.stderr)
+        sys.exit(1)
+    sheets_dir = Path(args.assay_sheets).resolve() if args.assay_sheets else cfg.assay_sheets
     active_uploads = discover_active_uploads(sheets_dir)
 
     print(f"REVIEW: metadata vs assay_sheets/")

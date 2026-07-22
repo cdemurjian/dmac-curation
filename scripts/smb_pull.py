@@ -43,13 +43,20 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(ROOT / ".env")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _config import add_config_args, config_from_args  # noqa: E402
+from _config import ProjectRootError  # noqa: E402
+
+_PLUGIN = Path(__file__).resolve().parents[1]
+# cwd .env first, plugin .env second — matches fdh_api.py:161.
+for _candidate in (Path.cwd() / ".env", _PLUGIN / ".env"):
+    if _candidate.exists():
+        load_dotenv(_candidate, override=False)
 
 import smbclient  # noqa: E402 — must follow load_dotenv
 
 HOST = os.environ.get("SMB_HOST", "bmc-pub14.mit.edu")
-SHARE = os.environ.get("SMB_SHARE", "engelward")  # TODO(v0.2): replace default with env-only, no hardcoded share name
+SHARE = os.environ.get("SMB_SHARE")  # no default share name; validated in main()
 MIT_USER = os.environ.get("MIT_USER", "")
 MIT_PASS = os.environ.get("MIT_PASS", "")
 
@@ -67,12 +74,6 @@ PLATE_STRATEGY = {
     "210901Eng": {"plates": ["5342L"],          "merge": False, "year_prefix": "D21"},
 }
 
-# TODO(v0.2): OUT_DIR and MANIFEST should be set via --out-dir / --manifest args
-# rather than hard-coded relative to ROOT. The current defaults match the
-# srp/lee bulk_rna layout.
-OUT_DIR = ROOT / "GEO" / "bulk_rna" / "fastq"
-MANIFEST = ROOT / "GEO" / "bulk_rna" / "manifest.tsv"
-
 CHUNK = 1 << 20  # 1 MB read chunks from SMB
 
 
@@ -81,14 +82,20 @@ CHUNK = 1 << 20  # 1 MB read chunks from SMB
 # TODO(v0.2): replace load_manuscript_samples() with a generic CSV/TSV loader
 # so this path works without openpyxl and without a project-specific workbook.
 # ---------------------------------------------------------------------------
-def load_manuscript_samples() -> list[dict]:
-    """Read manuscript bulk RNA samples from the project Excel workbook.
+def load_manuscript_samples(master_workbook: Path | None) -> list[dict]:
+    """Read manuscript bulk RNA samples from the project master workbook.
 
-    NOTE: This function is srp/lee-specific. It expects:
-      ROOT/new_files_from_lee/All Samples Used in Manuscript #1.xlsx
-    with columns: 'Sample Annotation', 'Mouse Acc.# ID#', 'Folder Name'.
+    NOTE: This function is srp/lee-specific. It expects a workbook with columns
+    'Sample Annotation', 'Mouse Acc.# ID#', 'Folder Name' — resolved from the
+    project's previous_metadata/*All*.xlsx (or --master-baseline).
     TODO(v0.2): generalise — accept a --sample-list CSV instead of openpyxl.
     """
+    if master_workbook is None:
+        sys.exit(
+            "ERROR: no master workbook found for sample planning. Add one to\n"
+            "previous_metadata/*All*.xlsx, pass --master-baseline <path>, or use\n"
+            "--from-manifest to skip planning entirely."
+        )
     try:
         from openpyxl import load_workbook  # noqa: PLC0415 — lazy, not in PEP 723 deps
     except ImportError:
@@ -97,10 +104,7 @@ def load_manuscript_samples() -> list[dict]:
             "Either add openpyxl to your environment or use --from-manifest to\n"
             "skip planning entirely."
         )
-    wb = load_workbook(
-        ROOT / "new_files_from_lee" / "All Samples Used in Manuscript #1.xlsx",
-        read_only=True, data_only=True,
-    )
+    wb = load_workbook(master_workbook, read_only=True, data_only=True)
     ws = wb.active
     rows = list(ws.iter_rows(values_only=True))
     hdr = list(rows[0])  # TODO(v0.2): unguarded — raises IndexError on empty workbook; add check
@@ -138,7 +142,7 @@ def detect_files(sample_dir: str) -> dict:
     return fastqs
 
 
-def plan_sample(sample: dict) -> list[dict]:
+def plan_sample(sample: dict, out_dir: Path) -> list[dict]:
     """Build the pull plan for one manuscript sample.
 
     Returns a list of job dicts. Each job is one local .fastq.gz output.
@@ -168,7 +172,7 @@ def plan_sample(sample: dict) -> list[dict]:
     has_paired = any(plate_files[p]["R1"] for p in strat["plates"])
     has_single = any(plate_files[p]["NA"] for p in strat["plates"])
 
-    out_subdir = OUT_DIR / folder
+    out_subdir = out_dir / folder
     jobs: list[dict] = []
     if has_paired and not has_single:
         for stream in ("R1", "R2"):
@@ -212,9 +216,9 @@ def plan_sample(sample: dict) -> list[dict]:
 # Manifest I/O
 # ---------------------------------------------------------------------------
 
-def write_manifest(jobs: list[dict]):
-    MANIFEST.parent.mkdir(parents=True, exist_ok=True)
-    with open(MANIFEST, "w") as fh:
+def write_manifest(jobs: list[dict], manifest: Path):
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    with open(manifest, "w") as fh:
         w = csv.writer(fh, delimiter="\t")
         w.writerow([
             "sample_annotation", "batch", "kind", "stream",
@@ -234,13 +238,13 @@ def write_manifest(jobs: list[dict]):
                     ";".join(str(sz) for _, sz, _ in j["sources"]),
                     "",
                 ])
-    print(f"Manifest written to {MANIFEST}")
+    print(f"Manifest written to {manifest}")
 
 
-def load_jobs_from_manifest() -> list[dict]:
+def load_jobs_from_manifest(manifest: Path) -> list[dict]:
     """Read jobs directly from manifest.tsv (no SMB planning required)."""
     jobs = []
-    with open(MANIFEST) as fh:
+    with open(manifest) as fh:
         r = csv.DictReader(fh, delimiter="\t")
         for row in r:
             if row.get("error"):
@@ -315,10 +319,21 @@ def main():
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    add_config_args(ap)
     ap.add_argument(
         "--write", action="store_true",
         help="Perform the transfer; default is dry-run "
              "(manifest + size estimate only).",
+    )
+    ap.add_argument(
+        "--out-dir", type=Path, default=None,
+        help="Destination for pulled files "
+             "(default: <project-root>/GEO/bulk_rna/fastq)",
+    )
+    ap.add_argument(
+        "--manifest", type=Path, default=None,
+        help="Manifest TSV path "
+             "(default: <project-root>/GEO/bulk_rna/manifest.tsv)",
     )
     ap.add_argument(
         "--batch",
@@ -343,12 +358,26 @@ def main():
     )
     args = ap.parse_args()
 
+    try:
+        cfg = config_from_args(args)
+    except ProjectRootError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    out_dir = args.out_dir if args.out_dir else (cfg.root / "GEO" / "bulk_rna" / "fastq")
+    manifest = args.manifest if args.manifest else (cfg.root / "GEO" / "bulk_rna" / "manifest.tsv")
+
     # Credentials check — fail fast with a clear message rather than an obscure KeyError
     if not MIT_USER or not MIT_PASS:
         sys.exit(
             "Credentials not set. Ensure MIT_USER and MIT_PASS are defined in .env or the environment.\n"
             "VPN is required for the MIT BMC SMB server."
         )
+
+    # Share name is required — no hardcoded lab default.
+    if not SHARE:
+        print("ERROR: set SMB_SHARE in .env (no default share name)", file=sys.stderr)
+        sys.exit(2)
 
     # Verify pigz is available before any SMB work — fail fast on a missing tool
     if args.write and subprocess.call(
@@ -361,9 +390,9 @@ def main():
     if args.from_manifest:
         # --from-manifest: read the plan locally; skip SMB planning entirely.
         # register_session is deferred until we actually start pulling below.
-        if not MANIFEST.exists():
-            sys.exit(f"--from-manifest requires {MANIFEST} to exist. Run without --write first.")
-        jobs_all = load_jobs_from_manifest()
+        if not manifest.exists():
+            sys.exit(f"--from-manifest requires {manifest} to exist. Run without --write first.")
+        jobs_all = load_jobs_from_manifest(manifest)
         print(f"Loaded {len(jobs_all)} jobs from manifest (planning skipped)")
         for j in jobs_all:
             b = j["batch"]
@@ -373,7 +402,7 @@ def main():
         # Planning phase requires SMB connectivity — register session now.
         smbclient.register_session(HOST, username=MIT_USER, password=MIT_PASS)
 
-        samples = load_manuscript_samples()
+        samples = load_manuscript_samples(cfg.master_workbook)
         if args.batch:
             samples = [s for s in samples if s["folder"] == args.batch]
         print(f"Samples (filtered): {len(samples)}")
@@ -383,7 +412,7 @@ def main():
         for i, s in enumerate(samples, 1):
             if i == 1 or i % 10 == 0 or i == len(samples):
                 print(f"  [{i:>3d}/{len(samples)}] {s['folder']} {s['sample_annotation']}", flush=True)
-            plan = plan_sample(s)
+            plan = plan_sample(s, out_dir)
             for j in plan:
                 jobs_all.append(j)
                 b = s["folder"]
@@ -397,7 +426,7 @@ def main():
     # reflects the complete plan.  (Finding 1: filtering mutated jobs_all in place
     # and wrote only the slice — destroying the full manifest.)
     if not args.from_manifest:
-        write_manifest(jobs_all)
+        write_manifest(jobs_all, manifest)
 
     # --rows N-M filter — applies only to the pull phase, not to the manifest
     jobs_to_pull = list(jobs_all)

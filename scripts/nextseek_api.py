@@ -41,12 +41,16 @@ from typing import Dict, Iterator, Optional, Tuple
 import requests
 from requests.auth import HTTPBasicAuth
 
-REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _config import add_config_args, config_from_args  # noqa: E402
+from _config import ProjectRootError  # noqa: E402
+
+# Kept only for the plugin-local .env fallback; never used for project paths.
+_PLUGIN = Path(__file__).resolve().parent.parent
 # nextseek.mit.edu serves `/nextseek_api/` (line 3462 of the spec self-references
 # nextseek-dev.mit.edu as the schema host). fairdata.mit.edu is the SEEK web UI,
 # not the API. Override via --base-url if pointing at dev or a different deployment.
 DEFAULT_BASE_URL = "https://nextseek.mit.edu"
-DEFAULT_CACHE_PATH = REPO / "context" / "assay_ids_cache.json"
 
 
 class NExtSEEKError(RuntimeError):
@@ -258,21 +262,21 @@ class NExtSEEKClient:
 # ─── CLI ─────────────────────────────────────────────────────────────────────
 
 def _load_dotenv():
-    """Load REPO/.env into os.environ (stdlib only — no python-dotenv dep).
+    """setdefault env vars from cwd/.env then <plugin>/.env (idempotent).
 
+    Mirrors scripts/fdh/fdh_api.py:159-169, the reference implementation.
     Skips lines that are blank or start with '#'. Strips surrounding quotes.
     Existing env vars take precedence (we only setdefault).
     """
-    env_path = REPO / ".env"
-    if not env_path.exists():
-        return
-    for raw in env_path.read_text().splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
+    for candidate in (Path.cwd() / ".env", _PLUGIN / ".env"):
+        if not candidate.exists():
             continue
-        key, val = line.split("=", 1)
-        val = val.strip().strip('"').strip("'")
-        os.environ.setdefault(key.strip(), val)
+        for raw in candidate.read_text().splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
 def cmd_fetch_assays(args: argparse.Namespace) -> int:
@@ -303,7 +307,15 @@ def cmd_fetch_assays(args: argparse.Namespace) -> int:
 
     duplicates = id_map.pop("__duplicates__", None)
 
-    out_path = Path(args.output) if args.output else DEFAULT_CACHE_PATH
+    if args.output:
+        out_path = Path(args.output)
+    else:
+        try:
+            cfg = config_from_args(args)
+        except ProjectRootError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        out_path = cfg.context / "assay_ids_cache.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "project_id": args.project_id,
@@ -431,8 +443,10 @@ def main(argv=None) -> int:
                          "If omitted, reads $NEXTSEEK_TOKEN.")
     fa.add_argument("--base-url", default=DEFAULT_BASE_URL,
                     help=f"NExtSEEK API base URL (default: {DEFAULT_BASE_URL}).")
-    fa.add_argument("--output", default=None,
-                    help=f"Output JSON cache (default: {DEFAULT_CACHE_PATH}).")
+    fa.add_argument("--output", type=Path, default=None,
+                    help="Where to write assay_ids_cache.json "
+                         "(default: <project-root>/context/assay_ids_cache.json)")
+    add_config_args(fa)
     fa.set_defaults(func=cmd_fetch_assays)
 
     # ── validate ────────────────────────────────────────────────────────────
@@ -453,6 +467,7 @@ def main(argv=None) -> int:
     va.add_argument("--password", default=None)
     va.add_argument("--token", default=None)
     va.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    add_config_args(va)
     va.set_defaults(func=cmd_validate)
 
     args = p.parse_args(argv)

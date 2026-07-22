@@ -44,6 +44,7 @@ Instructions docs).
 """
 
 import os
+import sys
 import json
 import shutil
 from pathlib import Path
@@ -52,9 +53,9 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 from collections import defaultdict
 
-REPO = str(Path(__file__).resolve().parent.parent)
-SRC  = os.path.join(REPO, "assay_sheets")
-ARCH = os.path.join(SRC, "4sheet_originals")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _config import add_config_args, config_from_args, plugin_context  # noqa: E402
+from _config import ProjectRootError  # noqa: E402
 
 HDR_FILL = PatternFill("solid", fgColor="D9E1F2")
 HDR_FONT = Font(bold=True)
@@ -83,22 +84,22 @@ HDR_FONT = Font(bold=True)
 # across projects. Always re-run the fetch + re-review synonyms when
 # switching projects. See Q S3 in QUESTIONS_FOR_YUFEI.md.
 
-_CACHE_PATH = os.path.join(REPO, "context", "assay_ids_cache.json")
-_SYNONYMS_PATH = os.path.join(REPO, "context", "assay_synonyms.json")
+def _load_assay_id_lookup(context_dir):
+    """Returns (lookup_dict, synonyms_dict, source_description).
 
-
-def _load_assay_id_lookup():
-    """Returns (lookup_dict, synonyms_dict, source_description)."""
+    Reads the PROJECT's context/ (resolved from cwd, never the plugin).
+    """
+    cache_path = Path(context_dir) / "assay_ids_cache.json"
+    synonyms_path = Path(context_dir) / "assay_synonyms.json"
     lookup = {}
     synonyms = {}
     sources = []
 
-    if os.path.exists(_CACHE_PATH):
+    if cache_path.exists():
         try:
-            with open(_CACHE_PATH) as f:
-                cache = json.load(f)
+            cache = json.loads(cache_path.read_text())
             lookup = cache.get("assay_id_by_title") or {}
-            sources.append(f"cache {os.path.basename(_CACHE_PATH)} "
+            sources.append(f"cache {cache_path.name} "
                            f"(project {cache.get('project_id')!r}, "
                            f"{len(lookup)} assays, fetched "
                            f"{cache.get('fetched_at_utc', '?')})")
@@ -107,12 +108,11 @@ def _load_assay_id_lookup():
     else:
         sources.append("no cache (run scripts/nextseek_api.py fetch-assays)")
 
-    if os.path.exists(_SYNONYMS_PATH):
+    if synonyms_path.exists():
         try:
-            with open(_SYNONYMS_PATH) as f:
-                syn_doc = json.load(f)
+            syn_doc = json.loads(synonyms_path.read_text())
             synonyms = syn_doc.get("synonyms_by_cited_name") or {}
-            sources.append(f"synonyms {os.path.basename(_SYNONYMS_PATH)} "
+            sources.append(f"synonyms {synonyms_path.name} "
                            f"({len(synonyms)} mappings)")
         except (OSError, json.JSONDecodeError) as e:
             sources.append(f"synonyms UNREADABLE: {e}")
@@ -122,10 +122,7 @@ def _load_assay_id_lookup():
     return lookup, synonyms, " + ".join(sources)
 
 
-ASSAY_ID_LOOKUP, ASSAY_SYNONYMS, _ASSAY_ID_SOURCE = _load_assay_id_lookup()
-
-
-def resolve_assay_id(cited_name: str):
+def resolve_assay_id(cited_name, lookup, synonyms):
     """Resolve a cited assay title to (resolved_title, assay_id_or_None).
 
     `resolved_title` is what we emit in the `assay_titles` column; either
@@ -133,12 +130,12 @@ def resolve_assay_id(cited_name: str):
     """
     if not cited_name:
         return "", None
-    if cited_name in ASSAY_ID_LOOKUP:
-        return cited_name, ASSAY_ID_LOOKUP[cited_name]
-    if cited_name in ASSAY_SYNONYMS:
-        canonical = ASSAY_SYNONYMS[cited_name]
-        if canonical in ASSAY_ID_LOOKUP:
-            return canonical, ASSAY_ID_LOOKUP[canonical]
+    if cited_name in lookup:
+        return cited_name, lookup[cited_name]
+    if cited_name in synonyms:
+        canonical = synonyms[cited_name]
+        if canonical in lookup:
+            return canonical, lookup[canonical]
     # No mapping; emit cited title with no ID (upload tool can flag or admin can patch)
     return cited_name, None
 
@@ -191,7 +188,7 @@ def read_4sheet(path):
 
 # ─── Build one flat-format xlsx for an arm ─────────────────────────────────
 
-def build_arm_flat(arm_name, source_files):
+def build_arm_flat(arm_name, source_files, out_dir, lookup, synonyms):
     """source_files: list of (sampletype, parent_assay, [records])."""
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -207,7 +204,7 @@ def build_arm_flat(arm_name, source_files):
     total = 0
     for sampletype, parent_assay, records in source_files:
         # Resolve cited assay title → (canonical title, ID) via cache+synonyms
-        resolved_title, assay_id_val = resolve_assay_id(parent_assay)
+        resolved_title, assay_id_val = resolve_assay_id(parent_assay, lookup, synonyms)
         assay_ids_cell = str(assay_id_val) if assay_id_val is not None else ""
 
         for rec in records:
@@ -271,7 +268,7 @@ def build_arm_flat(arm_name, source_files):
         cell.alignment = Alignment(wrap_text=True)
     readme['A1'].font = Font(bold=True, size=14)
 
-    out = os.path.join(SRC, f"{arm_name}.xlsx")
+    out = out_dir / f"{arm_name}.xlsx"
     wb.save(out)
     return out, total
 
@@ -280,6 +277,12 @@ def build_arm_flat(arm_name, source_files):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
+    add_config_args(parser)
+    parser.add_argument(
+        "--assay-sheets", type=Path, default=None,
+        help="Directory holding the 4-sheet inputs and receiving the flat "
+             "outputs (default: <project-root>/assay_sheets)",
+    )
     parser.add_argument(
         "--all-in-one", metavar="NAME", default=None,
         help="Consolidate ALL 4-sheet inputs into a single flat output named "
@@ -289,7 +292,23 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    print(f"Assay-ID source: {_ASSAY_ID_SOURCE}\n")
+    try:
+        cfg = config_from_args(args)
+    except ProjectRootError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(2)
+
+    src = Path(args.assay_sheets).resolve() if args.assay_sheets else cfg.assay_sheets
+    arch = src / "4sheet_originals"
+
+    if not src.is_dir():
+        print(f"ERROR: {src} is not a directory", file=sys.stderr)
+        raise SystemExit(2)
+
+    lookup, synonyms, source_desc = _load_assay_id_lookup(cfg.context)
+    print(f"Project root:    {cfg.root}")
+    print(f"Assay sheets:    {src}")
+    print(f"Assay-ID source: {source_desc}\n")
 
     # Source dir resolution: prefer 4sheet_originals/ if it exists with files
     # (subsequent runs), otherwise read from assay_sheets/ root (first run).
@@ -299,37 +318,39 @@ if __name__ == "__main__":
     def is_4sheet_filename(name):
         return name.endswith(".xlsx") and not name.startswith("~") and "_" in name
 
-    if os.path.isdir(ARCH) and any(is_4sheet_filename(f) for f in os.listdir(ARCH)):
-        source_dir = ARCH
-        print(f"Reading 4-sheet sources from {ARCH}/ (archive)")
+    if os.path.isdir(arch) and any(is_4sheet_filename(f) for f in os.listdir(arch)):
+        source_dir = arch
+        print(f"Reading 4-sheet sources from {arch}/ (archive)")
     else:
-        source_dir = SRC
-        print(f"Reading 4-sheet sources from {SRC}/ (first-run mode)")
+        source_dir = src
+        print(f"Reading 4-sheet sources from {src}/ (first-run mode)")
 
     files = sorted(f for f in os.listdir(source_dir) if is_4sheet_filename(f))
     if not files:
-        print(f"  ERROR: no 4-sheet files found in {source_dir}", file=__import__("sys").stderr)
+        print(f"  ERROR: no 4-sheet files found in {source_dir}", file=sys.stderr)
         raise SystemExit(1)
 
     by_arm = defaultdict(list)  # 'ArmA' → [(path, ...)]
     if args.all_in_one:
         # Single-bucket mode: every input feeds the same output.
         for f in files:
-            by_arm[args.all_in_one].append(os.path.join(source_dir, f))
+            by_arm[args.all_in_one].append(str(source_dir / f))
     else:
         for f in files:
             arm = f.split("_")[0]
-            by_arm[arm].append(os.path.join(source_dir, f))
+            by_arm[arm].append(str(source_dir / f))
 
-    # Clean any prior consolidated outputs so we don't mix old + new
-    for f in os.listdir(SRC):
+    # Clean any prior consolidated outputs so we don't mix old + new.
+    # Guarded: never delete outside the resolved project's assay-sheets dir.
+    assert src != plugin_context("").parent, "refusing to clean inside the plugin"
+    for f in os.listdir(src):
         if f.endswith(".xlsx") and "_" not in f:
-            os.remove(os.path.join(SRC, f))
+            os.remove(src / f)
 
-    # Archive originals (only if reading from SRC root; otherwise they're already archived)
-    os.makedirs(ARCH, exist_ok=True)
-    if source_dir == SRC:
-        print(f"Archiving {len(files)} four-sheet originals to {ARCH}/")
+    # Archive originals (only if reading from src root; otherwise they're already archived)
+    os.makedirs(arch, exist_ok=True)
+    if source_dir == src:
+        print(f"Archiving {len(files)} four-sheet originals to {arch}/")
     print()
 
     arm_outputs = []
@@ -340,14 +361,14 @@ if __name__ == "__main__":
             st, pa, recs = read_4sheet(path)
             sources.append((st, pa, recs))
         # Build consolidated flat file
-        out, n = build_arm_flat(arm, sources)
+        out, n = build_arm_flat(arm, sources, src, lookup, synonyms)
         arm_outputs.append((out, n, len(by_arm[arm])))
 
-    # Move originals to archive AFTER reading (only if we read from SRC root —
-    # otherwise they're already in ARCH).
-    if source_dir == SRC:
+    # Move originals to archive AFTER reading (only if we read from src root —
+    # otherwise they're already in arch).
+    if source_dir == src:
         for f in files:
-            shutil.move(os.path.join(SRC, f), os.path.join(ARCH, f))
+            shutil.move(str(src / f), str(arch / f))
 
     print("Consolidated:")
     for out, n, src_count in arm_outputs:
@@ -355,17 +376,12 @@ if __name__ == "__main__":
 
     # Report on assay-id resolution coverage
     cited = set()
-    for arm in by_arm:
-        for path in by_arm[arm]:
-            # (re-read just the Assay sheet — cheap, already done above; this
-            # is just for the report)
-            pass
     # Walk the assay titles we actually emitted (from the source files)
     for arm in by_arm:
         for path in by_arm[arm]:
             try:
-                # Source files now live in ARCH after this run
-                wb = openpyxl.load_workbook(os.path.join(ARCH, os.path.basename(path)),
+                # Source files now live in arch after this run
+                wb = openpyxl.load_workbook(str(arch / os.path.basename(path)),
                                             data_only=True)
                 if "Assay" in wb.sheetnames:
                     for r in wb["Assay"].iter_rows(min_row=2, values_only=True):
@@ -378,10 +394,10 @@ if __name__ == "__main__":
             except FileNotFoundError:
                 pass
 
-    resolved_direct = {t for t in cited if t in ASSAY_ID_LOOKUP}
-    resolved_via_synonym = {t for t in cited if t not in ASSAY_ID_LOOKUP
-                            and t in ASSAY_SYNONYMS
-                            and ASSAY_SYNONYMS[t] in ASSAY_ID_LOOKUP}
+    resolved_direct = {t for t in cited if t in lookup}
+    resolved_via_synonym = {t for t in cited if t not in lookup
+                            and t in synonyms
+                            and synonyms[t] in lookup}
     resolved = resolved_direct | resolved_via_synonym
     unresolved = sorted(cited - resolved)
 
@@ -390,7 +406,7 @@ if __name__ == "__main__":
     if resolved_via_synonym:
         print("  Via synonym map:")
         for t in sorted(resolved_via_synonym):
-            print(f"    - {t!r} → {ASSAY_SYNONYMS[t]!r} (id {ASSAY_ID_LOOKUP[ASSAY_SYNONYMS[t]]})")
+            print(f"    - {t!r} → {synonyms[t]!r} (id {lookup[synonyms[t]]})")
     if unresolved:
         print("  Unresolved (assay_ids column will be blank for rows citing these):")
         for t in unresolved:

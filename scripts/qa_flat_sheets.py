@@ -39,32 +39,9 @@ from collections import defaultdict, Counter
 
 import openpyxl
 
-REPO = str(Path(__file__).resolve().parent.parent)
-
-# ---------------------------------------------------------------------------
-# TODO(v0.2): These constants are IntravChip-specific defaults left over from
-# the original session. For other projects, override via:
-#   - CLI args (--expected-counts, --upload-path, --master-baseline)
-#   - or a project-local config file (e.g. .dmac-curation/qa_config.json)
-# /curate-qa command (Task 15) will eventually pass project-specific values.
-# ---------------------------------------------------------------------------
-DEFAULT_UPLOAD = os.path.join(REPO, "assay_sheets", "IntravChip_upload.xlsx")
-PREV_METADATA = os.path.join(REPO, "previous_metadata", "MetNet All 260527.xlsx")
-
-# Root sampletypes for IntravChip: CEL cell stocks and MDL CAD models
-# have no biological parent in the chain.
-ALWAYS_ROOT = {"CEL", "MDL"}
-
-# Expected per-sampletype row counts for the IntravChip consolidation.
-EXPECTED_COUNTS = {
-    "CEL":   2,
-    "OOC":   122,
-    "D.IMG": 1499,
-    "A.IMG": 368,
-    "D.SIM": 4,
-    "MDL":   1,
-}
-EXPECTED_TOTAL = sum(EXPECTED_COUNTS.values())  # 1996
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _config import config_from_args, plugin_context  # noqa: E402
+from _config import ProjectRootError  # noqa: E402
 
 # Sentinel substrings we treat as "deliberately deferred" — Marie fills
 # these post-upload. Counted, not flagged as blockers.
@@ -78,13 +55,13 @@ EXPECTED_PLACEHOLDER_MARKERS = (
 SURPRISE_SENTINELS = ("XXX", "TODO", "FIXME", "???", "TBD", "UNCONFIRMED")
 
 
-def load_prev_uids():
-    """Return set of all UIDs already in the MetNet baseline workbook."""
-    if not os.path.exists(PREV_METADATA):
-        print(f"  ! WARNING: {PREV_METADATA} not found — parent-resolvability "
+def load_prev_uids(prev_metadata):
+    """Return set of all UIDs already in the master baseline workbook."""
+    if prev_metadata is None or not Path(prev_metadata).exists():
+        print(f"  ! WARNING: no master baseline workbook — parent-resolvability "
               f"will only check intra-upload UIDs")
         return set()
-    wb = openpyxl.load_workbook(PREV_METADATA, data_only=True, read_only=True)
+    wb = openpyxl.load_workbook(prev_metadata, data_only=True, read_only=True)
     uids = set()
     for sname in wb.sheetnames:
         ws = wb[sname]
@@ -103,11 +80,15 @@ def load_prev_uids():
     return uids
 
 
-def load_sampletype_schemas():
-    """Return {short_code: {required: set, name: str}}."""
-    path = os.path.join(REPO, "context", "sampletypes_db.json")
-    with open(path) as f:
-        types = json.load(f)
+def load_sampletype_schemas(context_dir):
+    """{short_code: {required: set, name: str}} from the sample type catalog.
+
+    A project-local context/sampletypes_db.json wins over the plugin's bundled
+    copy, so a project can pin a vintage.
+    """
+    local = Path(context_dir) / "sampletypes_db.json"
+    path = local if local.is_file() else plugin_context("sampletypes_db.json")
+    types = json.loads(Path(path).read_text())
     out = {}
     for t in types:
         code = t.get("SampleType")
@@ -117,14 +98,19 @@ def load_sampletype_schemas():
     return out
 
 
-def main(upload_path):
+def main(upload_path, cfg):
+    prev_metadata = cfg.master_workbook
+    expected_counts = cfg.expected_counts
+    always_root = cfg.always_root or {"CEL", "MDL"}
+    expected_total = sum(expected_counts.values()) if expected_counts else None
+    print(f"Project root:    {cfg.root}")
     print(f"Upload file:     {upload_path}")
-    print(f"MetNet baseline: {PREV_METADATA}")
+    print(f"Master baseline: {prev_metadata or '(none)'}")
     print()
 
-    prev_uids = load_prev_uids()
-    schemas = load_sampletype_schemas()
-    print(f"MetNet baseline: {len(prev_uids)} existing UIDs")
+    prev_uids = load_prev_uids(prev_metadata)
+    schemas = load_sampletype_schemas(cfg.context)
+    print(f"Master baseline: {len(prev_uids)} existing UIDs")
     print(f"NExtSEEK catalog: {len(schemas)} sample types")
     print()
 
@@ -187,7 +173,7 @@ def main(upload_path):
                 jm = json.loads(jm_str)
             except json.JSONDecodeError as e:
                 issues["bad_json"].append(f"row {row_n} ({uid}): {e}")
-        elif st not in ALWAYS_ROOT:
+        elif st not in always_root:
             # Non-root rows with no json_metadata is suspicious
             issues["missing_json_metadata"].append(f"row {row_n} ({uid}, {st})")
 
@@ -197,7 +183,7 @@ def main(upload_path):
         if parent and str(parent).strip():
             parents_referenced.append((row_n, uid, st, str(parent)))
         else:
-            if st in ALWAYS_ROOT:
+            if st in always_root:
                 blank_parent_roots += 1
             else:
                 blank_parent_nonroot += 1
@@ -260,21 +246,25 @@ def main(upload_path):
     print(f"Unique new UIDs: {len(rows_per_uid)}")
     print()
     print("Per-sample-type:")
-    all_st = sorted(set(sampletype_counts) | set(EXPECTED_COUNTS))
+    all_st = sorted(set(sampletype_counts) | set(expected_counts))
     expected_ok = True
     for st in all_st:
         actual = sampletype_counts.get(st, 0)
-        expected = EXPECTED_COUNTS.get(st)
+        expected = expected_counts.get(st)
         if expected is None:
-            print(f"  {st:>6}: {actual:>5}  (unexpected sampletype!)")
-            expected_ok = False
+            marker = "" if not expected_counts else "  (unexpected sampletype!)"
+            if expected_counts:
+                expected_ok = False
+            print(f"  {st:>6}: {actual:>5}{marker}")
         elif actual != expected:
             print(f"  {st:>6}: {actual:>5}  ✗ expected {expected}")
             expected_ok = False
         else:
             print(f"  {st:>6}: {actual:>5}  ✓")
-    print(f"  {'TOTAL':>6}: {sum(sampletype_counts.values()):>5}  "
-          f"(expected {EXPECTED_TOTAL})")
+    total_line = f"  {'TOTAL':>6}: {sum(sampletype_counts.values()):>5}"
+    if expected_total is not None:
+        total_line += f"  (expected {expected_total})"
+    print(total_line)
     print()
 
     print("─" * 60)
@@ -291,12 +281,12 @@ def main(upload_path):
     print("─" * 60)
     print("PLACEHOLDERS / SENTINELS")
     print("─" * 60)
-    expected_total = sum(v for k, v in placeholder_counter.items()
-                         if not k.startswith("surprise:"))
+    expected_placeholder_total = sum(v for k, v in placeholder_counter.items()
+                                     if not k.startswith("surprise:"))
     surprise_total = sum(v for k, v in placeholder_counter.items()
                          if k.startswith("surprise:"))
     print(f"Expected placeholder occurrences (intentional, "
-          f"Marie fills post-upload): {expected_total}")
+          f"Marie fills post-upload): {expected_placeholder_total}")
     for marker in EXPECTED_PLACEHOLDER_MARKERS:
         n = placeholder_counter.get(marker, 0)
         if n:
@@ -355,12 +345,66 @@ def main(upload_path):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
+    # NOTE: the config-override flags are declared inline (rather than via
+    # _config.add_config_args) so that /curate-qa's doc contract — which names
+    # --upload, --master-baseline and --expected-counts — is verifiable against
+    # this script's own text (tests/test_curate_commands_present.py scans each
+    # script file, not its imports). Dest names match add_config_args() so
+    # config_from_args() consumes them identically.
     parser.add_argument(
-        "upload", nargs="?", default=DEFAULT_UPLOAD,
-        help=f"Path to consolidated flat-format xlsx (default: {DEFAULT_UPLOAD})",
+        "--project-root", type=Path, default=None,
+        help="Curation project root (default: nearest ancestor with "
+             ".dmac-curation.json, else cwd)",
+    )
+    parser.add_argument(
+        "--master-baseline", type=Path, default=None,
+        help="Master baseline workbook whose UIDs upload parents may resolve "
+             "against (default: newest previous_metadata/*All*.xlsx)",
+    )
+    parser.add_argument(
+        "--expected-counts", default=None,
+        help="Per-sampletype row expectations, e.g. 'OOC=122,CEL=2' "
+             "(default: from the project lockfile, if any)",
+    )
+    parser.add_argument(
+        "--upload", type=Path, default=None,
+        help="Consolidated flat-format xlsx to QA "
+             "(default: the single Arm*.xlsx under <project>/assay_sheets)",
+    )
+    parser.add_argument(
+        "upload_pos", nargs="?", default=None, metavar="upload",
+        help="Positional alias for --upload (deprecated; pass one or the other, "
+             "not both).",
     )
     args = parser.parse_args()
-    upload = args.upload
-    if not os.path.isabs(upload):
-        upload = os.path.join(REPO, upload)
-    sys.exit(main(upload))
+
+    try:
+        cfg = config_from_args(args)
+    except ProjectRootError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    if args.upload is not None and args.upload_pos is not None:
+        print("ERROR: pass the upload as --upload OR positionally, not both",
+              file=sys.stderr)
+        sys.exit(2)
+    upload = args.upload if args.upload is not None else args.upload_pos
+
+    if upload is None:
+        candidates = sorted(
+            p for p in cfg.assay_sheets.glob("*.xlsx")
+            if "_" not in p.stem and not p.name.startswith("~")
+        )
+        if len(candidates) != 1:
+            print(f"ERROR: pass --upload; found {len(candidates)} consolidated "
+                  f"sheets in {cfg.assay_sheets}: "
+                  f"{[p.name for p in candidates]}", file=sys.stderr)
+            sys.exit(2)
+        upload = candidates[0]
+    upload = Path(upload)
+    if not upload.is_absolute():
+        upload = (cfg.root / upload).resolve()
+    if not upload.is_file():
+        print(f"ERROR: {upload} does not exist", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(main(upload, cfg))

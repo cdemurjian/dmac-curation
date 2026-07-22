@@ -8,7 +8,9 @@
 # replaced with CSV-driven approach. See TODO(v0.2) notes below.
 """Patch assay sheets with GEO accession URLs after GSE/GSM assignment.
 
-Reads a GEO accession CSV (two columns: sample_id, gsm_accession) and patches:
+Reads a GEO accession CSV (two whitespace-separated columns: column 1 is the
+GSM accession, column 2 is the sample title from which the D-id is extracted)
+and patches:
   - D.SEQ upload sheet:   Accession = GSM, Link_PrimaryData = GSM URL
   - A.GEX upload sheet:   Link_PrimaryData = GSE URL (series-level, all rows)
   - A.SPTX upload sheet:  Link_PrimaryData = per-sample GSM URL
@@ -36,12 +38,11 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-ROOT = Path(__file__).resolve().parent.parent
-SHEETS = ROOT / "assay_sheets"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _config import add_config_args, config_from_args  # noqa: E402
+from _config import ProjectRootError  # noqa: E402
 
 GSM_URL = "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={}"
-
-# TODO(v0.2): accept --sheets-dir to override SHEETS path
 
 
 def parse_gsm_csv(csv_path: Path) -> dict[str, str]:
@@ -187,6 +188,7 @@ def patch_asptx(path: Path, gsm_map: dict[str, str], write: bool) -> None:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    add_config_args(ap)
     ap.add_argument("--write", action="store_true",
                     help="Patch in place, creates .bak; default is dry-run.")
     ap.add_argument(
@@ -218,13 +220,19 @@ def main():
     ap.add_argument(
         "--sheets-dir",
         type=Path,
-        default=SHEETS,
+        default=None,
         metavar="DIR",
         help="Directory containing upload sheets (default: <project>/assay_sheets/)",
     )
     args = ap.parse_args()
 
-    sheets = args.sheets_dir
+    try:
+        cfg = config_from_args(args)
+    except ProjectRootError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    sheets = Path(args.sheets_dir).resolve() if args.sheets_dir else cfg.assay_sheets
     gse_bulk_url = GSM_URL.format(args.gse_bulk)
 
     gsm_map = parse_gsm_csv(args.gsm_csv)

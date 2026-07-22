@@ -17,7 +17,9 @@
 #   tail -F GEO/upload_logs/*.log
 
 set -u
-cd "$(dirname "$0")/.."
+# Intentionally NOT cd-ing to the script's directory. This script operates on
+# paths the caller passes, resolved against the caller's cwd. Anchoring to the
+# script location made /curate-deposit upload from inside the plugin checkout.
 
 if [[ -f .env ]]; then
   set -a
