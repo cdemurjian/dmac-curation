@@ -101,6 +101,48 @@ def test_search_survives_an_unexpected_payload(monkeypatch):
     assert st.search_terms("x", http=FakeHTTP({"unexpected": True})) == []
 
 
+def _one_item_payload(item):
+    """A well-formed-JSON payload whose sole collection entry is `item`."""
+    return {"collection": [item]}
+
+
+def test_search_survives_links_as_a_string(monkeypatch):
+    """`links` a str would AttributeError in _acronym (.get on a str)."""
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    payload = _one_item_payload({
+        "@id": "http://purl.obolibrary.org/obo/NCIT_C16403",
+        "prefLabel": "Cell Line",
+        "links": "not-a-dict",
+        "definition": ["A cell culture derived from a single cell."],
+    })
+    assert st.search_terms("cell line", http=FakeHTTP(payload)) == []
+
+
+def test_search_survives_a_non_numeric_score(monkeypatch):
+    """`score` a non-numeric str would ValueError in float(...)."""
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    payload = _one_item_payload({
+        "@id": "http://purl.obolibrary.org/obo/NCIT_C16403",
+        "prefLabel": "Cell Line",
+        "links": {"ontology": "http://data.bioontology.org/ontologies/NCIT"},
+        "score": "high",
+        "definition": ["A cell culture derived from a single cell."],
+    })
+    assert st.search_terms("cell line", http=FakeHTTP(payload)) == []
+
+
+def test_search_survives_definition_as_an_int(monkeypatch):
+    """`definition` an int would TypeError: 'int' object is not subscriptable."""
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    payload = _one_item_payload({
+        "@id": "http://purl.obolibrary.org/obo/NCIT_C16403",
+        "prefLabel": "Cell Line",
+        "links": {"ontology": "http://data.bioontology.org/ontologies/NCIT"},
+        "definition": 7,
+    })
+    assert st.search_terms("cell line", http=FakeHTTP(payload)) == []
+
+
 def test_to_binding_is_always_unconfirmed():
     hit = st.TermHit(iri="i", label="l", source="NCIT", score=1.0, definition="d")
     b = st.to_binding(hit)

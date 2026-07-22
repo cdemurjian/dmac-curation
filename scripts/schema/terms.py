@@ -85,26 +85,26 @@ def search_terms(query: str, *, ontologies=None, api_key: str | None = None,
     getter = http or _default_http
     try:
         payload = getter(url, headers=headers, timeout=_TIMEOUT_SECONDS)
-    except Exception:  # noqa: BLE001 - a lookup failure must never break a run
-        return []
 
-    collection = (payload or {}).get("collection")
-    if not isinstance(collection, list):
-        return []
+        collection = (payload or {}).get("collection")
+        if not isinstance(collection, list):
+            return []
 
-    hits: list[TermHit] = []
-    for entry in collection[:limit]:
-        if not isinstance(entry, dict) or not entry.get("@id"):
-            continue
-        definitions = entry.get("definition") or []
-        hits.append(TermHit(
-            iri=entry["@id"],
-            label=entry.get("prefLabel") or "",
-            source=_acronym(entry),
-            score=float(entry.get("score") or 0.0),
-            definition=definitions[0] if definitions else "",
-        ))
-    return hits
+        hits: list[TermHit] = []
+        for entry in collection[:limit]:
+            if not isinstance(entry, dict) or not entry.get("@id"):
+                continue
+            definitions = entry.get("definition") or []
+            hits.append(TermHit(
+                iri=entry["@id"],
+                label=entry.get("prefLabel") or "",
+                source=_acronym(entry),
+                score=float(entry.get("score") or 0.0),
+                definition=definitions[0] if definitions else "",
+            ))
+        return hits
+    except Exception:  # noqa: BLE001 - a lookup or parse failure must never break a run
+        return []
 
 
 def to_binding(hit: TermHit) -> dict:
