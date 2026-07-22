@@ -5,45 +5,62 @@ description: Curator's workbench for NExtSEEK / FairDomHub metadata. Human-in-th
 
 # DMAC Curation
 
-You are helping a curator at MIT DMAC turn a PI's research-project data into NExtSEEK-ready upload sheets via the 13-phase pipeline.
+You are the curator's workbench for MIT DMAC: turning a PI's research-project
+data into NExtSEEK-ready metadata, FairDomHub deposits, sample type
+definitions, and repository submission artifacts. Human-in-the-loop and
+PI-facing throughout.
 
 ## When this skill activates
 
-- Current working directory contains `.dmac-curation.json` (the per-project lockfile)
+- Current working directory contains `.dmac-curation.json` (the project lockfile)
 - Or cwd contains the curation input layout: `files/`, `manuscript/`, `previous_metadata/`
-- Or the user invokes any `/curate-*` slash command
-- Or the user mentions NExtSEEK / FairDomHub / FDH / "curate metadata"
+- Or the user invokes any `/curate-*` or `/fdh-*` slash command
+- Or the user mentions NExtSEEK / FairDomHub / FDH / "curate metadata" /
+  a sample type / a GEO, SRA or PRIDE submission
 
-## The 13-phase pipeline
+## Modes
 
-| # | Phase | Command | Artifact |
+The plugin is organised as **modes**, not as one sequence. A mode is a
+convention, not a framework: entry-point commands, a reference doc loaded on
+demand, and optionally its own scripts. Adding a file is registering it; there
+is nothing to declare in `plugin.json`.
+
+| mode | entry points | reference | state scope |
 |---|---|---|---|
-| 0 | Init | `/curate-init [--lab CODE] [--pi NAME]` | scaffold cwd + `.dmac-curation.json` lockfile |
-| 1 | Inventory | `/curate-inventory` | `FILE_INDEX.md` |
-| 2 | Sample tree | `/curate-sample-tree` | `SAMPLE_TREE.md` |
-| 3 | Questions | `/curate-questions [add\|list\|resolve]` | `QUESTIONS_FOR_PI.md` |
-| 4 | Task plan | (uses TaskCreate, no command) | TaskList state |
-| 5 | Build | `/curate-build [<arm>]` | `assay_sheets/4sheet_originals/*.xlsx` + `scripts/build_<arm>.py` |
-| 6 | Consolidate | `/curate-consolidate` | `assay_sheets/Arm{X}.xlsx` (flat format) |
-| 7 | Resolve assays | `/curate-resolve-assays --project-id N` | `context/assay_ids_cache.json` |
-| 8 | Synonyms | (LLM-driven in Phase 7) | `context/assay_synonyms.json` |
-| 9 | QA | `/curate-qa` | console disposition report |
-| 10 | Deposit | `/curate-deposit <geo\|zenodo\|omero>` | external uploads + `Link_PrimaryData` backfilled |
-| 11 | Retrieve | `/curate-retrieve` | `RETRIEVE.TXT` |
-| 12 | Validate | `/curate-validate <metadata.xlsx>` | console diff report |
-| 13 | Email | `/curate-email` | `EMAIL_TO_PI.md` |
-| any | Status | `/curate-status` | console pipeline-state summary |
+| `pipeline` | `/curate-init`, `/curate-inventory`, `/curate-sample-tree`, `/curate-questions`, `/curate-build`, `/curate-consolidate`, `/curate-resolve-assays`, `/curate-qa`, `/curate-deposit`, `/curate-retrieve`, `/curate-validate`, `/curate-email`, `/curate-status` | `PHASES.md` | project - needs a lockfile and scaffold |
+| `fdh` | `/fdh-upload`, `/fdh-api` | `FDH.md` | credentials only - no project needed |
+| `schema` | `/curate-sampletype` | `SCHEMA.md` | cwd - writes where you are, no project needed |
+| `report` | `/curate-report` | `REPORTS.md` | input - reads a lockfile if present, never requires one |
 
-For deep per-phase reference, read `skills/curation/PHASES.md`. For each command's behavior, the `commands/curate-*.md` files are authoritative.
+Load a mode's reference doc when you enter that mode, not before. For each
+command's exact behavior, the `commands/*.md` files are authoritative.
+`/curate-status` reports per mode.
 
-## FairDomHub direct API (standalone — NOT part of the 13-phase pipeline)
+### `pipeline` - the curation pipeline
 
-Two FDH capabilities independent of NExtSEEK curation:
-- **Upload a study** → `/fdh-upload` drives the interactive `scripts/fdh/submit.py`.
-- **Programmatic API access** ("find / delete / patch … on FDH") → `/fdh-api` runs a
-  reuse-or-generate loop over `scripts/fdh/fdh_api.py` + `context/fdh_api_index.json`.
+11 phases driven by 13 commands. This is where most work happens, but it is one
+mode among four. Deep per-phase reference: `PHASES.md`.
 
-Deep reference: `skills/curation/FDH.md` (load on demand). Auth: `.env` `FDH_API`.
+### `fdh` - FairDomHub
+
+- **Upload a study** -> `/fdh-upload` drives the interactive `scripts/fdh/submit.py`.
+- **Programmatic API access** ("find / delete / patch ... on FDH") -> `/fdh-api`
+  runs a reuse-or-generate loop over `scripts/fdh/fdh_api.py` +
+  `context/fdh_api_index.json`.
+
+Auth: `FDH_API` in the project's `.env` or the environment. Reference: `FDH.md`.
+
+### `schema` - sample type authoring
+
+"Help me bolster D.VIA." Produces a proposed sample type record, a controlled
+vocabulary, and a rationale document. A human applies it; the mode never writes
+to NExtSEEK. Reference: `SCHEMA.md`.
+
+### `report` - submission artifacts
+
+"I have file X.xlsx with metadata, turn it into a GEO report." Produces GEO, SRA
+and PRIDE artifacts from UIDs, a NExtSEEK workbook, a curated upload sheet, or
+arbitrary tabular data. Reference: `REPORTS.md`.
 
 ## Hard rules (never violate)
 
@@ -78,6 +95,10 @@ Deep reference: `skills/curation/FDH.md` (load on demand). Auth: `.env` `FDH_API
 - "screw the X" → de-scope X for now
 - "upload to FairDomHub" / "FDH upload" → `/fdh-upload` (interactive `submit.py`)
 - "access the FDH API" / "find/delete/patch … on FDH" → `/fdh-api` reuse-or-generate loop
+- "bolster X" / "what should we collect for X" / "define a sample type" → `schema` mode (`/curate-sampletype`)
+- "turn this into a GEO submission" / "build the SRA sheet" / "PRIDE report" → `report` mode (`/curate-report`)
+- "the mapping" → `report` mode's `<FORMAT>.mapping.json`, the reviewable spec the LLM writes once
+- "what mode am I in" → `/curate-status`
 
 ## Pitfalls to pre-warn about
 

@@ -4,6 +4,50 @@ Deep per-phase contract. Read on demand when SKILL.md or a command needs to cons
 
 For each phase: inputs, outputs, scripts invoked, error modes, edge cases.
 
+## Phase table
+
+13 commands drive 11 phases. Phases 4 and 8 were retired as numbers (see
+"Retired phases"); the surviving numbers are deliberately **not** renumbered,
+because every scaffolded project's `CLAUDE.md` bakes in the order,
+`/curate-status` maps artifacts by number, and curators speak in phase numbers.
+
+The 11 pipeline phases run inventory (1) through email (13):
+
+| # | Phase | Command | Artifact |
+|---|---|---|---|
+| 1 | Inventory | `/curate-inventory` | `FILE_INDEX.md` |
+| 2 | Sample tree | `/curate-sample-tree` | `SAMPLE_TREE.md` |
+| 3 | Questions | `/curate-questions [add\|list\|resolve]` | `QUESTIONS_FOR_PI.md` |
+| 5 | Build | `/curate-build [<arm>]` | `assay_sheets/4sheet_originals/*.xlsx` + `scripts/build_<arm>.py` |
+| 6 | Consolidate | `/curate-consolidate` | `assay_sheets/Arm{X}.xlsx` (flat format) |
+| 7 | Resolve assays | `/curate-resolve-assays --project-id N` | `context/assay_ids_cache.json` + `context/assay_synonyms.json` |
+| 9 | QA | `/curate-qa` | console disposition report |
+| 10 | Deposit | `/curate-deposit <geo\|zenodo\|omero>` | external uploads + `Link_PrimaryData` backfilled |
+| 11 | Retrieve | `/curate-retrieve` | `RETRIEVE.TXT` |
+| 12 | Validate | `/curate-validate <metadata.xlsx>` | console diff report |
+| 13 | Email | `/curate-email` | `EMAIL_TO_PI.md` |
+
+---
+
+Phase 0 precedes them all: `/curate-init` scaffolds the project. It is the init
+step, not one of the 11 pipeline phases.
+
+| # | Phase | Command | Artifact |
+|---|---|---|---|
+| 0 | Init | `/curate-init [--lab CODE] [--pi NAME] [--mode NAME]` | scaffold cwd + `.dmac-curation.json` lockfile |
+
+### Retired phases
+
+**Phase 4 (task plan)** had no command, no script and no artifact; it existed
+only as TaskList state. Using a task list is good practice, not a pipeline
+stage. Its guidance is folded into Phase 3's tail.
+
+**Phase 8 (synonyms)** was always the same command and invocation as Phase 7.
+It existed in the table only because `assay_synonyms.json` is a second
+artifact, and artifacts are not phases. It is documented as a Phase 7 output.
+
+Neither number is reused.
+
 ---
 
 ## Phase 0 — Init
