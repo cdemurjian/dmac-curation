@@ -13,6 +13,11 @@ Parse from `$ARGUMENTS`:
 `--lab` and `--pi` are required for `pipeline` mode only. If missing there, use
 `AskUserQuestion` - do NOT guess. `schema` and `report` modes need neither.
 
+If `--mode` is any value outside `{pipeline, schema, report}`, stop with a clear
+error (e.g. `unknown mode: <value>`) before doing anything else. Never call
+`set_mode` with an unrecognised mode - a typo like `--mode piepline` must not
+mint a junk mode section.
+
 ## Additive contract
 
 **Create what is missing; never overwrite what exists.** There is no
@@ -22,8 +27,11 @@ project is a first-class path, not an error.
 | condition | action |
 |---|---|
 | file absent | create it |
-| file present, this run would produce identical content | leave it, report "unchanged" |
-| file present, content would differ | leave it, report "exists - not modified", print a diff summary |
+| file present | leave it, report "exists - not modified" |
+
+The check is presence-only: the command does not compare contents. If you happen
+to notice by eye that an existing file looks stale, you may mention it - but that
+is best-effort prose, not a guaranteed step, and nothing is ever rewritten.
 
 The one exception is the lockfile, which is *merged*, never replaced. Use
 `scripts/_lockfile.py` for that; never hand-write the JSON.
@@ -38,13 +46,21 @@ The one exception is the lockfile, which is *merged*, never replaced. Use
 
 3. Read the schema vintage: `<PLUGIN_PATH>/context/VINTAGE.json` -> `bundled_date`.
 
-4. Create only the missing directories:
-   `mkdir -p files manuscript previous_metadata assay_sheets scripts`.
-   Skip this entirely for `schema` and `report` modes; they need no scaffold.
+**Steps 4 and 5 - the pipeline scaffold (directories AND rendered templates) -
+run only in pipeline mode.** For `--mode schema` and `--mode report`, do both
+skips: create no directories and render no templates. Skip straight to the
+lockfile merge in Step 6. `schema` and `report` produce nothing but a lockfile
+entry (Step 6) and a report (Step 7); they never collect a `lab`/`pi`, so there
+is nothing to render.
 
-5. Render any missing templates. Existing files are never touched:
+4. In pipeline mode only, create the missing directories:
+   `mkdir -p files manuscript previous_metadata assay_sheets scripts`.
+
+5. In pipeline mode only, render any missing templates. Existing files are
+   never touched:
 
    ```bash
+   # render scaffold only in pipeline mode; schema and report skip this step
    uv run --with jinja2 python3 <<'PY'
    from jinja2 import Environment, FileSystemLoader, StrictUndefined
    import datetime, os, pathlib
@@ -78,7 +94,10 @@ The one exception is the lockfile, which is *merged*, never replaced. Use
    import sys, pathlib
    sys.path.insert(0, "<PLUGIN_PATH>/scripts")
    import _lockfile
-   values = {"lab": "$LAB", "pi": "$PI"} if "$MODE" == "pipeline" else {}
+   # normalize before storing so the lockfile matches the shape below:
+   # LAB uppercased, PI lowercased. schema/report collect no lab/pi -> {}
+   values = ({"lab": "$LAB".upper(), "pi": "$PI".lower()}
+             if "$MODE" == "pipeline" else {})
    doc = _lockfile.set_mode(pathlib.Path.cwd(), "$MODE", values)
    print(f"lockfile schema_version={doc['schema_version']} "
          f"plugin_version={doc['plugin_version']} modes={sorted(doc['modes'])}")

@@ -41,6 +41,16 @@ def test_init_writes_a_v1_lockfile_shape():
     assert '"modes"' in text
 
 
+def test_scaffold_render_is_tied_to_pipeline_mode():
+    """schema/report must not render the pipeline scaffold (Task 13 fix).
+
+    The render step (directories + templates) is gated on pipeline mode so an
+    agent executing `--mode schema` in a bare dir writes nothing but a lockfile.
+    """
+    text = INIT.read_text()
+    assert "only in pipeline mode" in text
+
+
 def test_adding_a_mode_preserves_the_existing_one(tmp_path):
     _lockfile.set_mode(tmp_path, "pipeline", {"lab": "KAM", "phase": 6})
     _lockfile.set_mode(tmp_path, "report", {"last_format": "GEO"})
