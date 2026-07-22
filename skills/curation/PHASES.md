@@ -327,7 +327,7 @@ Routes by first arg:
 
 ### `/curate-deposit geo [--type bulk|spatial]`
 
-- Drives `scripts/deposit/geo_build_xlsx.py` to render BULK_filled.xlsx or SPTX_filled.xlsx from filled metadata.
+- **The build is delegated to `report` mode.** Run `/curate-report GEO <input>`; Phase 10 keeps only the genuinely pipeline-specific parts — external upload and accession backfill. This route was a **dead end** before the delegation: nothing produced the input it named and no GEO template xlsx shipped with the plugin, so delegating to report mode was closer to a free fix than a rewrite, and it avoids maintaining two divergent GEO build paths — the exact divergence the toolkit spec warns about elsewhere. Ordering is deliberate: GEO deposit happens **before** NExtSEEK upload because accessions must be backfilled into the sheets first, which is why report mode's curated-sheet adapter reads `assay_sheets/Arm{X}.xlsx` locally with no API call.
 - Drives `scripts/upload_geo_ncftp.sh` for upload.
 - After GEO acceptance (manual confirmation): `scripts/apply_geo_accessions.py` patches D.SEQ/A.GEX/A.SPTX with GSM and series URLs. Bulk and spatial are separate GEO submissions with separate series accessions, so the script takes a flag pair per submission. See `commands/curate-deposit.md` for the full invocation and roster format.
 
