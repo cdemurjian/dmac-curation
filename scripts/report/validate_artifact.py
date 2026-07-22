@@ -101,20 +101,55 @@ def required_fields(spec_path: Path, section: str) -> list[str]:
             if k.startswith("*") and not k.startswith("**")]
 
 
-def _read_sheet_once(ws) -> tuple[list[str], list[tuple], int, int]:
+def _read_sheet_once(ws, required: list[str]) -> tuple[list[str], list[tuple], int, int]:
     """Collect header, data rows and cell counts in ONE pass.
 
     In read_only mode the underlying archive closes with the workbook, and any
-    later iter_rows on the worksheet raises. Everything must be gathered here.
+    later iter_rows on the worksheet raises. Every row is buffered in a single
+    iteration before anything is computed.
+
+    The header row is LOCATED, not assumed to be row 0. The real GEO template's
+    `Metadata` sheet is a VERTICAL multi-section form: a `# ...` comment on row
+    1, then a STUDY block, then the SAMPLES header (`*library name` and the rest)
+    partway down, then a blank gap and a PROTOCOLS block. Assuming row 0 finds
+    the comment, not the header, so none of the required sample fields are seen
+    and a valid artifact is wrongly HARD_REJECTed. Instead:
+
+      - If `required` is non-empty, the header is the row with the MOST cells
+        matching a required field name (case-insensitive). If no row overlaps,
+        fall back to row 0. For any flat single-header sheet this IS row 0.
+      - If `required` is empty (e.g. SRA `libraries` stars nothing), fall back
+        to row 0 - preserving the prior behavior for that path exactly.
+
+    The DATA rows are the rows below the located header, stopping at the first
+    ENTIRELY EMPTY row (all cells None/"") - so the GEO sample block ends at the
+    blank gap and the trailing PROTOCOLS/STUDY rows are not read as sample data.
+    Counts are over the located block (header row + data rows).
     """
-    header: list[str] = []
+    rows = [row for row in ws.iter_rows(values_only=True)]
+    if not rows:
+        return [], [], 0, 0
+
+    header_idx = 0
+    if required:
+        wanted = {r.strip().lower() for r in required}
+        best = 0
+        for i, row in enumerate(rows):
+            overlap = sum(1 for v in row
+                          if v is not None and str(v).strip().lower() in wanted)
+            if overlap > best:
+                best, header_idx = overlap, i
+
+    header = ["" if v is None else str(v) for v in rows[header_idx]]
+
     data: list[tuple[Any, ...]] = []
+    for row in rows[header_idx + 1:]:
+        if all(v in (None, "") for v in row):
+            break
+        data.append(row)
+
     nonempty = total = 0
-    for i, row in enumerate(ws.iter_rows(values_only=True)):
-        if i == 0:
-            header = ["" if v is None else str(v) for v in row]
-        else:
-            data.append(row)
+    for row in (rows[header_idx], *data):
         for value in row:
             total += 1
             if value not in (None, ""):
@@ -178,10 +213,15 @@ def _validate_xlsx(file_path: Path, required: list[str],
                                validation_notes="workbook has zero sheets")
 
     ws = wb[wb.sheetnames[0]]
-    row_count = ws.max_row or 0
-    column_count = ws.max_column or 0
-    header, data, nonempty, total = _read_sheet_once(ws)
+    header, data, nonempty, total = _read_sheet_once(ws, required)
     wb.close()
+
+    # Structural counts describe the LOCATED block, not the raw sheet extent:
+    # column_count is the header's width, row_count the header row plus its data
+    # rows (so a vertical-form sheet reports its SAMPLES block, not the whole
+    # multi-section form).
+    column_count = len(header)
+    row_count = (1 + len(data)) if header else 0
 
     present, rows_complete, missing = _check_required(header, data, required)
     if not present:

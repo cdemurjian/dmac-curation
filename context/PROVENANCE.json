@@ -94,7 +94,7 @@
       "source_path": "tools/hibayes/artifact_validator.py",
       "commit_sha": "dcca50c187890dc93659e5594810179793bb94eb",
       "vendored_date": "2026-07-22",
-      "local_divergence": "SUBSET plus extension. Upstream is 897 lines and imports tools.hibayes.enums and tools.hibayes.exporter; most of it is a 29-column evidence-CSV harness (run_stage_a, CSV_HEADER_29, rebase_artifact_path, classify_artifact_kind, the nf-core and SVG validators) that this plugin has no use for. Taken: ArtifactStatus, ValidatorResult, the GEO two-part required-field check, and the single-pass read-only-workbook discipline. Added: SRA (libraries and biosamples sections) and PRIDE (tab-delimited px, not xlsx), plus a DISPOSITION map onto CLEAN/SOFT_FLAG/HARD_REJECT."
+      "local_divergence": "SUBSET plus extension. Upstream is 897 lines and imports tools.hibayes.enums and tools.hibayes.exporter; most of it is a 29-column evidence-CSV harness (run_stage_a, CSV_HEADER_29, rebase_artifact_path, classify_artifact_kind, the nf-core and SVG validators) that this plugin has no use for. Taken: ArtifactStatus, ValidatorResult, the GEO two-part required-field check, and the single-pass read-only-workbook discipline. Added: SRA (libraries and biosamples sections) and PRIDE (tab-delimited px, not xlsx), plus a DISPOSITION map onto CLEAN/SOFT_FLAG/HARD_REJECT. The GEO reader also auto-locates the *library name header row instead of assuming row 1: the real GEO Metadata sheet is a vertical multi-section form (a # comment on row 1, a STUDY block, then the SAMPLES header partway down, a blank gap, then PROTOCOLS), so the header is not at row 1 and a row-0 assumption HARD_REJECTs a valid artifact."
     }
   }
 }

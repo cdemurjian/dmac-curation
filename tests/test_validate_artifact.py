@@ -26,6 +26,32 @@ GEO_REQUIRED = ["*library name", "*title", "*library strategy", "*organism",
                 "*raw file"]
 
 
+def _geo_vertical_xlsx(path, sample_rows):
+    """A GEO-template-SHAPED workbook: a vertical multi-section form.
+
+    Reproduces the real `Metadata` sheet's shape - a `#` comment on row 1, a
+    STUDY block whose `*title` label sits in column A (a decoy 1-cell overlap),
+    then the SAMPLES header (all 8 required fields) BELOW row 1, sample data
+    rows, a fully-blank gap row, then a PROTOCOLS section. The header is not at
+    row 0 and the trailing PROTOCOLS row must not be read as sample data.
+    """
+    openpyxl = pytest.importorskip("openpyxl")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Metadata"
+    ws.append(["# This is a metadata template for submission of HT data"])
+    ws.append(["STUDY"])
+    ws.append(["*title", "My study title"])           # decoy: 1-cell overlap
+    ws.append(["*summary (abstract)", "an abstract"])
+    ws.append(["SAMPLES"])
+    ws.append(list(GEO_REQUIRED))                      # real header, NOT row 1
+    for r in sample_rows:
+        ws.append(r)
+    ws.append([None] * len(GEO_REQUIRED))              # fully-blank gap row
+    ws.append(["PROTOCOLS"])
+    wb.save(path)
+
+
 def test_status_enum_has_the_five_upstream_members():
     assert {s.value for s in va.ArtifactStatus} == {
         "Valid", "Incomplete", "SchemaInvalid", "Missing", "Unreadable"}
@@ -140,6 +166,45 @@ def test_structural_counts_are_reported(tmp_path):
     assert r.column_count == len(GEO_REQUIRED)
     assert r.nonempty_cell_count > 0
     assert 0.0 <= r.null_cell_fraction <= 1.0
+
+
+def test_geo_vertical_form_locates_the_samples_header_below_row_1(tmp_path):
+    """The real GEO Metadata sheet is a vertical form: header is NOT row 1.
+
+    Regression for the Task-31 smoke-test defect: the validator assumed row 0
+    was the header, read the `# ...` comment, found none of the 8 required GEO
+    fields and HARD_REJECTed a correctly-rendered artifact. The located header
+    must be found below row 1, the two sample rows read, and the trailing blank
+    gap + PROTOCOLS row NOT treated as sample data.
+    """
+    p = tmp_path / "geo.xlsx"
+    _geo_vertical_xlsx(p, [
+        ["L1", "T1", "RNA-Seq", "Homo sapiens", "polyA RNA",
+         "paired-end", "Illumina NextSeq 500", "r1.fastq.gz"],
+        ["L2", "T2", "RNA-Seq", "Homo sapiens", "polyA RNA",
+         "paired-end", "Illumina NextSeq 500", "r2.fastq.gz"]])
+    r = va.validate_geo_xlsx(file_path=p,
+                             geo_template_path=ASSETS / "GEO-updated.json")
+    assert r.status is va.ArtifactStatus.Valid
+    assert r.disposition == "CLEAN"
+    assert r.required_fields_present is True
+    assert r.all_required_rows_complete is True
+    assert r.row_count == 3  # header + 2 sample rows, PROTOCOLS excluded
+
+
+def test_geo_vertical_form_still_null_checks_the_located_block(tmp_path):
+    """A blank required cell in a located-block sample row is still Incomplete."""
+    p = tmp_path / "geo.xlsx"
+    _geo_vertical_xlsx(p, [
+        ["L1", "T1", "RNA-Seq", "Homo sapiens", "polyA RNA",
+         "paired-end", "Illumina NextSeq 500", "r1.fastq.gz"],
+        ["L2", "T2", "RNA-Seq", None, "polyA RNA",
+         "paired-end", "Illumina NextSeq 500", "r2.fastq.gz"]])
+    r = va.validate_geo_xlsx(file_path=p,
+                             geo_template_path=ASSETS / "GEO-updated.json")
+    assert r.status is va.ArtifactStatus.Incomplete
+    assert r.required_fields_present is True
+    assert r.all_required_rows_complete is False
 
 
 def test_validation_survives_a_workbook_with_zero_sheets(tmp_path):
