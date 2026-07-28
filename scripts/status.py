@@ -83,6 +83,22 @@ def _pipeline_status(root: Path, locked: dict) -> dict:
             n = _count_xlsx(target, with_underscore=False)
             artifacts.append({"phase": phase, "name": "assay_sheets/Arm*.xlsx",
                               "present": n > 0, "detail": f"{n} flat files"})
+        elif rel == "SAMPLE_TREE.md":
+            # Phase 2 also produces sample_tree.json and the SAMPLE_TREE.html
+            # viewer. The HTML is a build artifact: flag it stale when older
+            # than the JSON it renders, so a re-run of the tree is visible here.
+            present = target.exists()
+            html = root / "SAMPLE_TREE.html"
+            js = root / "sample_tree.json"
+            detail = ""
+            if html.is_file():
+                stale = (js.is_file()
+                         and html.stat().st_mtime < js.stat().st_mtime)
+                detail = "+ HTML (stale, re-run tree)" if stale else "+ HTML"
+            elif present:
+                detail = "no HTML viewer"
+            artifacts.append({"phase": phase, "name": rel,
+                              "present": present, "detail": detail})
         elif rel == "RETRIEVE.TXT":
             present = target.is_file()
             lines = len(target.read_text().split()) if present else 0
