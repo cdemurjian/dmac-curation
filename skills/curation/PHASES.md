@@ -50,6 +50,44 @@ Neither number is reused.
 
 ---
 
+## What an "arm" is
+
+An **arm is a unit of build work** — the granularity at which the pipeline chunks, checkpoints,
+and parallelises a curation. It is not a formal NExtSEEK concept; it exists only in this pipeline.
+
+An arm is what flows through the whole back half:
+
+| Phase | What the arm is |
+|---|---|
+| 2 | one ASCII tree per arm in `SAMPLE_TREE.md` |
+| 4 | one task per arm, optionally `blockedBy` other arms |
+| 5 | one `scripts/build_<arm>.py` + a set of `assay_sheets/4sheet_originals/<arm>_<sampletype>.xlsx` |
+| 6 | one flat `assay_sheets/Arm{X}.xlsx` |
+| 7, 9, 12 | iterated over as `Arm*.xlsx` |
+
+Arms are labelled by letter (`A`, `B`, `C`, …) and are the argument to `/curate-build <arm>`.
+`/curate-status` reports progress as "6/8 arms built".
+
+**The word borrows clinical-trial language, but do not take it literally.** A trial arm is a
+treatment group, and treatment groups are independent by construction. Arms here are not: Phase 4
+explicitly supports "Arm G blocked by Arm E + Arm F". An arm is better read as *a coherent chunk of
+the dataset that can be built in one pass* — sometimes a treatment group, sometimes a downstream
+product that needs two upstream chunks finished first.
+
+### When to split into separate arms
+
+Split when the arms **differ in structure** — different sample types, different assays, different
+depth of tree. Splitting then buys real isolation: each arm builds, QAs and uploads on its own, and
+a problem in one does not block the others.
+
+Do NOT split when the groups differ only in the **value of an attribute**. Three treatment groups
+that share an identical sample-type chain and differ only in a `Treatment` field are one arm with a
+column, not three arms. Splitting them produces near-identical trees and multiplies the workbook
+count for no isolation benefit, and gives the copies room to drift apart.
+
+Rule of thumb: if two candidate arms would produce the same ASCII tree with only a label changed,
+they are one arm.
+
 ## Phase 0 — Init
 
 **Command:** `/curate-init [--lab CODE] [--pi NAME] [--mode NAME]`
@@ -111,11 +149,21 @@ overwrites what exists.
 5. Render ASCII trees per arm.
 6. Surface open structural questions (Q1, Q2, …) at the bottom.
 7. Render `templates/SAMPLE_TREE.md.j2` → `./SAMPLE_TREE.md`.
+8. Write `./sample_tree.json` — one node per sample type (with `count` = rows to create), one edge
+   per parent→child assay connection, carrying manuscript quotes and rationale. Omit `clade`; it is
+   derived from the assay's `Parent Clade Type` / `Child Clade Type`.
+9. Run `scripts/build_sample_tree_html.py` → `./SAMPLE_TREE.html`, the interactive review view.
+
+**Outputs:** `SAMPLE_TREE.md` (narrative, edited by hand), `sample_tree.json` (source of truth for
+the graph), `SAMPLE_TREE.html` (build artifact — regenerate, never edit). All three describe one
+tree derived once; they must not disagree.
 
 **Edge cases:**
-- New sample type not in `sampletypes_db.json` (e.g., proposed D.REF): mark as PENDING_SCHEMA, add admin question
+- New sample type not in `sampletypes_db.json` (e.g., proposed D.REF): mark as PENDING_SCHEMA, add admin question, and set `"match_type": "proposed_new"` so the viewer draws it dashed
 - Manuscript has no Methods section: pull from email + supplementary docs; flag as a question
 - Parent type ambiguous (e.g., D.IMG.Parent = OOC vs CEL/CHM/TIS): follow PI precedent in master, document the deviation
+- Clade warning on render: the declared clade contradicts the assay definition, or no assay covers the edge. Fix the model — don't suppress the warning
+- No organism-tier type for the study system (e.g., insects): fold organism attributes onto the tissue node, leave `Parent` a placeholder, and raise a vocabulary question
 
 ---
 
