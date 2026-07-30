@@ -37,6 +37,12 @@ Each output file contains one "Samples" sheet with columns:
   - assay_titles                            (parent assay name from the original
                                              4-sheet Assay tab)
 
+Alongside each flat upload file, a companion `<arm>_review.xlsx` is written with
+ONE SHEET PER SAMPLE TYPE and every field in its own column. The flat file packs
+each sample into a single `json_metadata` blob — correct for upload, unreadable
+for a human — so the review file is what a curator actually reads before
+submitting. It is never uploaded.
+
 The 20 original per-sample-type xlsx files are moved to
   assay_sheets/4sheet_originals/
 for reference (in case the schema-level review benefits from the per-type
@@ -44,6 +50,7 @@ Instructions docs).
 """
 
 import os
+import re
 import sys
 import json
 import shutil
@@ -186,6 +193,64 @@ def read_4sheet(path):
     wb.close()
     return sampletype, parent_assay, records
 
+# ─── Build the human-review workbook (one sheet per sample type) ───────────
+
+def build_review_workbook(arm_name, source_files, out_dir):
+    """Emit `<arm>_review.xlsx`: one sheet per SAMPLE TYPE, every field its own column.
+
+    The flat upload file carries each sample as a single `json_metadata` blob, which is
+    what NExtSEEK wants and what a human cannot read. This is the reviewable twin: the
+    same records, re-expanded, split the way the curator thinks about them.
+
+    Kept as a SEPARATE FILE rather than an extra sheet so the upload workbook stays
+    exactly what gets submitted, with nothing extra in it.
+
+    A sample type split across several source files (e.g. A.TITR appearing in both an
+    arm build and a published-data build) is MERGED into one sheet — the sheet is per
+    sample type, not per source file.
+    """
+    by_type = defaultdict(list)
+    for sampletype, _, records in source_files:
+        by_type[sampletype].extend(records)
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    for sampletype in sorted(by_type):
+        records = by_type[sampletype]
+        # Identity first, then every other field in order of first appearance, so
+        # related fields stay adjacent instead of being alphabetised apart.
+        lead = [c for c in ("UID", "Name", "Parent") if any(c in r for r in records)]
+        seen, rest = set(lead), []
+        for rec in records:
+            for k in rec:
+                if k not in seen:
+                    seen.add(k)
+                    rest.append(k)
+        cols = lead + rest
+
+        # Excel sheet names cap at 31 chars and forbid []:*?/\
+        title = re.sub(r"[\[\]:*?/\\]", "-", sampletype)[:31]
+        ws = wb.create_sheet(title)
+        ws.append(cols)
+        for cell in ws[1]:
+            cell.fill = HDR_FILL
+            cell.font = HDR_FONT
+        for rec in records:
+            ws.append([rec.get(c, "") for c in cols])
+
+        for i, col in enumerate(cols, 1):
+            # Parent can hold hundreds of semicolon-joined UIDs; bound it so it cannot
+            # push every other column off screen.
+            width = {"UID": 24, "Name": 34, "Parent": 45}.get(col, 22)
+            ws.column_dimensions[get_column_letter(i)].width = width
+        ws.freeze_panes = "B2"
+
+    out = out_dir / f"{arm_name}_review.xlsx"
+    wb.save(out)
+    return out, {st: len(r) for st, r in by_type.items()}
+
+
 # ─── Build one flat-format xlsx for an arm ─────────────────────────────────
 
 def build_arm_flat(arm_name, source_files, out_dir, lookup, synonyms):
@@ -255,6 +320,11 @@ def build_arm_flat(arm_name, source_files, out_dir, lookup, synonyms):
     readme.append(["                    (RNA Extraction=61, Tissue Collection=74, Short Read Sequencing=64,"])
     readme.append(["                     Cell Culture=85; others blank — see Q S3 in QUESTIONS_FOR_YUFEI.md)"])
     readme.append(["  json_metadata   — UPLOAD PAYLOAD: full per-sample attributes as compact JSON"])
+    readme.append([])
+    readme.append(["Companion file:"])
+    readme.append([f"  {arm_name}_review.xlsx — THE SAME ROWS, one sheet per sample type,"])
+    readme.append(["      every field in its own column. Read that one to review the metadata;"])
+    readme.append(["      upload THIS one. The review file is never submitted."])
     readme.append([])
     readme.append(["NOTE: NExtSEEK reads uid, sampletype, json_metadata, plus EITHER assay_ids OR"])
     readme.append(["      assay_titles (both are in the InputRowModel schema, but the spec does NOT"])
@@ -388,7 +458,8 @@ if __name__ == "__main__":
             sources.append((st, pa, recs))
         # Build consolidated flat file
         out, n = build_arm_flat(arm, sources, src, lookup, synonyms)
-        arm_outputs.append((out, n, len(by_arm[arm])))
+        review_out, review_counts = build_review_workbook(arm, sources, src)
+        arm_outputs.append((out, n, len(by_arm[arm]), review_out, review_counts))
 
     # Move originals to archive AFTER reading (only if we read from src root —
     # otherwise they're already in arch).
@@ -397,8 +468,12 @@ if __name__ == "__main__":
             shutil.move(str(src / f), str(arch / f))
 
     print("Consolidated:")
-    for out, n, src_count in arm_outputs:
-        print(f"  ✓ {os.path.basename(out):20s} {n:>4d} rows  (from {src_count} per-type files)")
+    for out, n, src_count, review_out, review_counts in arm_outputs:
+        print(f"  ✓ {os.path.basename(out):26s} {n:>4d} rows  (from {src_count} per-type files)")
+        types = ", ".join(f"{st} {c}" for st, c in sorted(review_counts.items()))
+        print(f"  ✓ {os.path.basename(review_out):26s} {n:>4d} rows  "
+              f"(review copy, one sheet per sample type)")
+        print(f"      {types}")
 
     # Report on assay-id resolution coverage
     cited = set()
