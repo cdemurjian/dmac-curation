@@ -16,10 +16,69 @@ which type - do not guess.
 into the current working directory, under `schema/`. There is **no lockfile**
 requirement, no scaffold, and no project. This works from anywhere.
 
-## The mode never applies anything
+## The default mode never applies anything
 
-It **never writes to NExtSEEK** and never edits `sampletypes_db.json`. Its
-product is a proposal with rationale, which a human reviews and applies by hand.
+By default it **never writes to NExtSEEK** and never edits `sampletypes_db.json`.
+Its product is a proposal with rationale, which a human reviews and applies by hand.
+
+The one exception is the explicit `apply` verb below, which exists so a validated,
+agreed schema gap can be closed without hand-editing through the web UI. Everything
+else in this mode stays read-only.
+
+## `apply` — add an attribute to a live sample type
+
+Invoked as `/curate-sampletype apply <TYPE> --add <FIELD>`, normally as the handoff
+from `/curate-qc` after the server rejected a field that genuinely ought to exist.
+
+**This is a GLOBAL, SHARED-SCHEMA WRITE.** Sample types are not project-scoped:
+adding `Notes` to `A.TITR` changes that type for every project and every existing
+`A.TITR` record across NExtSEEK. Treat it accordingly.
+
+### Steps
+
+1. Read the current definition and show it to the user:
+
+   ```bash
+   uv run --script <PLUGIN>/scripts/nextseek_api.py sampletype-get <TYPE>
+   ```
+
+2. Show the plan — dry-run is the default, so this sends nothing:
+
+   ```bash
+   uv run --script <PLUGIN>/scripts/nextseek_api.py \
+     sampletype-add-attribute <TYPE> --name <FIELD> --type Text
+   ```
+
+3. **Get explicit confirmation for this specific type and field.** Not blanket
+   approval for a batch. State the blast radius in the same breath.
+
+4. Apply, then verify:
+
+   ```bash
+   uv run --script <PLUGIN>/scripts/nextseek_api.py \
+     sampletype-add-attribute <TYPE> --name <FIELD> --type Text --apply
+   ```
+
+   The command re-GETs the type afterwards and fails loudly if any pre-existing
+   attribute went missing. Do not treat a 200 response as success on its own.
+
+5. Re-run `/curate-qc` to confirm the rows that were failing now validate.
+
+6. Do one type first and verify it end to end before batching the rest.
+
+### Why the wrapper matters
+
+The server treats `sample_attributes` as the COMPLETE list, not a delta — a PATCH
+carrying only the new field would **delete every other attribute on the type**.
+`sampletype-add-attribute` always re-sends the full array with each existing entry
+keyed by its `id`, then verifies the round-trip. Never hand-roll this PATCH.
+
+### When NOT to apply
+
+If the server rejected a field because *we* got it wrong — invented it, mis-cased it
+(`Bead_coating_vendor` vs `Bead_coating_Vendor`), or copied a typo out of
+`sampletypes_db.json` (`QuanitifcationMethod`) — **fix the build script instead**.
+Patching the schema to accommodate our own error pollutes a shared vocabulary.
 
 ## The loop
 

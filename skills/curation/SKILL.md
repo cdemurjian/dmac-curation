@@ -27,7 +27,7 @@ is nothing to declare in `plugin.json`.
 
 | mode | entry points | reference | state scope |
 |---|---|---|---|
-| `pipeline` | `/curate-init`, `/curate-inventory`, `/curate-sample-tree`, `/curate-questions`, `/curate-build`, `/curate-consolidate`, `/curate-resolve-assays`, `/curate-qa`, `/curate-deposit`, `/curate-retrieve`, `/curate-validate`, `/curate-email`, `/curate-status` | `PHASES.md` | project - needs a lockfile and scaffold |
+| `pipeline` | `/curate-init`, `/curate-inventory`, `/curate-sample-tree`, `/curate-questions`, `/curate-build`, `/curate-consolidate`, `/curate-resolve-assays`, `/curate-qa`, `/curate-qc`, `/curate-deposit`, `/curate-retrieve`, `/curate-validate`, `/curate-email`, `/curate-status` | `PHASES.md` | project - needs a lockfile and scaffold |
 | `fdh` | `/fdh-upload`, `/fdh-api` | `FDH.md` | credentials only - no project needed |
 | `schema` | `/curate-sampletype` | `SCHEMA.md` | cwd - writes where you are, no project needed |
 | `report` | `/curate-report` | `REPORTS.md` | input - reads a lockfile if present, never requires one |

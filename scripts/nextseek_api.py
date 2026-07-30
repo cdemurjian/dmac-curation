@@ -115,6 +115,40 @@ class NExtSEEKClient:
         """GET /projects/{id}/ — returns the full JSON:API response dict."""
         return self._get(f"/projects/{project_id}/")
 
+    def get_sample_type(self, ident) -> dict:
+        """GET /sample_types/{id-or-title}/ — full schema incl. sample_attributes."""
+        return self._get(f"/sample_types/{ident}/")
+
+    def patch_sample_type(self, type_id, sample_attributes: list) -> dict:
+        """PATCH /sample_types/{id}/ — replace the sample_attributes array.
+
+        DESTRUCTIVE IF MISUSED. The server treats `sample_attributes` as the
+        COMPLETE list, not a delta: any existing attribute omitted from the
+        array is dropped from the type. Callers must send every current
+        attribute (each carrying its `id`) plus whatever is being added.
+        `add_sample_type_attribute()` below is the safe wrapper — prefer it.
+
+        Sample types are GLOBAL. A change here affects every project and every
+        existing record of this type across NExtSEEK, not just the caller's.
+        """
+        csrf = self._prime_csrf()
+        headers = {"Content-Type": "application/json"}
+        if csrf:
+            headers["X-CSRFToken"] = csrf
+            headers["Referer"] = self.base_url
+        url = f"{self.base_url}/nextseek_api/sample_types/{type_id}/"
+        payload = {"data": {"id": str(type_id), "type": "sample_types",
+                            "attributes": {"sample_attributes": sample_attributes}}}
+        resp = self.session.patch(url, json=payload, headers=headers,
+                                  timeout=self.timeout)
+        if not resp.ok:
+            raise NExtSEEKError(resp.status_code, url, resp.text)
+        try:
+            return resp.json()
+        except ValueError:
+            raise NExtSEEKError(resp.status_code, url,
+                                f"Non-JSON response: {resp.text[:500]}")
+
     def _prime_csrf(self) -> Optional[str]:
         """GET /login/ to populate the csrftoken cookie, then return its value.
 
@@ -334,6 +368,150 @@ def cmd_fetch_assays(args: argparse.Namespace) -> int:
     return 0
 
 
+def _client_from_args(args: argparse.Namespace) -> "NExtSEEKClient":
+    """Resolve credentials the same way cmd_fetch_assays does, then build a client.
+
+    Raises SystemExit(2) with the same guidance message when nothing is available.
+    """
+    _load_dotenv()
+    username = getattr(args, "username", None) or os.environ.get("NEXTSEEK_USERNAME")
+    password = getattr(args, "password", None) or os.environ.get("NEXTSEEK_PASSWORD")
+    token = getattr(args, "token", None) or os.environ.get("NEXTSEEK_TOKEN")
+    if not (username and password) and not token:
+        print("error: provide credentials via one of:\n"
+              "  --username + --password\n"
+              "  NEXTSEEK_USERNAME + NEXTSEEK_PASSWORD env vars (or in .env)\n"
+              "  --token / NEXTSEEK_TOKEN",
+              file=sys.stderr)
+        raise SystemExit(2)
+    return NExtSEEKClient(username=username, password=password, token=token,
+                          base_url=getattr(args, "base_url", DEFAULT_BASE_URL))
+
+
+def _unwrap(doc: dict) -> dict:
+    """JSON:API responses arrive as {'data': {...}} or {'data': [{...}]}."""
+    data = doc.get("data", doc)
+    return data[0] if isinstance(data, list) and data else data
+
+
+def _attr_rows(record: dict) -> list:
+    return (record.get("attributes") or {}).get("sample_attributes") or []
+
+
+def _fmt_attr(a: dict) -> str:
+    t = (a.get("sample_attribute_type") or {}).get("title") or "?"
+    req = "required" if a.get("required") else "optional"
+    return f"{str(a.get('title')):28s} {t:12s} {req:9s} (id={a.get('id')}, pos={a.get('pos')})"
+
+
+def cmd_sampletype_get(args: argparse.Namespace) -> int:
+    client = _client_from_args(args)
+    rec = _unwrap(client.get_sample_type(args.sampletype))
+    attrs = _attr_rows(rec)
+    title = (rec.get("attributes") or {}).get("title")
+    print(f"SampleType {title!r}  (id {rec.get('id')})  — {len(attrs)} attributes\n")
+    for a in sorted(attrs, key=lambda x: x.get("pos") or 0):
+        print(f"  {_fmt_attr(a)}")
+    return 0
+
+
+def cmd_sampletype_add_attribute(args: argparse.Namespace) -> int:
+    """Add one attribute to a sample type. Dry-run unless --apply.
+
+    Sends the FULL attribute array (existing entries keyed by id, plus the new
+    one) because the server replaces rather than merges. Omitting an existing
+    attribute would delete it.
+    """
+    client = _client_from_args(args)
+    rec = _unwrap(client.get_sample_type(args.sampletype))
+    type_id = rec.get("id")
+    existing = _attr_rows(rec)
+    names = {str(a.get("title")) for a in existing}
+
+    print(f"SampleType {args.sampletype!r} (id {type_id}) — {len(existing)} attributes today")
+
+    if args.name in names:
+        print(f"\n✓ {args.name!r} is ALREADY defined — nothing to do.")
+        return 0
+
+    # Rebuild the complete array. Existing entries keep their id so the server
+    # updates them in place instead of recreating (and renumbering) them.
+    #
+    # sample_attribute_type is sent as an ID ref, not a title ref: the GET returns
+    # a rich object ({id, title, base_type, regexp}) and the upstream SEEK is
+    # happier resolving the id it already issued than re-matching on title.
+    # `description` and `pid` are echoed back so a PATCH does not blank them.
+    def _type_ref(a: dict) -> dict:
+        t = a.get("sample_attribute_type") or {}
+        return {"id": str(t["id"])} if t.get("id") else {"title": t.get("title") or "Text"}
+
+    payload = []
+    for a in sorted(existing, key=lambda x: x.get("pos") or 0):
+        row = {
+            "id": str(a.get("id")),
+            "title": a.get("title"),
+            "sample_attribute_type": _type_ref(a),
+            "required": bool(a.get("required")),
+            "pos": a.get("pos"),
+        }
+        if a.get("description") is not None:
+            row["description"] = a["description"]
+        if a.get("pid") is not None:
+            row["pid"] = a["pid"]
+        payload.append(row)
+
+    # Resolve the new attribute's type id from an existing attribute of the same
+    # title, so we reuse the server's own id rather than relying on title matching.
+    type_ref = {"title": args.type}
+    for a in existing:
+        t = a.get("sample_attribute_type") or {}
+        if t.get("title") == args.type and t.get("id"):
+            type_ref = {"id": str(t["id"])}
+            break
+
+    next_pos = max([a.get("pos") or 0 for a in existing] or [0]) + 1
+    payload.append({                     # no id -> server creates it
+        "title": args.name,
+        "sample_attribute_type": type_ref,
+        "required": bool(args.required),
+        "pos": next_pos,
+    })
+
+    print(f"\nPLAN: add {args.name!r} ({args.type}, "
+          f"{'required' if args.required else 'optional'}) at pos {next_pos}")
+    print(f"      re-sending {len(existing)} existing attributes unchanged "
+          f"(server replaces the array, so they must all be present)")
+
+    if getattr(args, "debug", False):
+        import json as _j
+        print("\n--- payload that would be sent ---")
+        print(_j.dumps({"data": {"id": str(type_id), "type": "sample_types",
+                                 "attributes": {"sample_attributes": payload}}}, indent=1)[:2500])
+
+    if not args.apply:
+        print("\nDRY RUN — nothing sent. Re-run with --apply to PATCH.")
+        print("NOTE: sample types are GLOBAL. This affects every project and every")
+        print("      existing record of this type across NExtSEEK.")
+        return 0
+
+    print(f"\nPATCHing {args.sampletype} …")
+    client.patch_sample_type(type_id, payload)
+
+    # Trust the round-trip, not the response body.
+    after = _attr_rows(_unwrap(client.get_sample_type(args.sampletype)))
+    after_names = {str(a.get("title")) for a in after}
+    lost = names - after_names
+    if lost:
+        print(f"  ✗ ATTRIBUTES LOST: {sorted(lost)} — investigate immediately")
+        return 1
+    if args.name not in after_names:
+        print(f"  ✗ {args.name!r} not present after PATCH")
+        return 1
+    print(f"  ✓ verified: {len(after)} attributes, {args.name!r} added, "
+          f"all {len(existing)} originals intact")
+    return 0
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     """Dry-run validate one or more xlsx files against NExtSEEK without inserting."""
     _load_dotenv()
@@ -469,6 +647,37 @@ def main(argv=None) -> int:
     va.add_argument("--base-url", default=DEFAULT_BASE_URL)
     add_config_args(va)
     va.set_defaults(func=cmd_validate)
+
+    # ── sample-type schema inspection / patching ────────────────────────────
+    stg = sub.add_parser(
+        "sampletype-get",
+        help="Show a sample type's current attribute list (read-only).")
+    stg.add_argument("sampletype", help="Short code or numeric id, e.g. A.TITR")
+    stg.add_argument("--username", default=None)
+    stg.add_argument("--password", default=None)
+    stg.add_argument("--token", default=None)
+    stg.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    stg.set_defaults(func=cmd_sampletype_get)
+
+    sta = sub.add_parser(
+        "sampletype-add-attribute",
+        help="Add ONE attribute to a sample type. Dry-run unless --apply. "
+             "Sample types are GLOBAL: this affects every project.")
+    sta.add_argument("sampletype", help="Short code or numeric id, e.g. A.TITR")
+    sta.add_argument("--name", required=True, help="Attribute title, e.g. Notes")
+    sta.add_argument("--type", default="Text",
+                     help="SampleAttributeType title (default: Text)")
+    sta.add_argument("--required", action="store_true",
+                     help="Mark the new attribute required (default: optional)")
+    sta.add_argument("--debug", action="store_true",
+                     help="Print the exact JSON payload before sending.")
+    sta.add_argument("--apply", action="store_true",
+                     help="Actually PATCH. Without this the command only prints the plan.")
+    sta.add_argument("--username", default=None)
+    sta.add_argument("--password", default=None)
+    sta.add_argument("--token", default=None)
+    sta.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    sta.set_defaults(func=cmd_sampletype_add_attribute)
 
     args = p.parse_args(argv)
     return args.func(args)

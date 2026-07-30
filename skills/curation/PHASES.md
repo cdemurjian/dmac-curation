@@ -367,6 +367,40 @@ projects.
 
 ---
 
+## Phase 9b — QC (server-side validation)
+
+**Command:** `/curate-qc`
+
+**Inputs:** `assay_sheets/<name>.xlsx` (consolidated flat), `.env` credentials, project id
+
+**Action:**
+1. `scripts/nextseek_api.py validate --project-id N --checks structure,dag,name_check --dump-dir <scratch> <file>`
+2. If invalid, parse the DUMP (the console truncates at 20 of potentially hundreds).
+3. Group `VALIDATION_ATTRIBUTE_NAME` errors by sample type. Decide per field whether it is
+   our error (invented / mis-cased / a typo copied from `sampletypes_db.json`) or a genuine
+   schema gap.
+4. Our error -> fix the build script. Genuine gap -> discuss with the user, then hand off to
+   `/curate-sampletype apply <TYPE> --add <FIELD>`.
+5. Re-run to confirm.
+
+**Why it exists:** Phase 9's `/curate-qa` is entirely local. It cannot know which attribute
+names the live server recognises, so it will happily pass a file the server rejects outright.
+Run 9a for build correctness and 9b for server conformance; 9b is the last gate before upload.
+
+**Edge cases:**
+- `CONVERT failed: Missing required columns: ['assay_ids']` — the flat file needs `uid`,
+  `sampletype`, `assay_ids`, `json_metadata`. Rebuild it.
+- `Unknown columns (ignored): ['name','parent','notes_summary']` — expected. Those are the
+  consolidator's denormalized review columns; the server ignores them.
+- Bundled `sampletypes_db.json` contradicts the server in BOTH directions: it lists fields the
+  server rejects, carries at least one typo (`QuanitifcationMethod`), and hides case
+  distinctions the server enforces (`Bead_coating_vendor` on D.TITR vs `Bead_coating_Vendor`
+  on D.FCRB). Probe the server; record findings in the project's
+  `context/live_sampletype_attributes.json`.
+- A sample-type patch is a GLOBAL write. Never do it without explicit per-type agreement.
+
+---
+
 ## Phase 10 — Deposit
 
 **Command:** `/curate-deposit <geo|zenodo|omero> [args]`
