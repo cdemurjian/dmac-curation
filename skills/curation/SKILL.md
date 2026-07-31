@@ -82,12 +82,28 @@ the metadata exists and go find it; a placeholder is a failure to look, not a
 real gap.
 
 Before writing (or placeholdering) any value for such a study, harvest these
-four sources in order and stop at the first real hit:
+five sources in order and stop at the first real hit:
 
-1. Manuscript **Methods**
+1. Manuscript **Methods** — read the WHOLE section, not a skim. Detailed
+   Materials and Methods often sit at the END of the main text (e.g. PNAS) or
+   only in the SI; never conclude "Methods is thin" without reading both the
+   main text and the supplement end to end.
 2. Manuscript **Supplemental / Supplementary Methods**
 3. Manuscript **Data Availability statement** (accessions, platforms, repo URLs)
-4. The **master NExtSEEK sheet** — `previous_metadata/*.xlsx` (already-curated rows)
+4. The **named deposit itself** — when a Data Availability statement gives an
+   accession, FETCH the deposit and enumerate its files; reading the accession is
+   not the same as reading the deposit. Public archives need no auth, e.g.:
+   - PRIDE / ProteomeXchange: FTP directory index + `checksum.txt` under
+     `https://ftp.pride.ebi.ac.uk/pride/data/archive/<YYYY>/<MM>/<PXDxxxxxx>/`
+   - GEO: the series supplementary-file list / `<GSE>_RAW.tar`; SRA: the run table;
+     FairDomHub: the `studies/assays/samples` JSON.
+   Cross-check the manifest against the supplementary data files already sitting in
+   `files/`. This manifest is **ground truth for the data tier**: the number and
+   identity of raw/processed files fixes the D.* node counts, filenames, and
+   checksums. Do NOT infer data-tier structure from precedent when a deposit exists.
+5. The **master NExtSEEK sheet** — `previous_metadata/*.xlsx` (already-curated
+   rows). Precedent here governs **format and attribute names**, not how many data
+   files some *other* study produced — never let it override the deposit on structure.
 
 Then:
 
