@@ -20,7 +20,7 @@ The 11 pipeline phases run inventory (1) through email (13):
 | 2 | Sample tree | `/curate-sample-tree` | `SAMPLE_TREE.md` |
 | 3 | Questions | `/curate-questions [add\|list\|resolve]` | `QUESTIONS_FOR_PI.md` |
 | 5 | Build | `/curate-build [<arm>]` | `assay_sheets/4sheet_originals/*.xlsx` + `scripts/build_<arm>.py` |
-| 6 | Consolidate | `/curate-consolidate` | `assay_sheets/Arm{X}.xlsx` (flat format) |
+| 6 | Consolidate | `/curate-consolidate` | `assay_sheets/Arm{X}-upload.xlsx` (flat format) |
 | 7 | Resolve assays | `/curate-resolve-assays --project-id N` | `context/assay_ids_cache.json` + `context/assay_synonyms.json` |
 | 9 | QA | `/curate-qa` | console disposition report |
 | 10 | Deposit | `/curate-deposit <geo\|zenodo\|omero>` | external uploads + `Link_PrimaryData` backfilled |
@@ -63,8 +63,8 @@ An arm is what flows through the whole back half:
 | 2 | one ASCII tree per arm in `SAMPLE_TREE.md` |
 | 4 | one task per arm, optionally `blockedBy` other arms |
 | 5 | one `scripts/build_<arm>.py` + a set of `assay_sheets/4sheet_originals/<arm>_<sampletype>.xlsx` |
-| 6 | one flat `assay_sheets/Arm{X}.xlsx` |
-| 7, 9, 12 | iterated over as `Arm*.xlsx` |
+| 6 | one flat `assay_sheets/Arm{X}-upload.xlsx` |
+| 7, 9, 12 | iterated over as `Arm*-upload.xlsx` |
 
 Arms are labelled by letter (`A`, `B`, `C`, …) and are the argument to `/curate-build <arm>`.
 `/curate-status` reports progress as "6/8 arms built".
@@ -241,7 +241,7 @@ passed it, so the mechanism existed and nothing populated it.
 1. Identify arm. If not supplied, list arms from `SAMPLE_TREE.md` and `AskUserQuestion`.
 2. Read sample types and counts for the arm.
 3. Read master to identify existing parent UIDs. Workbook precedent beats the schema (hard rule 4).
-4. Read manuscript for protocol section names and instrument details.
+4. Gather field values. For a **published/submitted** study run the Published-paper harvest (SKILL.md): check the manuscript **Methods**, **Supplemental Methods**, and **Data Availability statement**, plus the **master NExtSEEK sheet** (`previous_metadata/*.xlsx`), for instrument, platform, protocol, and manifest details before deciding any value is missing. A value genuinely absent from all four is left blank and logged to `QUESTIONS_FOR_PI.md`, never placeholdered.
 5. Generate `./scripts/build_<arm>.py`:
    - PEP 723 inline deps (openpyxl)
    - `sys.path.insert(0, "<PLUGIN_PATH>/scripts")`
@@ -253,7 +253,8 @@ passed it, so the mechanism existed and nothing populated it.
 7. Suggest the next arm, or `/curate-consolidate`.
 
 **Edge cases:**
-- Missing manifest data: use `placeholder("<what is missing>")`, never a blank.
+- Missing manifest data, **in-prep study**: use `placeholder("<what is missing>")`, never a blank.
+- Missing manifest data, **published/submitted study**: run the Published-paper harvest first (SKILL.md). If still absent, leave blank and add a question to `QUESTIONS_FOR_PI.md` — no placeholder.
 - Sample type new to the schema: write to `assay_sheets/pending_schema/`.
 - Mid-arm scope ambiguity: stop, add to `QUESTIONS_FOR_PI.md`, propose to the user.
 
@@ -265,7 +266,9 @@ passed it, so the mechanism existed and nothing populated it.
 
 **Inputs:** `assay_sheets/4sheet_originals/*.xlsx`, optional `context/assay_ids_cache.json` + `context/assay_synonyms.json`
 
-**Output:** `assay_sheets/Arm{X}.xlsx`, flat format, one per arm.
+**Output:** `assay_sheets/Arm{X}-upload.xlsx`, flat format, one per arm. The
+`-upload` suffix is what `/curate-retrieve` and `/curate-deposit` read, so the
+sheet does not need renaming between here and Phase 11.
 
 ### Flat cannot carry controlled vocabulary
 
@@ -307,7 +310,7 @@ before designing anything new around it.
 **Edge cases:**
 - Cache or synonyms missing: leave `assay_ids` blank, suggest `/curate-resolve-assays`.
 - Pending-schema sample types: write to `assay_sheets/pending_schema/Arm<X>.xlsx`.
-- Re-run: prior consolidated outputs in the target dir are deleted first, so a stale arm file cannot survive. That deletion is scoped to the resolved project's assay-sheets dir and refuses to run inside the plugin checkout.
+- Re-run: prior consolidated outputs (`Arm{X}-upload.xlsx` and legacy `Arm{X}.xlsx`) in the target dir are deleted first, so a stale arm file cannot survive. A `-upload-new.xlsx` working copy is **never** deleted — it holds curator hand-edits and GEO/Zenodo backfill (hard rule 2). The deletion is scoped to the resolved project's assay-sheets dir and refuses to run inside the plugin checkout.
 
 ---
 
@@ -410,7 +413,7 @@ Routes by first arg:
 
 ### `/curate-deposit geo [--type bulk|spatial]`
 
-- **The build is delegated to `report` mode.** Run `/curate-report GEO <input>`; Phase 10 keeps only the genuinely pipeline-specific parts — external upload and accession backfill. This route was a **dead end** before the delegation: nothing produced the input it named and no GEO template xlsx shipped with the plugin, so delegating to report mode was closer to a free fix than a rewrite, and it avoids maintaining two divergent GEO build paths — the exact divergence the toolkit spec warns about elsewhere. Ordering is deliberate: GEO deposit happens **before** NExtSEEK upload because accessions must be backfilled into the sheets first, which is why report mode's curated-sheet adapter reads `assay_sheets/Arm{X}.xlsx` locally with no API call.
+- **The build is delegated to `report` mode.** Run `/curate-report GEO <input>`; Phase 10 keeps only the genuinely pipeline-specific parts — external upload and accession backfill. This route was a **dead end** before the delegation: nothing produced the input it named and no GEO template xlsx shipped with the plugin, so delegating to report mode was closer to a free fix than a rewrite, and it avoids maintaining two divergent GEO build paths — the exact divergence the toolkit spec warns about elsewhere. Ordering is deliberate: GEO deposit happens **before** NExtSEEK upload because accessions must be backfilled into the sheets first, which is why report mode's curated-sheet adapter reads `assay_sheets/Arm{X}-upload.xlsx` locally with no API call.
 - Drives `scripts/upload_geo_ncftp.sh` for upload.
 - After GEO acceptance (manual confirmation): `scripts/apply_geo_accessions.py` patches D.SEQ/A.GEX/A.SPTX with GSM and series URLs. Bulk and spatial are separate GEO submissions with separate series accessions, so the script takes a flag pair per submission. See `commands/curate-deposit.md` for the full invocation and roster format.
 
@@ -440,7 +443,7 @@ Routes by first arg:
 
 **Command:** `/curate-retrieve [--include-parents]`
 
-**Inputs:** `assay_sheets/*-upload-new.xlsx`
+**Inputs:** `assay_sheets/*-upload-new.xlsx` (preferred), else `*-upload.xlsx` — the latter is what `/curate-consolidate` now writes directly, so no rename step is needed.
 
 **Action:**
 1. Invoke `scripts/build_retrieve.py`.

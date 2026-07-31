@@ -51,7 +51,7 @@ Both LLM steps are **O(columns), not O(rows)**. That is the whole design.
 | UIDs on the command line | `adapt_uids` - POST `/nextseek_api/admin/samples/retrieve/` |
 | `RETRIEVE.TXT` | `adapt_retrieve_txt` |
 | `*_AllMetadata*.xlsx` | `adapt_nextseek_workbook` - local read, no API call |
-| `Arm{X}.xlsx` | `adapt_curated_sheet` - local read, works **before** upload |
+| `Arm{X}-upload.xlsx` | `adapt_curated_sheet` - local read, works **before** upload (matches any `Arm*` sheet without an underscore) |
 | any other xlsx / csv | `adapt_tabular` |
 
 All emit the same shape. Everything downstream is adapter-agnostic.
@@ -73,7 +73,7 @@ Read the template spec (`context/report_templates/GEO-updated.json` or
 
 ```json
 { "report_type": "GEO",
-  "source": {"adapter": "curated_sheet", "path": "assay_sheets/ArmA.xlsx"},
+  "source": {"adapter": "curated_sheet", "path": "assay_sheets/ArmA-upload.xlsx"},
   "row_scope": {"target_sampletype": "D.SEQ", "expected_rows": 117},
   "samples": {
     "*library name":         {"source": "UID"},
@@ -111,9 +111,15 @@ every error and re-validate. Do not proceed with errors outstanding.
 
 ### Step 6 - write only the synthesize fields
 
-Study title, summary and experimental design. If the project has a
-`manuscript/`, read it. If it does not, say so and let those fields become
-placeholders rather than inventing prose.
+Study title, summary and experimental design. Report mode is inherently a
+published/submitted path, so run the Published-paper harvest (SKILL.md) before
+degrading anything: read the manuscript **Methods**, **Supplemental Methods**,
+and **Data Availability statement**, plus the **master NExtSEEK sheet**
+(`previous_metadata/*.xlsx`). Only after that harvest comes up empty does a
+field degrade — and here that means a placeholder in the artifact plus a
+`<FORMAT>.completeness.md` entry (unlike pipeline build, a blank required GEO/SRA
+field fails validation silently, so the visible marker stays). Never invent
+prose.
 
 ### Steps 7 through 9
 
