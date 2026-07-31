@@ -26,6 +26,18 @@ than a footgun.
 
 Reads go through the REST API, which works fine and is schema-validated.
 
+STOPGAP. This drives an admin-UI endpoint, not a designed API: superuser-only, a GET with
+JSON in query params, and no Rails validation (see _validate for the three guards that
+replace it). It is expected to be superseded by a proper nextseek_api REST write endpoint
+wrapping DBtable_sampleattribute + updateSampleType; when that exists, make this a thin
+client of it.
+
+ALSO: a change made here is INVISIBLE to batch-upload validation and to the upload itself
+until the NExtSEEK app workers are restarted. prefetch_sample_type_attributes caches
+sample_type_id -> attribute titles in a module-level dict with no TTL and no invalidation
+on write. The web attributes page will show your new attribute while /curate-qc still
+denies it; that disagreement is the bug, not a failed write.
+
 Usage:
     uv run scripts/sampletype_attr.py types
     uv run scripts/sampletype_attr.py list A.TITR
