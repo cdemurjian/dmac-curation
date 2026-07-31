@@ -58,6 +58,19 @@ def test_build_retrieve_empty_dir(tmp_path):
 # plugin-tree target; they never hand the loop a deletable file inside the real
 # plugin, so even a broken guard could not destroy anything here.
 
+def test_consolidated_output_predicate_protects_upload_new():
+    """The cleanup predicate deletes owned outputs but keeps working copies."""
+    f = consolidate_to_flat.is_consolidated_output
+    # Owned outputs — deletable before a re-run.
+    assert f("ArmA-upload.xlsx") is True        # current suffixed output
+    assert f("ArmA.xlsx") is True               # legacy bare-arm output
+    # NEVER deletable.
+    assert f("ArmA-upload-new.xlsx") is False   # protected hand-edited copy
+    assert f("ArmA_RNA.xlsx") is False          # 4-sheet source (has underscore)
+    assert f("~$ArmA-upload.xlsx") is False     # openpyxl lock file
+    assert f("notes.txt") is False              # not an xlsx
+
+
 def test_consolidate_guard_predicate_rejects_plugin_and_accepts_project(tmp_path):
     """The guard predicate: reject the plugin tree, accept a real project's dir."""
     plugin = plugin_root()

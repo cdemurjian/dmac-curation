@@ -20,12 +20,16 @@ Per /nextseek_api/batch-upload/start/ spec:
   the 4-sheet format is auto-detected; otherwise flat. Multiple sample types
   in one file are ONLY allowed in flat format.
 
+Output is named `Arm{X}-upload.xlsx` — the `-upload` suffix the downstream
+retrieve and deposit steps read, so no rename is needed between here and
+Phase 11. (`--all-in-one NAME` still writes exactly `NAME.xlsx`.)
+
 Output (5 files):
-  ArmA.xlsx — 117 rows: RNA, DNA, D.SEQ, D.MSP (phospho), D.IMG (H&E)
-  ArmB.xlsx —  74 rows: CEL, MUS, TIS, D.MSP (mouse cell-line MHC)
-  ArmE.xlsx —  78 rows: PAT, PAV, TIS, CEL, MUS, D.MSP (human PDX)
-  ArmF.xlsx —  96 rows: PAT, PAV, TIS, D.MSP (human patient)
-  ArmH.xlsx —   2 rows: D.REF (SDA databases)
+  ArmA-upload.xlsx — 117 rows: RNA, DNA, D.SEQ, D.MSP (phospho), D.IMG (H&E)
+  ArmB-upload.xlsx —  74 rows: CEL, MUS, TIS, D.MSP (mouse cell-line MHC)
+  ArmE-upload.xlsx —  78 rows: PAT, PAV, TIS, CEL, MUS, D.MSP (human PDX)
+  ArmF-upload.xlsx —  96 rows: PAT, PAV, TIS, D.MSP (human patient)
+  ArmH-upload.xlsx —   2 rows: D.REF (SDA databases)
 
 Each output file contains one "Samples" sheet with columns:
   - uid, sampletype                         (required by NExtSEEK)
@@ -188,8 +192,12 @@ def read_4sheet(path):
 
 # ─── Build one flat-format xlsx for an arm ─────────────────────────────────
 
-def build_arm_flat(arm_name, source_files, out_dir, lookup, synonyms):
-    """source_files: list of (sampletype, parent_assay, [records])."""
+def build_arm_flat(arm_name, source_files, out_dir, lookup, synonyms, out_name):
+    """source_files: list of (sampletype, parent_assay, [records]).
+
+    `out_name` is the output basename (e.g. ``ArmA-upload.xlsx``); the caller
+    decides it so per-arm and ``--all-in-one`` runs can name files differently.
+    """
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Samples"
@@ -268,11 +276,31 @@ def build_arm_flat(arm_name, source_files, out_dir, lookup, synonyms):
         cell.alignment = Alignment(wrap_text=True)
     readme['A1'].font = Font(bold=True, size=14)
 
-    out = out_dir / f"{arm_name}.xlsx"
+    out = out_dir / out_name
     wb.save(out)
     return out, total
 
 # ─── Guard ────────────────────────────────────────────────────────────────
+
+def is_consolidated_output(name):
+    """True for a per-arm flat file this script OWNS and may delete before a
+    re-run: the underscore-free outputs it writes (``ArmA-upload.xlsx``) plus
+    legacy bare-arm outputs (``ArmA.xlsx``) from before the ``-upload`` suffix.
+
+    A ``-upload-new.xlsx`` is NEVER an output we own: it is the curator's
+    protected working copy (hard rule 2), carrying hand edits and GEO/Zenodo
+    backfill that a regeneration would silently destroy. So we keep it even
+    though it is also underscore-free. 4-sheet sources (``ArmA_RNA.xlsx``, with
+    an underscore) and openpyxl lock files (``~$…``) are likewise not ours.
+    """
+    if not name.endswith(".xlsx") or name.startswith("~"):
+        return False
+    if "_" in name:            # a 4-sheet source, not a consolidated output
+        return False
+    if "-upload-new" in name:  # the protected working copy — never delete
+        return False
+    return True
+
 
 def _is_inside_plugin(path, plugin=None):
     """True if `path` is the plugin checkout itself or lives inside its tree.
@@ -367,10 +395,11 @@ if __name__ == "__main__":
             arm = f.split("_")[0]
             by_arm[arm].append(str(source_dir / f))
 
-    # Clean any prior consolidated outputs so we don't mix old + new.
+    # Clean any prior consolidated outputs so we don't mix old + new — but keep
+    # `-upload-new.xlsx` working copies (see is_consolidated_output).
     # (A `src` at or under the plugin checkout was already rejected up-front.)
     for f in os.listdir(src):
-        if f.endswith(".xlsx") and "_" not in f:
+        if is_consolidated_output(f):
             os.remove(src / f)
 
     # Archive originals (only if reading from src root; otherwise they're already archived)
@@ -386,8 +415,10 @@ if __name__ == "__main__":
         for path in by_arm[arm]:
             st, pa, recs = read_4sheet(path)
             sources.append((st, pa, recs))
-        # Build consolidated flat file
-        out, n = build_arm_flat(arm, sources, src, lookup, synonyms)
+        # Build consolidated flat file. Per-arm outputs carry the `-upload`
+        # suffix retrieve/deposit read; --all-in-one keeps the exact NAME given.
+        out_name = f"{arm}.xlsx" if args.all_in_one else f"{arm}-upload.xlsx"
+        out, n = build_arm_flat(arm, sources, src, lookup, synonyms, out_name)
         arm_outputs.append((out, n, len(by_arm[arm])))
 
     # Move originals to archive AFTER reading (only if we read from src root —

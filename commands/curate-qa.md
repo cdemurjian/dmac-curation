@@ -6,15 +6,15 @@ The user wants Phase 9 — QA pass on the consolidated upload sheets.
 
 ## Prereqs
 
-- `assay_sheets/Arm*.xlsx` exists
+- `assay_sheets/Arm*-upload.xlsx` exists (or a `-upload-new.xlsx` working copy)
 
 ## Steps
 
-1. Invoke `uv run --script <PLUGIN>/scripts/qa_flat_sheets.py --upload assay_sheets/Arm{X}.xlsx [--master-baseline previous_metadata/<master>.xlsx] [--expected-counts <sampletype>=<n>,...]`.
+1. Invoke `uv run --script <PLUGIN>/scripts/qa_flat_sheets.py --upload assay_sheets/Arm{X}-upload.xlsx [--master-baseline previous_metadata/<master>.xlsx] [--expected-counts <sampletype>=<n>,...]`.
 2. Read the script's report. The script outputs raw `[BLOCKER]` / `[INFO]` findings. Categorize each row CLEAN / SOFT_FLAG / HARD_REJECT.
 3. Print per-arm summary table:
    ```
-   ArmA.xlsx (117 rows): 88 CLEAN, 12 SOFT_FLAG, 17 HARD_REJECT
+   ArmA-upload.xlsx (117 rows): 88 CLEAN, 12 SOFT_FLAG, 17 HARD_REJECT
      HARD_REJECT reasons:
        - missing File_PrimaryData (15)
        - dangling Parent UID (2)
@@ -24,7 +24,8 @@ The user wants Phase 9 — QA pass on the consolidated upload sheets.
    ...
    ```
 4. Suggest fixes for HARD_REJECT rows:
-   - Missing files → use placeholder markers + `/curate-questions add`
+   - Missing values, **in-prep** study → placeholder markers + `/curate-questions add`
+   - Missing values, **published/submitted** study → run the Published-paper harvest (SKILL.md) across manuscript Methods / Supplemental Methods / Data Availability + the master sheet; if still absent, leave blank and `/curate-questions add` — no placeholder
    - Dangling parents → check `previous_metadata` master, possibly build the missing parent
    - Pending schema → move to `assay_sheets/pending_schema/`
 
@@ -34,5 +35,6 @@ The user wants Phase 9 — QA pass on the consolidated upload sheets.
 - `Link_PrimaryData` / `Checksum_PrimaryData` blank → SOFT_FLAG (not enforced)
 - Parent UID not in new sheets or master → HARD_REJECT
 - Pending-schema type → HARD_REJECT (move out of upload set)
-- `*** PLACEHOLDER: ... ***` marker in `File_PrimaryData` → SOFT_FLAG (intentional)
+- `*** PLACEHOLDER: ... ***` marker in `File_PrimaryData` → SOFT_FLAG (intentional; in-prep studies)
+- A blank required field on a **published/submitted** study is still HARD_REJECT, but expect a matching entry in `QUESTIONS_FOR_PI.md` — cross-reference it rather than proposing a placeholder (SKILL.md Published-paper harvest).
 - Don't be the last gate — surface dispositions to user for confirmation.

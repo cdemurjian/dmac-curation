@@ -17,7 +17,7 @@ Parse `$ARGUMENTS`: optional `<arm>` (letter or short name). If omitted, list ar
 
 1. Read `SAMPLE_TREE.md`, identify the arm. Read sample types and counts.
 2. Read master xlsx for existing parent UIDs (cell-line CEL UIDs, patient PAT UIDs, etc.) — don't recreate.
-3. Read manuscript for instrument details, protocol section names.
+3. Gather field values. For a **published/submitted** study (Data Availability statement, an accession, or a DOI in the manuscript — or the user says so), run the Published-paper harvest (SKILL.md): check the manuscript Methods, Supplemental Methods, and Data Availability statement, plus the master NExtSEEK sheet (`previous_metadata/`), for instrument, platform, and protocol details before deciding a value is missing.
 4. Generate `./scripts/build_<arm>.py`. The file must:
    - Begin with PEP 723 inline-deps header (`openpyxl>=3.1`)
    - Insert `<PLUGIN_PATH>/scripts` into `sys.path`
@@ -32,7 +32,7 @@ Parse `$ARGUMENTS`: optional `<arm>` (letter or short name). If omitted, list ar
 ## Behavioral rules
 
 - Follow precedent over schema (sample existing PI rows in `previous_metadata/` before writing new ones — schema lies, workbook tells truth).
-- Use `*** PLACEHOLDER: ... ***` markers for unknown values, never blanks (greppable).
+- Unknown values: for an **in-prep** study use `*** PLACEHOLDER: ... ***` markers, never blanks (greppable). For a **published/submitted** study, harvest the four sources first (SKILL.md); if a value is genuinely absent, leave it blank and add a name-pattern-anchored question to `QUESTIONS_FOR_PI.md` — no placeholder.
 - Pre-assigned UIDs (no auto-gen). Format `<TYPE>-YYMMDD<LAB>-N`.
 - Don't include parent-tier records that already exist — `/curate-retrieve` auto-pulls them.
 - If the arm has new sample types not in `sampletypes_db.json` (e.g., `D.REF`), write to `assay_sheets/pending_schema/` and note in `QUESTIONS_FOR_PI.md`.

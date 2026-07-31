@@ -61,7 +61,7 @@ every downstream step is adapter-agnostic.
 |---|---|
 | NExtSEEK UIDs (args, or `RETRIEVE.TXT`) | `POST /nextseek_api/admin/samples/retrieve/` |
 | NExtSEEK workbook (`*_AllMetadata*.xlsx`) | local read, no API call |
-| curated upload sheet (`Arm{X}.xlsx`) | local read; works **before** upload |
+| curated upload sheet (`Arm{X}-upload.xlsx`) | local read; works **before** upload |
 | arbitrary xlsx / csv | local read; columns mapped by the LLM step |
 
 Normalized shape:
@@ -94,13 +94,21 @@ valuable idea to carry over.
 
 Some GEO fields are derivable only from context an input may lack - organism,
 tissue and cell line frequently live on **ancestor** samples rather than the
-`D.SEQ` row, and protocol prose needs a resolvable SOP id. When an input cannot
-supply them:
+`D.SEQ` row, and protocol prose needs a resolvable SOP id. First run the
+Published-paper harvest (SKILL.md): the manuscript Methods, Supplemental Methods
+and Data Availability statement, plus the master NExtSEEK sheet
+(`previous_metadata/*.xlsx`), usually supply exactly these. Only when all four
+come up empty does the field degrade:
 
 - write `*** PLACEHOLDER: <what is missing> ***` (SKILL.md hard rule 8 -
   greppable; a blank is not), and
 - record it in `<FORMAT>.completeness.md` with the field, the input searched,
   and why it failed.
+
+Report mode keeps the placeholder even for published work (unlike pipeline
+build, which blanks-and-flags): a blank required GEO/SRA field fails validation
+silently, so the visible marker must stay. The `completeness.md` entry is the
+flag.
 
 **Never silently fabricate; never refuse outright.**
 
