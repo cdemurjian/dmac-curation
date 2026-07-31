@@ -21,23 +21,31 @@ Drop these into the empty subdirectories before running `/curate-inventory`:
 
 ## Pipeline mode
 
-11 phases driven by 13 commands. Suggested order:
+12 phases driven by 14 commands. Suggested order:
 1. `/curate-inventory` -> `FILE_INDEX.md`
-2. `/curate-sample-tree` -> `SAMPLE_TREE.md`
+2. `/curate-sample-tree` -> `SAMPLE_TREE.md` + `sample_tree.json` + `SAMPLE_TREE.html`
 3. `/curate-questions add` (as gaps surface) -> `QUESTIONS_FOR_PI.md`
 4. `/curate-build <arm>` per arm -> `assay_sheets/4sheet_originals/`
-5. `/curate-consolidate` -> `assay_sheets/Arm{X}.xlsx`
+5. `/curate-consolidate` -> `assay_sheets/Arm{X}.xlsx` + `Arm{X}_review.xlsx`
 6. `/curate-resolve-assays --project-id N` -> `context/assay_ids_cache.json` (then curate `context/assay_synonyms.json`)
-7. `/curate-qa` -> CLEAN/SOFT_FLAG/HARD_REJECT report
-8. `/curate-deposit <target>` -> external uploads plus URL backfill
-9. `/curate-retrieve` -> `RETRIEVE.TXT`
-10. `/curate-validate <downloaded.xlsx>` -> round-trip diff
-11. `/curate-email` -> `EMAIL_TO_PI.md`
+7. `/curate-qa` -> CLEAN/SOFT_FLAG/HARD_REJECT report (local, offline)
+8. `/curate-qc` -> server-side validation against live NExtSEEK (last gate before upload)
+9. `/curate-deposit <target>` -> external uploads plus URL backfill
+10. `/curate-retrieve` -> `RETRIEVE.TXT`
+11. `/curate-validate <downloaded.xlsx>` -> round-trip diff
+12. `/curate-email` -> `EMAIL_TO_PI.md`
 
 The 4-sheet files `/curate-build` writes are a **review artifact**, not a build
 intermediate. Curators eyeball them per sample type before `/curate-consolidate`
 collapses them into per-arm flat files. That is why both formats exist, and it
 is also the only format where NExtSEEK enforces controlled vocabulary.
+
+`/curate-consolidate` also writes `Arm{X}_review.xlsx`: the same rows, one sheet
+per sample type, every field in its own column. Read that one; upload the other.
+
+**Run both `/curate-qa` and `/curate-qc`, in that order.** `/curate-qa` is local and
+cannot know which attribute names the live server recognises, so a clean `/curate-qa`
+is not evidence an upload will succeed.
 
 {% endif -%}
 {% if 'schema' in active -%}

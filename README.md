@@ -11,7 +11,7 @@ throughout.
 The plugin is organised as four **modes**. A mode is a convention, not a framework:
 entry-point commands, a reference doc loaded on demand, and optionally its own scripts.
 
-- **`pipeline`** — the metadata curation pipeline: 11 phases from inventory through
+- **`pipeline`** — the metadata curation pipeline: 12 phases from inventory through
   sample tree, build, consolidate, QA, deposit, retrieve, to emailing the PI. Needs a
   project (a lockfile and scaffold). Reference: [`skills/curation/PHASES.md`](skills/curation/PHASES.md).
 - **`fdh`** — FairDomHub: interactive study upload and direct programmatic API access.
@@ -31,12 +31,13 @@ entry-point commands, a reference doc loaded on demand, and optionally its own s
 |---|---|
 | `/curate-init` | scaffold or extend a project working directory (additive) |
 | `/curate-inventory` | `FILE_INDEX.md` from PI inputs |
-| `/curate-sample-tree` | `SAMPLE_TREE.md` mapping manuscript narrative to NExtSEEK sample types |
+| `/curate-sample-tree` | `SAMPLE_TREE.md` + `sample_tree.json` + interactive `SAMPLE_TREE.html`, mapping manuscript narrative to NExtSEEK sample types |
 | `/curate-questions` | running `QUESTIONS_FOR_PI.md` |
 | `/curate-build` | per-arm upload sheets (4-sheet xlsx review artifact) |
-| `/curate-consolidate` | collapse the 4-sheet sheets to flat-format `Arm{X}.xlsx` |
+| `/curate-consolidate` | collapse the 4-sheet sheets to flat-format `Arm{X}.xlsx`, plus `Arm{X}_review.xlsx` (one sheet per sample type, for humans) |
 | `/curate-resolve-assays` | fetch project assays via NExtSEEK API, cache + curate synonyms |
-| `/curate-qa` | CLEAN / SOFT_FLAG / HARD_REJECT disposition of the upload sheets |
+| `/curate-qa` | CLEAN / SOFT_FLAG / HARD_REJECT disposition of the upload sheets (local, offline) |
+| `/curate-qc` | validate against the **live** NExtSEEK server; triage schema gaps. The last gate before upload |
 | `/curate-deposit` | stage external deposits (Zenodo / OMERO / GEO) and backfill URLs |
 | `/curate-retrieve` | emit `RETRIEVE.TXT` for the `chat_nextseek` retrieve function |
 | `/curate-validate` | round-trip diff downloaded metadata vs uploads |
@@ -53,7 +54,7 @@ entry-point commands, a reference doc loaded on demand, and optionally its own s
 
 | command | does |
 |---|---|
-| `/curate-sampletype` | propose or bolster a NExtSEEK sample type; writes a `<TYPE>.review.md` for a human to apply |
+| `/curate-sampletype` | propose or bolster a NExtSEEK sample type; writes a `<TYPE>.review.md` for a human to apply. The explicit `apply` verb can also **write the change to a live server** via `scripts/sampletype_attr.py` |
 
 **`report`** (reference: `REPORTS.md`)
 
@@ -91,6 +92,10 @@ dmac-curation/
 ├── skills/curation/{SKILL.md, PHASES.md, FDH.md, SCHEMA.md, REPORTS.md}
 ├── commands/{curate-*.md, fdh-*.md}   # slash commands, grouped by mode
 ├── scripts/                           # PEP 723 inline-deps, uv-runnable
+│   ├── nextseek_api.py                # assay-id cache, server-side validate, sample-type reads
+│   ├── sampletype_attr.py             # add attributes to a live sample type (native editor)
+│   ├── consolidate_to_flat.py         # 4-sheet -> flat upload file + _review.xlsx
+│   ├── build_sample_tree_html.py      # sample_tree.json -> interactive SAMPLE_TREE.html
 │   ├── fdh/                           # FairDomHub upload + API
 │   ├── report/                        # report-mode adapters, mapping, render, validate
 │   ├── schema/                        # schema-mode field index + vocabulary
@@ -113,11 +118,12 @@ cd /path/to/empty/project_dir
 # Drop your inputs into files/, manuscript/, previous_metadata/
 # Then walk the pipeline mode:
 /curate-inventory       # → FILE_INDEX.md
-/curate-sample-tree     # → SAMPLE_TREE.md
+/curate-sample-tree     # → SAMPLE_TREE.md + sample_tree.json + SAMPLE_TREE.html
 /curate-build A         # → assay_sheets/4sheet_originals/
-/curate-consolidate     # → assay_sheets/Arm*.xlsx
+/curate-consolidate     # → assay_sheets/Arm*.xlsx + Arm*_review.xlsx
 /curate-resolve-assays --project-id 10
-/curate-qa
+/curate-qa              # local checks
+/curate-qc              # server-side validation - last gate before upload
 /curate-deposit zenodo
 /curate-retrieve        # → RETRIEVE.TXT
 /curate-email           # → EMAIL_TO_PI.md

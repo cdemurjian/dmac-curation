@@ -1,6 +1,6 @@
 ---
 name: dmac-curation
-description: Curator's workbench for NExtSEEK / FairDomHub metadata. Human-in-the-loop, PI-facing. Modes are pipeline (13 commands, 11 phases from inventory through sample tree, build, consolidate, QA, deposit, retrieve, to email PI), fdh (FairDomHub upload and direct API), schema (sample type authoring and controlled vocabulary), report (GEO / SRA / PRIDE submission artifacts). Activate when working in a directory containing files/, manuscript/, previous_metadata/, or any .dmac-curation.json lockfile, or when the user mentions NExtSEEK, FairDomHub, curation, sample types, or a GEO/SRA/PRIDE submission.
+description: Curator's workbench for NExtSEEK / FairDomHub metadata. Human-in-the-loop, PI-facing. Modes are pipeline (14 commands, 12 phases from inventory through sample tree, build, consolidate, QA, server-side QC, deposit, retrieve, to email PI), fdh (FairDomHub upload and direct API), schema (sample type authoring and controlled vocabulary), report (GEO / SRA / PRIDE submission artifacts). Activate when working in a directory containing files/, manuscript/, previous_metadata/, or any .dmac-curation.json lockfile, or when the user mentions NExtSEEK, FairDomHub, curation, sample types, or a GEO/SRA/PRIDE submission.
 ---
 
 # DMAC Curation
@@ -38,7 +38,7 @@ command's exact behavior, the `commands/*.md` files are authoritative.
 
 ### `pipeline` - the curation pipeline
 
-11 phases driven by 13 commands. This is where most work happens, but it is one
+12 phases driven by 14 commands. This is where most work happens, but it is one
 mode among four. Deep per-phase reference: `PHASES.md`.
 
 ### `fdh` - FairDomHub
@@ -115,6 +115,20 @@ arbitrary tabular data. Reference: `REPORTS.md`.
 - **MIT Kerberos realm is `ATHENA.MIT.EDU`** (not `MIT.EDU`), but BMC SMB doesn't accept Kerberos. Use `.env` + `smbprotocol`.
 - **Fig-7-style byte-identical duplicate trees** in rclone'd Dropbox dumps. Always `diff` before assuming nested dirs are content.
 - **`page[size]` is ignored** by NExtSEEK `/assays/` endpoint. Paginate via `next` link only.
+- **The live server is a third authority, and it outranks both.** Hard rule 4 says the
+  workbook beats `context/sampletypes_db.json`. For attribute NAMES the live server beats
+  both: the bundled DB lists fields the server rejects (`Notes` on nine of eleven A./D.
+  types), carries at least one typo (`QuanitifcationMethod` on D.PCR), and hides case
+  distinctions the server enforces (`Bead_coating_vendor` on D.TITR vs
+  `Bead_coating_Vendor` on D.FCRB). Probe with `/curate-qc` before believing either.
+- **`PATCH /nextseek_api/sample_types/{id}/` can never add an attribute** to a sample type
+  that has samples. It proxies straight to SEEK, which enforces
+  `allow_new_attribute? = !samples?` and returns 422; the proxy discards the status and
+  surfaces a generic `502 "Invalid upstream response"`. Use `scripts/sampletype_attr.py`,
+  which drives NExtSEEK's own native editor and bypasses Rails.
+- **A schema patch fixes a row only if EVERY field on that row is valid.** Adding one
+  attribute may leave `success`/`failed` unchanged. Judge progress by the distinct
+  (sample type, field) rejection list.
 
 ## Behavior when ambiguous
 
