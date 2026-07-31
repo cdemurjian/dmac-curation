@@ -26,7 +26,7 @@ import json
 from pathlib import Path
 
 SCHEMA_VERSION = 1
-PLUGIN_VERSION = "0.3.0"
+PLUGIN_VERSION = "0.4.0"
 LOCKFILE_NAME = ".dmac-curation.json"
 
 # Keys describing the PLUGIN, not a mode. Everything else in a v0 lockfile was

@@ -136,12 +136,12 @@ def test_claude_md_defaults_to_pipeline_when_modes_absent():
     assert "/curate-inventory" in _render_claude_md()
 
 
-def test_claude_md_lists_eleven_pipeline_steps():
+def test_claude_md_lists_twelve_pipeline_steps():
     import re
     out = _render_claude_md(modes=["pipeline"])
     block = out.split("Suggested order:", 1)[1].split("\n\n", 1)[0]
     numbered = re.findall(r"^\s*(\d+)\. ", block, flags=re.M)
-    assert len(numbered) == 11, f"expected 11 steps, got {numbered}"
+    assert len(numbered) == 12, f"expected 12 steps, got {numbered}"
 
 
 def test_claude_md_records_why_both_sheet_formats_exist():
