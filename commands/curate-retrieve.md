@@ -8,7 +8,7 @@ Parse `$ARGUMENTS`: optional `--include-parents`.
 
 ## Prereqs
 
-- `assay_sheets/*-upload-new.xlsx` (or `-upload.xlsx`) exists
+- `assay_sheets/*-upload-new.xlsx` (or `-upload.xlsx`) exists. `/curate-consolidate` writes `Arm{X}-upload.xlsx` directly, so a fresh consolidation is already retrievable with no rename.
 
 ## Steps
 

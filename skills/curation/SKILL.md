@@ -71,7 +71,52 @@ arbitrary tabular data. Reference: `REPORTS.md`.
 5. **Re-mine email/manuscript before re-asking the PI.** Grep `email_convo.md`, `manuscript/`, and `QUESTIONS_FOR_PI.md` (resolved section) before adding a new question.
 6. **Use `uv`, not bare `python3`.** All scripts have PEP 723 inline-deps. Invoke via `uv run --script <plugin>/scripts/X.py`.
 7. **Pre-assign UIDs.** Format `<TYPE>-YYMMDD<LAB>-N`. Never auto-gen. Never blank. Date stamp is curation date, not experiment date.
-8. **Placeholder markers over blanks.** Use `*** PLACEHOLDER: <description> ***` for unknown values. Greppable; blanks vanish.
+8. **Harvest before you placeholder; for published work, flag don't placeholder.** For an **in-prep** study, use `*** PLACEHOLDER: <description> ***` for unknown values (greppable; blanks vanish). For a **published or submitted** study the metadata almost always exists — run the [Published-paper harvest](#published-paper-harvest) before writing any value, and if it is genuinely absent from all four sources, leave the cell **blank** and log the gap in `QUESTIONS_FOR_PI.md`. Never a placeholder in that case.
+
+## Published-paper harvest
+
+A study is **published or submitted** when its manuscript carries a Data
+Availability statement, a repository accession (GEO/GSE, SRA/PRJNA, PRIDE/PXD,
+Zenodo, Dryad), or a DOI — or the user tells you it is. For these studies assume
+the metadata exists and go find it; a placeholder is a failure to look, not a
+real gap.
+
+Before writing (or placeholdering) any value for such a study, harvest these
+five sources in order and stop at the first real hit:
+
+1. Manuscript **Methods** — read the WHOLE section, not a skim. Detailed
+   Materials and Methods often sit at the END of the main text (e.g. PNAS) or
+   only in the SI; never conclude "Methods is thin" without reading both the
+   main text and the supplement end to end.
+2. Manuscript **Supplemental / Supplementary Methods**
+3. Manuscript **Data Availability statement** (accessions, platforms, repo URLs)
+4. The **named deposit itself** — when a Data Availability statement gives an
+   accession, FETCH the deposit and enumerate its files; reading the accession is
+   not the same as reading the deposit. Public archives need no auth, e.g.:
+   - PRIDE / ProteomeXchange: FTP directory index + `checksum.txt` under
+     `https://ftp.pride.ebi.ac.uk/pride/data/archive/<YYYY>/<MM>/<PXDxxxxxx>/`
+   - GEO: the series supplementary-file list / `<GSE>_RAW.tar`; SRA: the run table;
+     FairDomHub: the `studies/assays/samples` JSON.
+   Cross-check the manifest against the supplementary data files already sitting in
+   `files/`. This manifest is **ground truth for the data tier**: the number and
+   identity of raw/processed files fixes the D.* node counts, filenames, and
+   checksums. Do NOT infer data-tier structure from precedent when a deposit exists.
+5. The **master NExtSEEK sheet** — `previous_metadata/*.xlsx` (already-curated
+   rows). Precedent here governs **format and attribute names**, not how many data
+   files some *other* study produced — never let it override the deposit on structure.
+
+Then:
+
+- **Found** → use the real value.
+- **Genuinely absent from all four** → leave the cell **blank** and add a
+  name-pattern-anchored question to `QUESTIONS_FOR_PI.md`. Do **not** write a
+  `*** PLACEHOLDER ***`. QA surfaces the blank; the PI fills it.
+
+Placeholders remain correct for **in-prep** studies, where the value does not
+yet exist. In `report` mode the same harvest applies first, but a genuinely
+missing *required* field still degrades to a placeholder in the artifact plus a
+`<FORMAT>.completeness.md` entry — GEO/SRA validation needs a visible unfilled
+marker, and a blank there fails silently.
 
 ## Soft rules (apply with judgment)
 
@@ -139,7 +184,7 @@ arbitrary tabular data. Reference: `REPORTS.md`.
 
 ## Behavior when ambiguous
 
-If unsure between two interpretations, default to the conservative one and surface the ambiguity to the user. Don't invent values. Don't fill blanks "to be helpful." Use a `*** PLACEHOLDER: ... ***` marker.
+If unsure between two interpretations, default to the conservative one and surface the ambiguity to the user. Don't invent values. Don't fill blanks "to be helpful." For an in-prep study use a `*** PLACEHOLDER: ... ***` marker; for a published/submitted study run the [Published-paper harvest](#published-paper-harvest) first and, if still unresolved, leave the cell blank and flag it in `QUESTIONS_FOR_PI.md`.
 
 ## Reading order for new sessions
 

@@ -22,36 +22,54 @@ discard both.
 - `./manuscript/` non-empty
 - `./previous_metadata/*.xlsx` exists
 
-## If the paper is already curated (uncommon — check, don't dwell)
+## Harvest the real evidence BEFORE you derive the tree (not optional)
 
-**Most papers reaching this pipeline are NOT yet curated; deriving the tree from the manuscript is
-the normal path.** But a minority are already deposited, and re-deriving one of those by hand
-produces a tree that silently disagrees with the published structure. So spend one grep on it,
-then move on.
+The tree's structure — especially the **data tier** (how many `D.*`/`A.*` rows, and their
+files) — must come from primary sources you have actually read, not from precedent inference or a
+skim. Run the SKILL.md **Published-paper harvest** in full *before* writing any node, because the
+data tier's row counts are fixed by what was actually generated and deposited, and you cannot know
+that from the abstract. Doing this after the fact means re-deriving the tree — the exact failure
+this ordering prevents.
 
-Do NOT go looking online beyond this check, and never treat the absence of a deposit as a problem —
-it is the expected case.
+1. **Read the whole Methods**, main text AND SI appendix, end to end. Detailed Materials and
+   Methods frequently sit at the END of a PNAS/Nature main text or only in the SI — never conclude
+   "Methods is thin" from a skim. Extract the sample-prep chain, instrument, treatment dose/time,
+   and replicate/plex structure — these fix both the tree shape and the build-phase field values.
+   (Manuscript may be `.pdf` or `.docx`; extract text accordingly.)
 
-1. Grep the manuscript for `fairdomhub.org`, `SEEK`, `BioStudies`, `PRJNA`, `GSE`, `zenodo`, `dryad`.
-   No hit — which is usual — means derive from the manuscript and skip the rest of this section.
-2. If, and only if, a FairDomHub study is explicitly named, read its real structure — public
-   studies need no auth — and prefer it over inference:
+2. **Grep the manuscript's Data Availability statement for a deposit accession** — cover every
+   repository, not just SEEK:
+   `PXD`, `ProteomeXchange`, `PRIDE`, `MassIVE`/`MSV`, `GSE`/`GEO`, `PRJNA`/`SRA`, `fairdomhub.org`,
+   `SEEK`, `BioStudies`, `zenodo`, `dryad`, `figshare`, and the literal `Data availability`.
+
+3. **If any accession is named, FETCH the deposit and enumerate its files — this is ground truth
+   for the data tier**, overriding precedent. Public archives need no auth:
 
    ```bash
+   # PRIDE / ProteomeXchange (PXDxxxxxx): the file manifest + checksums
+   curl -sS https://ftp.pride.ebi.ac.uk/pride/data/archive/<YYYY>/<MM>/<PXD>/          # dir index
+   curl -sS https://ftp.pride.ebi.ac.uk/pride/data/archive/<YYYY>/<MM>/<PXD>/checksum.txt
+
+   # FairDomHub (already-curated structure): sample titles ARE the UIDs
    curl -sS -H "Accept: application/json" https://fairdomhub.org/studies/<ID>.json   # -> assay ids
-   curl -sS -H "Accept: application/json" https://fairdomhub.org/assays/<ID>.json    # -> title + sample ids
-   curl -sS -H "Accept: application/json" https://fairdomhub.org/samples/<ID>.json   # -> title = the UID
+   curl -sS -H "Accept: application/json" https://fairdomhub.org/assays/<ID>.json    # -> sample ids
+   curl -sS -H "Accept: application/json" https://fairdomhub.org/samples/<ID>.json   # -> title = UID
    ```
 
-   Each assay lists the samples on **both** ends of the edge it licenses. Sample titles are UIDs
-   (`PAV-240116FLY-1`), so the prefix gives you the sample type. Probe a handful of samples per
-   assay and the real node set and edge set fall out directly.
-3. Use that structure as the tree. Fall back to manuscript inference only for what the deposit
-   does not cover, and say plainly in the rationale which nodes came from which source.
+   The manifest's raw/processed file set fixes the `D.*`/`A.*` node counts, filenames, and
+   checksums. **Cross-check it against the supplementary data files already in `files/`** (e.g. a
+   processed-data workbook with one sheet per plex independently confirms the per-branch count).
+   Say plainly in each node's `rationale` which source it came from (deposit vs. Methods vs.
+   precedent), and prefer deposit > Methods > precedent whenever they disagree on structure.
+
+4. Only a study with **no** Data Availability accession and no deposit is derived from the
+   manuscript narrative alone — and even then the full Methods (step 1) still governs the shape.
 
 ## Steps
 
-1. Read `manuscript/*.docx` extracted text. Identify experimental arms.
+1. Complete the **Harvest** above first (whole Methods main + SI; fetch any named deposit; cross-check
+   `files/`). From it, identify the experimental arms AND the deposit-anchored data-tier structure
+   (`D.*`/`A.*` counts and their files). Manuscript may be `.pdf` or `.docx` — extract text accordingly.
 2. Read `<PLUGIN>/context/sampletypes_db.json` (101 types) and `<PLUGIN>/context/assays_db.json` (217 assays).
 3. For each arm, identify required sample types. Use the master xlsx to determine `[EXIST]` (existing UIDs) vs `[NEW]` (to be created).
 4. For each new sample type, infer parent type — **sample existing PI rows first**, fall back to `sampletypes_db.json` if no precedent.
@@ -75,6 +93,12 @@ it is the expected case.
 ## Behavioral rules
 
 - Schema lies; workbook tells truth. Sample 5-10 existing PI rows per sample type before consulting the schema JSON.
+- **For the DATA tier, the deposit and the paper's Methods outrank precedent.** The workbook tells
+  you the *format and attribute names* of a `D.*`/`A.*` row; it does NOT tell you how many raw or
+  processed files THIS study generated — only the study's own deposit manifest and Methods do. When
+  a precedent-based count (e.g. "2 raw files per plex") disagrees with the fetched deposit (e.g. 3
+  raw files, one per plex), the deposit wins. Reconciling this after the sheets are built is the
+  rework the Harvest step exists to prevent.
 - **`proposed_new` means "the schema does not license this", not "I could not find it in a deposit".**
   Those are different failures. A schema-legal edge that is missing from an existing deposit is a
   *coverage* gap — record it in the rationale and leave `match_type` alone. Marking it proposed
@@ -113,6 +137,9 @@ it is the expected case.
   pulls those into a highlighted callout. Use it for offline holdings, partial file coverage,
   placeholder parentage, and anything a reviewer would otherwise have to read the Markdown to find.
 - Evidence fields are optional and render only when present, so emit the tree even when the
-  manuscript is thin — then enrich `sample_tree.json` and re-run as answers arrive.
+  manuscript is genuinely thin — then enrich `sample_tree.json` and re-run as answers arrive.
+  But "thin" is a conclusion you may reach only AFTER the full Harvest (whole Methods + any named
+  deposit), never a reason to skip it. A missing value on an in-prep study is a real gap; a missing
+  value on a published/deposited study is almost always a failure to look.
 - The HTML loads Cytoscape and dagre from unpkg, so first render needs a network connection.
   It is a single self-contained file otherwise, safe to email to a PI.

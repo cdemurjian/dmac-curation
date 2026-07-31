@@ -27,7 +27,7 @@ PIPELINE_ARTIFACTS = [
     (2, "SAMPLE_TREE.md", "Sample tree"),
     (3, "QUESTIONS_FOR_PI.md", "Questions"),
     (5, "assay_sheets/4sheet_originals", "Build (4-sheet review artifacts)"),
-    (6, "assay_sheets", "Consolidate (flat Arm*.xlsx)"),
+    (6, "assay_sheets", "Consolidate (flat Arm*-upload.xlsx)"),
     (7, "context/assay_ids_cache.json", "Resolve assays"),
     (7, "context/assay_synonyms.json", "Resolve assays (synonyms)"),
     (9, None, "QA (console report, no artifact)"),

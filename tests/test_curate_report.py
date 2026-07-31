@@ -80,7 +80,7 @@ def test_doc_states_no_llm_client_is_needed():
 
 def test_doc_lists_every_adapter():
     text = DOC.read_text()
-    for phrase in ("UID", "AllMetadata", "Arm{X}.xlsx", "csv"):
+    for phrase in ("UID", "AllMetadata", "Arm{X}-upload.xlsx", "csv"):
         assert phrase in text
 
 

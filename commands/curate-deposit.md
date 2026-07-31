@@ -12,7 +12,7 @@ Parse `$ARGUMENTS`: first arg routes to sub-target.
 
 1. **Build — delegated to report mode.** Run `/curate-report GEO <input>` and let report mode produce `report/GEO_filled.xlsx` plus its completeness report. Do **not** invoke a renderer here: there is exactly one GEO build path and it lives in report mode.
 
-   The input is usually a curated `assay_sheets/Arm{X}.xlsx`, because **GEO deposit happens before NExtSEEK upload** — the accessions GEO assigns must be backfilled into the sheets first. Report mode's curated-sheet adapter reads those sheets locally, with no API call, which is exactly what that ordering requires.
+   The input is usually a curated `assay_sheets/Arm{X}-upload.xlsx` (the curated-sheet adapter matches any `Arm*` sheet without an underscore), because **GEO deposit happens before NExtSEEK upload** — the accessions GEO assigns must be backfilled into the sheets first. Report mode's curated-sheet adapter reads those sheets locally, with no API call, which is exactly what that ordering requires.
 
    Read `report/GEO.completeness.md` with the user before uploading anything. A submission still carrying `*** PLACEHOLDER: ... ***` markers would be rejected by GEO, and hearing that from NCBI is slower than catching it here.
 2. **Upload**: invoke `<PLUGIN>/scripts/upload_geo_ncftp.sh GEO/<subfolder>/`. Reads `.env` for `NCFTP_*` creds. Resilient with retry loop.
