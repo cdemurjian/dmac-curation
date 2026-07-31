@@ -126,6 +126,13 @@ arbitrary tabular data. Reference: `REPORTS.md`.
   `allow_new_attribute? = !samples?` and returns 422; the proxy discards the status and
   surfaces a generic `502 "Invalid upstream response"`. Use `scripts/sampletype_attr.py`,
   which drives NExtSEEK's own native editor and bypasses Rails.
+- **After adding a sample-type attribute, NExtSEEK must be RESTARTED before `/curate-qc` or
+  the upload can see it.** `prefetch_sample_type_attributes` caches attribute titles per worker
+  process with no TTL and no invalidation on write. Symptom: the web attributes page and
+  `sampletype_attr.py list` show the new field while validation still rejects it, and the
+  rejection count oscillates between runs on an unchanged file. Waiting does not help.
+- **`sampletype_attr.py` is a stopgap** driving an admin-UI endpoint, expected to be replaced by
+  a proper `nextseek_api` REST write endpoint. Superuser-only, no Rails validation.
 - **A schema patch fixes a row only if EVERY field on that row is valid.** Adding one
   attribute may leave `success`/`failed` unchanged. Judge progress by the distinct
   (sample type, field) rejection list.

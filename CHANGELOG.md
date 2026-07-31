@@ -43,6 +43,18 @@ adding sample-type attributes.
   capital V; D.ADCP has no such field), `Dilution` on D.ADCD, and
   `QuanitifcationMethod` - a typo carried by `context/sampletypes_db.json` itself.
 
+### Known issues
+
+- **A newly added sample-type attribute is invisible to `/curate-qc` and to the upload until
+  the NExtSEEK app workers are restarted.** `prefetch_sample_type_attributes` caches attribute
+  titles per worker process with no TTL and no invalidation on write, so each worker keeps
+  whatever it saw first and requests round-robin across differing views. The web attributes
+  page shows the new field while validation denies it. Documented in `/curate-qc`; the fix
+  belongs upstream (invalidate on `sampleAttributeSave`, or add a TTL).
+- `scripts/sampletype_attr.py` is a **stopgap** that drives an admin-UI endpoint: superuser-only,
+  a GET with JSON in query params, and no Rails validation. It should be replaced by a proper
+  `nextseek_api` REST write endpoint wrapping `DBtable_sampleattribute` + `updateSampleType`.
+
 ### Changed
 
 - `/curate-init`'s rendered `CLAUDE.md` now lists 12 phases including `/curate-qc`, and

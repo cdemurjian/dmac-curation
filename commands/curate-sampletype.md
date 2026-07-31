@@ -89,6 +89,29 @@ reconcile existing samples' `json_metadata`.
 
 6. Do one type first and verify end to end before batching.
 
+### This is a stopgap, not the intended interface
+
+`sampletype_attr.py` drives the admin UI's own endpoint because there is currently no REST
+write path that works. That makes it a deliberate workaround with real limitations:
+
+- it is **superuser-only**
+- it is a **GET with JSON in query params**, shaped for a datagrid rather than for tooling
+- it **bypasses every Rails validation** (see below), so its three client-side guards are the
+  only thing standing in
+- a change is **invisible until the NExtSEEK workers restart** (see `/curate-qc`)
+
+The intended replacement is a proper `nextseek_api` REST write endpoint wrapping
+`DBtable_sampleattribute` plus `DBtable_sample.updateSampleType`. When that lands, this tool
+should become a thin client of it and these caveats mostly disappear.
+
+**If you are the one building that endpoint:** port the three guards from
+`sampletype_attr.py::_validate`, call `updateSampleType` so existing samples' `json_metadata`
+is reconciled, invalidate `_SAMPLE_TYPE_ATTRIBUTES_CACHE` on write so no restart is needed, and
+do NOT proxy to SEEK or the `allow_new_attribute?` editing constraint comes straight back.
+
+Until then, prefer this tool over hand-editing through the web page: the page offers none of
+the validation.
+
 ### Why this path is dangerous, and what protects you
 
 Because the write goes through the Django ORM, **every SEEK model validation is

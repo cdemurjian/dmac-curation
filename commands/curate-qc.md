@@ -118,6 +118,48 @@ next session does not re-probe.
   rejection list while the row still failed on `Lab` and `Name` — that is progress,
   and it should be reported as such rather than as a failed patch.
 
+## After ANY schema change: NExtSEEK must be restarted
+
+**A newly added sample-type attribute is invisible to `/curate-qc` and to the upload
+until the NExtSEEK app workers are restarted.** This is not a delay you can wait out.
+
+`nextseek_api/batch_upload/prefetch.py::prefetch_sample_type_attributes` caches
+`sample_type_id -> {attribute titles}` in a plain module-level dict:
+
+```python
+uncached = [sid for sid in sample_type_ids if sid not in _SAMPLE_TYPE_ATTRIBUTES_CACHE]
+```
+
+There is no TTL and no invalidation on write. `_trim_cache` evicts only on size
+(`attribute_cache_max`, default 1000, against ~101 sample types, so never). `clear_caches()`
+exists but is called only mid-insert every N batches and in tests: no endpoint, no management
+command, no env var reaches it.
+
+Consequences worth recognising:
+
+- Every worker holds its own cache, so requests round-robin across differing views. The symptom
+  is a rejection count that **oscillates** between runs on an unchanged file (observed:
+  15 -> 14 -> 15 -> 14 distinct gaps). A single type appearing to "clear" is just a request
+  landing on a worker that happens to be cold for it.
+- **The upload is affected identically.** `validate` and `start` both call the shared
+  `_run_pre_insert_stages` (`validation.py:179` and `orchestrator.py:584`), which runs
+  `build_insertable` and therefore the same cached lookup. `/curate-qc` is a dry run of the
+  exact code the upload executes, so a stale rejection there means a real rejection on upload.
+- Uploading anyway is worse than waiting: there is no rollback or atomic block in `insert.py`,
+  so you get a PARTIAL upload - the valid rows land, the rest do not.
+
+**Confirm the DB is right, then ask for a restart.** The web attributes page and
+`sampletype_attr.py list` read the `sample_attributes` table live, so they will show the new
+attribute while `/curate-qc` still denies it. That disagreement is the signature of this bug,
+not evidence the write failed.
+
+Verified 2026-07-31: after adding 14 attributes across 10 sample types, validation sat at 14
+distinct gaps across 8 polling attempts. A manual worker restart took it to
+`213/213, failed=0` on the next run with no other change.
+
+Worth fixing upstream: invalidate `_SAMPLE_TYPE_ATTRIBUTES_CACHE` when `sampleAttributeSave`
+writes (it already knows the `sample_type_id`), or give the cache a short TTL.
+
 ## Why the REST schema-patch route does not work (root-caused 2026-07-31)
 
 `PATCH /nextseek_api/sample_types/{id}/` returns `502 {"errors":[{"title":"Invalid
