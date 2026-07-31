@@ -2,6 +2,56 @@
 
 All notable changes to dmac-curation will be documented in this file.
 
+## 0.4.0 - 2026-07-31
+
+Server-side validation, a human-readable review artifact, and a working route for
+adding sample-type attributes.
+
+### Added
+
+- **`/curate-qc` (phase 9b)** - validate the consolidated upload file against the
+  **live** NExtSEEK server before uploading, and triage what comes back. `/curate-qa`
+  is entirely local: it checks row counts, parent resolvability and required fields,
+  but cannot know which attribute names the server recognises. On its first real run
+  `/curate-qa` reported 199/213 clean while the server rejected 121 rows outright.
+  **A clean `/curate-qa` is not evidence an upload will succeed.** Run both.
+- **`scripts/sampletype_attr.py`** - add an attribute to a live sample type. Dry-run by
+  default; `--apply` to write; production additionally requires `--yes-production`
+  (accepted anywhere on the command line). Verified end to end on dev then production.
+- **`/curate-sampletype apply`** - the explicit write verb, wrapping the above. Schema
+  writes stay in schema mode; `/curate-qc` only diagnoses and hands off. Patching a
+  shared vocabulary must never be a side effect of a QA-shaped command.
+- **`Arm{X}_review.xlsx`** from `/curate-consolidate` - the same rows as the upload
+  file, one sheet per sample type, every field in its own column. The flat file packs
+  each sample into a single `json_metadata` blob, which is right for NExtSEEK and
+  unreadable for a person. Read the review file; upload the other.
+- **Interactive `SAMPLE_TREE.html`** from `/curate-sample-tree`, rendered from a new
+  `sample_tree.json` by `scripts/build_sample_tree_html.py`. Click any node or edge for
+  its evidence quotes, rationale and flags. Contributed via PR #2.
+- `nextseek_api.py sampletype-get` - read a sample type's real attribute list.
+
+### Fixed
+
+- **`PATCH /nextseek_api/sample_types/{id}/` does not work and never did** for any
+  sample type that has samples. It proxies 1:1 to SEEK, which enforces
+  `allow_new_attribute? = !samples?` and returns 422; the proxy never checks the
+  upstream status, so it surfaces as a generic `502 "Invalid upstream response"` with
+  the real message discarded. `sampletype-add-attribute` is retired and now fails with
+  an explanation and a pointer to the working tool.
+- Four attribute names in the shipped guidance that the live server rejects:
+  `Bead_region` (does not exist on any type), `Bead_coating_vendor` (D.FCRB wants a
+  capital V; D.ADCP has no such field), `Dilution` on D.ADCD, and
+  `QuanitifcationMethod` - a typo carried by `context/sampletypes_db.json` itself.
+
+### Changed
+
+- `/curate-init`'s rendered `CLAUDE.md` now lists 12 phases including `/curate-qc`, and
+  names the review and sample-tree artifacts.
+- Three new SKILL.md pitfalls: the live server outranks both the workbook and the
+  bundled schema for attribute names; the sample-type PATCH constraint; and the fact
+  that a row fails if *any* of its fields is invalid, so a schema patch can be correct
+  and still not move the pass count.
+
 ## 0.3.0 - 2026-07-22
 
 Reframed from a 13-phase pipeline into a four-mode curator's workbench.

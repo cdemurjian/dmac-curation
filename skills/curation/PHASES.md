@@ -6,7 +6,8 @@ For each phase: inputs, outputs, scripts invoked, error modes, edge cases.
 
 ## Phase table
 
-13 commands drive 11 phases. Phases 4 and 8 were retired as numbers (see
+14 commands drive 12 phases. Phase 9 is split into 9a (`/curate-qa`, local) and
+9b (`/curate-qc`, server-side); phases 4 and 8 were retired as numbers (see
 "Retired phases"); the surviving numbers are deliberately **not** renumbered,
 because every scaffolded project's `CLAUDE.md` bakes in the order,
 `/curate-status` maps artifacts by number, and curators speak in phase numbers.
