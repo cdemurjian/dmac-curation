@@ -36,42 +36,101 @@ adding `Notes` to `A.TITR` changes that type for every project and every existin
 
 ### Steps
 
-1. Read the current definition and show it to the user:
+The REST route does not work for this. `PATCH /nextseek_api/sample_types/{id}/` is a
+1:1 pass-through to SEEK, and SEEK enforces
+
+```ruby
+# lib/seek/samples/sample_type_editing_constraints.rb
+def allow_new_attribute?
+  !samples?
+end
+```
+
+so it returns 422 for any sample type that already has samples — which is nearly all
+of them. NExtSEEK's proxy does not check the upstream status, so it surfaces as a
+generic `502 "Invalid upstream response"`. No payload shape works around it.
+
+Use `scripts/sampletype_attr.py`, which drives NExtSEEK's OWN native editor
+(`/seek/attribute/save/` → Django ORM → `sample_attributes`), never invoking Rails
+and therefore never hitting the constraint. It also calls `updateSampleType` to
+reconcile existing samples' `json_metadata`.
+
+1. Read the current state. Note the sample count — that is what blocks the REST route:
 
    ```bash
-   uv run --script <PLUGIN>/scripts/nextseek_api.py sampletype-get <TYPE>
+   uv run --script <PLUGIN>/scripts/sampletype_attr.py list <TYPE>
    ```
 
-2. Show the plan — dry-run is the default, so this sends nothing:
+2. Dry run. Prints the exact record and sends nothing:
 
    ```bash
-   uv run --script <PLUGIN>/scripts/nextseek_api.py \
-     sampletype-add-attribute <TYPE> --name <FIELD> --type Text
+   uv run --script <PLUGIN>/scripts/sampletype_attr.py \
+     add <TYPE> --title <FIELD> --type Text
    ```
 
-3. **Get explicit confirmation for this specific type and field.** Not blanket
-   approval for a batch. State the blast radius in the same breath.
-
-4. Apply, then verify:
+3. **Rehearse on dev before touching production.** `A.TITR` and friends exist there in
+   the same shape:
 
    ```bash
-   uv run --script <PLUGIN>/scripts/nextseek_api.py \
-     sampletype-add-attribute <TYPE> --name <FIELD> --type Text --apply
+   uv run --script <PLUGIN>/scripts/sampletype_attr.py \
+     --base-url https://nextseek-dev.mit.edu add <TYPE> --title <FIELD> --type Text --apply
    ```
 
-   The command re-GETs the type afterwards and fails loudly if any pre-existing
-   attribute went missing. Do not treat a 200 response as success on its own.
+4. **Get explicit confirmation for this specific type and field**, stating the blast
+   radius. Then apply. Production requires `--yes-production` in addition to `--apply`;
+   the tool refuses otherwise.
 
-5. Re-run `/curate-qc` to confirm the rows that were failing now validate.
+   ```bash
+   uv run --script <PLUGIN>/scripts/sampletype_attr.py \
+     add <TYPE> --title <FIELD> --type Text --apply --yes-production
+   ```
 
-6. Do one type first and verify it end to end before batching the rest.
+5. Verify with `list`, then re-run `/curate-qc` to confirm the failing rows now validate.
 
-### Why the wrapper matters
+6. Do one type first and verify end to end before batching.
 
-The server treats `sample_attributes` as the COMPLETE list, not a delta — a PATCH
-carrying only the new field would **delete every other attribute on the type**.
-`sampletype-add-attribute` always re-sends the full array with each existing entry
-keyed by its `id`, then verifies the round-trip. Never hand-roll this PATCH.
+### Why this path is dangerous, and what protects you
+
+Because the write goes through the Django ORM, **every SEEK model validation is
+bypassed**. `sampletype_attr.py::_validate` re-implements the three that matter —
+`validate_attribute_title_unique`, `validate_attribute_accessor_names_unique`, and
+`validate_one_title_attribute_present`. Those guards are the ONLY protection on this
+path. Anyone using the `/seek/samples/attributes/` web page directly gets none.
+
+Three wire-format gotchas, all easy to get wrong and all already handled by the tool:
+
+- The numeric attribute-type id travels in the key named `sample_attribute_type_title`,
+  because the grid combobox uses `sample_attribute_type_id` as its `valueField`.
+- `id` must be OMITTED for a new attribute. Any `id > 0` means update.
+- `sample_controlled_vocab_id` is silently dropped and never written.
+
+A partial `records` list is safe: the save path only touches the records passed and has
+no delete-missing pass.
+
+**Open question, unverified:** the ORM path skips the Rails callbacks that trigger Solr
+reindexing, so a newly added attribute may not be searchable in SEEK until a reindex.
+
+### Verified end to end (2026-07-31)
+
+`Notes` was added to `A.TITR` on dev then production, and the change was confirmed to
+have the intended effect:
+
+| | dev (id 35) | production (id 99) |
+|---|---|---|
+| before | 10 attributes | 10 attributes |
+| after | 11, `Notes` id 2651 | 11, `Notes` id 3603 |
+| originals | intact, ids 1324-1333 | intact, ids 2238-2980 |
+| existing samples | reconciled, `total: 7` | reconciled, `total: 7` |
+
+Server validation then stopped rejecting `Notes` on `A.TITR` while every other
+rejection stayed put — a clean, targeted change.
+
+**`--yes-production` may appear anywhere on the command line.** It is stripped from
+argv before parsing precisely so it does not have to precede the subcommand.
+
+**Expect the row count NOT to move after a single patch.** A row fails if any one of
+its fields is undefined, so `A.TITR` rows kept failing on `Lab` and `Name`. Judge
+progress by the distinct (type, field) rejection list.
 
 ### When NOT to apply
 

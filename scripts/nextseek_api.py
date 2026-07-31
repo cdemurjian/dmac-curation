@@ -416,12 +416,42 @@ def cmd_sampletype_get(args: argparse.Namespace) -> int:
 
 
 def cmd_sampletype_add_attribute(args: argparse.Namespace) -> int:
-    """Add one attribute to a sample type. Dry-run unless --apply.
+    """RETIRED. This route cannot add an attribute to a sample type that has samples.
 
-    Sends the FULL attribute array (existing entries keyed by id, plus the new
-    one) because the server replaces rather than merges. Omitting an existing
-    attribute would delete it.
+    Root-caused 2026-07-31. PATCH /nextseek_api/sample_types/{id}/ is a 1:1
+    pass-through to SEEK (services/sample_types.py), and SEEK enforces
+
+        # lib/seek/samples/sample_type_editing_constraints.rb
+        def allow_new_attribute?
+          !samples?
+        end
+
+    so SEEK returns 422 for any type that already has samples. NExtSEEK's proxy
+    never checks the upstream status, so the 422 surfaces as a generic
+    502 "Invalid upstream response". No payload shape can work around it.
+
+    Use `scripts/sampletype_attr.py`, which drives NExtSEEK's own native editor
+    (/seek/attribute/save/ -> Django ORM), bypassing Rails and therefore the
+    constraint. Kept here only so the failure explains itself.
     """
+    print(__doc__ and "" or "", end="")
+    print(
+        "RETIRED: this route cannot add an attribute to a sample type that has samples.\n"
+        "\n"
+        "PATCH /nextseek_api/sample_types/{id}/ passes straight through to SEEK, and SEEK\n"
+        "enforces allow_new_attribute? = !samples?, returning 422. NExtSEEK's proxy does not\n"
+        "check the upstream status, so it surfaces as 502 'Invalid upstream response'.\n"
+        "\n"
+        "Use the native-editor client instead:\n"
+        "  uv run --script <PLUGIN>/scripts/sampletype_attr.py list <TYPE>\n"
+        "  uv run --script <PLUGIN>/scripts/sampletype_attr.py add <TYPE> --title <NAME> --type Text\n"
+        "  (add --apply, and on production also --yes-production)\n",
+        file=sys.stderr)
+    return 2
+
+
+def _cmd_sampletype_add_attribute_dead(args: argparse.Namespace) -> int:
+    """Original REST implementation. Unreachable; kept for reference only."""
     client = _client_from_args(args)
     rec = _unwrap(client.get_sample_type(args.sampletype))
     type_id = rec.get("id")
@@ -661,8 +691,7 @@ def main(argv=None) -> int:
 
     sta = sub.add_parser(
         "sampletype-add-attribute",
-        help="Add ONE attribute to a sample type. Dry-run unless --apply. "
-             "Sample types are GLOBAL: this affects every project.")
+        help="RETIRED - cannot work. Use scripts/sampletype_attr.py instead.")
     sta.add_argument("sampletype", help="Short code or numeric id, e.g. A.TITR")
     sta.add_argument("--name", required=True, help="Attribute title, e.g. Notes")
     sta.add_argument("--type", default="Text",

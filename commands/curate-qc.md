@@ -66,8 +66,16 @@ both; run this one last.
    every project and every existing record of it across NExtSEEK, not just this
    curation. Get explicit per-type agreement. Never patch as a side effect of QC.
 
-6. Hand off the agreed patches to `/curate-sampletype apply <TYPE> --add <FIELD>`.
-   That command owns the write; this one only diagnoses.
+6. Hand off the agreed patches to `/curate-sampletype apply <TYPE> --add <FIELD>`,
+   which drives `scripts/sampletype_attr.py`. That command owns the write; this one
+   only diagnoses. Read the current state first:
+
+   ```bash
+   uv run --script <PLUGIN>/scripts/sampletype_attr.py list <TYPE>
+   ```
+
+   Note the `samples=` count it prints. Any non-zero count is why the REST route
+   cannot work (see below) and why the native editor is used instead.
 
 7. Re-run step 1 to confirm the fix took and nothing else broke.
 
@@ -77,7 +85,8 @@ The authoritative source is the server, not the bundled catalog. Read one type
 directly:
 
 ```bash
-uv run --script <PLUGIN>/scripts/nextseek_api.py sampletype-get A.TITR
+uv run --script <PLUGIN>/scripts/nextseek_api.py sampletype-get A.TITR   # REST, read-only
+uv run --script <PLUGIN>/scripts/sampletype_attr.py list A.TITR          # same, plus sample count
 ```
 
 To test many candidate fields at once, build a throwaway flat file with one row per
@@ -102,26 +111,54 @@ next session does not re-probe.
   'parent', 'notes_summary']` is expected — those are the denormalized review columns
   the consolidator adds and the server ignores. Not an error.
 - The `validate` endpoint has no side effects. It is safe to run repeatedly.
+- **A schema patch fixes a row only if EVERY field on that row is valid.** A row fails
+  if any one of its fields is undefined, so adding one attribute may not move the
+  success count at all. Judge progress by the distinct (type, field) rejection list,
+  not by `success`/`failed` alone. Adding `Notes` to `A.TITR` removed `Notes` from its
+  rejection list while the row still failed on `Lab` and `Name` — that is progress,
+  and it should be reported as such rather than as a failed patch.
 
-## Known server-side blocker (as of 2026-07-30)
+## Why the REST schema-patch route does not work (root-caused 2026-07-31)
 
-`PATCH /nextseek_api/sample_types/{id}/` returns **`502 {"errors":[{"title":"Invalid
-upstream response"}]}`** on nextseek.mit.edu, so `/curate-sampletype apply` cannot
-currently complete. Verified twice against `A.TITR` (id 99) with payloads conforming
-to `SampleTypePatchData` / `SampleTypeSampleAttributePatch`, using both the title-ref
-and id-ref forms of `sample_attribute_type`.
+`PATCH /nextseek_api/sample_types/{id}/` returns `502 {"errors":[{"title":"Invalid
+upstream response"}]}` for essentially every real sample type. This is NOT a payload
+bug, and no reshaping fixes it.
 
-Evidence it is not the payload:
-- `GET` on the same resource succeeds, so auth, path and resource id are all correct.
-- The error body is NExtSEEK's proxy reporting that UPSTREAM SEEK returned something
-  it could not interpret — a gateway failure, not a validation rejection (a bad
-  payload returns a 400 with field-level detail).
-- The sample type was re-read after each attempt and was **byte-identical both times**,
-  so the write never partially applied.
+The chain:
 
-**Do not keep retrying.** Two attempts is enough to establish it. Report it to the
-NExtSEEK administrators, and in the meantime either drop the offending field from the
-build script or have an admin add the attribute through the web UI.
+1. The endpoint is a 1:1 pass-through to SEEK (`nextseek_api/services/sample_types.py`,
+   `SampleTypeProxyViewSet.partial_update`). It adds request validation and nothing else.
+2. SEEK refuses the update:
 
-Re-test with the dry run (`sampletype-add-attribute <TYPE> --name <FIELD>`, no
-`--apply`) plus one `--apply` after the admins confirm a fix.
+   ```ruby
+   # lib/seek/samples/sample_type_editing_constraints.rb
+   def allow_new_attribute?
+     !samples?
+   end
+   ```
+
+   enforced by `validate_against_editing_constraints`. **Any sample type that already
+   has samples cannot gain an attribute through Rails.**
+3. SEEK returns **422** with a bare error hash.
+4. `partial_update` never checks the upstream status code. It tries to model-validate
+   the 422 body, that raises, and a bare `except Exception` converts it to the generic
+   502. The real message is discarded — which is why this is undiagnosable from outside.
+
+Note the narrowing: that model validation enforces only TWO things, adding an attribute
+and removing one that holds data. Edits to EXISTING attributes are likely more permissive
+over REST than through the SEEK web form — untested.
+
+**The working route** is `scripts/sampletype_attr.py`, which drives NExtSEEK's own native
+editor (`/seek/attribute/save/` → Django ORM), bypassing Rails entirely. See
+`/curate-sampletype` for the full procedure, the safety guards, and the wire-format
+gotchas. `nextseek_api.py sampletype-add-attribute` is retired and now fails with a
+pointer to it.
+
+Two related NExtSEEK defects worth fixing if you are in that code:
+
+- The 502 masking above, which is the same shape across `services/assays.py`,
+  `investigations.py`, `people.py`, `projects.py`, `studies.py`, `samples.py`,
+  `data_files.py` — every upstream 4xx/5xx becomes a generic 502.
+- `dmac/settings.py` configures no `nextseek_api` logger, so the one surviving
+  diagnostic (`log.info('seek_proxy ... status=%d')` in `nextseek_api/helpers.py`) is
+  written nowhere. That single line would have revealed the 422 immediately.
