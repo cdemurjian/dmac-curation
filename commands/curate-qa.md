@@ -11,6 +11,9 @@ The user wants Phase 9 — QA pass on the consolidated upload sheets.
 ## Steps
 
 1. Invoke `uv run --script <PLUGIN>/scripts/qa_flat_sheets.py --upload assay_sheets/Arm{X}-upload.xlsx [--master-baseline previous_metadata/<master>.xlsx] [--expected-counts <sampletype>=<n>,...]`.
+   **Always pass `--master-baseline` with a FRESH DB pull** — it powers the
+   UID-vs-DB collision net (a new UID that already exists in the pull would
+   overwrite another study on upload). Without a baseline the net can't run.
 2. Read the script's report. The script outputs raw `[BLOCKER]` / `[INFO]` findings. Categorize each row CLEAN / SOFT_FLAG / HARD_REJECT.
 3. Print per-arm summary table:
    ```
@@ -31,6 +34,13 @@ The user wants Phase 9 — QA pass on the consolidated upload sheets.
 
 ## Behavioral rules
 
+- **New UID already in the DB baseline → HARD_REJECT (stamp collision).** On
+  upload it OVERWRITES that record. This is the second net behind
+  `stamp_guard` (the build guard) — if a build was hand-edited to skip the guard,
+  QA still catches it. Exception: a deliberate update/restore batch (e.g. fixing
+  a prior collision) legitimately targets existing UIDs — re-run with
+  `QA_ALLOW_DB_UPDATES=1` to downgrade it to `[INFO]`, and only after confirming
+  every listed UID is one you intend to overwrite.
 - `File_PrimaryData` blank → HARD_REJECT (skill rule 8)
 - `Link_PrimaryData` / `Checksum_PrimaryData` blank → SOFT_FLAG (not enforced)
 - Parent UID not in new sheets or master → HARD_REJECT

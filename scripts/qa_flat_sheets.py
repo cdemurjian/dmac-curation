@@ -162,6 +162,13 @@ def main(upload_path, cfg):
         else:
             rows_per_uid[uid] = (row_n, st)
 
+        # (1b) Collision with the LIVE DB (stamp-collision second net).
+        # A NEW upload UID that already exists in the master baseline will
+        # UPDATE (overwrite) that record on upload rather than insert — the
+        # failure mode behind the 260730WHI/260729WHI incidents.
+        if uid and uid in prev_uids:
+            issues["uid_exists_in_db"].append(uid)
+
         # (2) Sampletype validity
         if st not in schemas:
             issues["unknown_sampletype"].append(f"row {row_n}: {st!r}")
@@ -304,12 +311,32 @@ def main(upload_path, cfg):
     print("─" * 60)
     print("ISSUES")
     print("─" * 60)
+    blocker_count = 0
+
+    # UID-vs-DB collision net. A NEW upload UID already present in the DB
+    # baseline overwrites that record on upload — a stamp collision unless it is
+    # a deliberate update/restore (then re-run with QA_ALLOW_DB_UPDATES=1).
+    allow_updates = os.environ.get("QA_ALLOW_DB_UPDATES") == "1"
+    collided = issues.get("uid_exists_in_db", [])
+    if collided:
+        tag = "INFO — updates acknowledged" if allow_updates else "BLOCKER"
+        print(f"\n  [{tag}] {len(collided)} new UID(s) already exist in the DB baseline")
+        print("    → on upload these UPDATE (overwrite) existing rows, not insert.")
+        print("    → fresh batch? STAMP COLLISION with another study — re-mint under a")
+        print("      free <YYMMDD><LAB> stamp (see scripts/stamp_guard.py).")
+        print("    → intentional update/restore? re-run with QA_ALLOW_DB_UPDATES=1.")
+        for u in collided[:10]:
+            print(f"      - {u}")
+        if len(collided) > 10:
+            print(f"      ... and {len(collided) - 10} more")
+        if not allow_updates:
+            blocker_count += len(collided)
+
     blocker_keys = [
         "duplicate_uid", "missing_uid", "unknown_sampletype", "bad_json",
         "missing_json_metadata", "parent_uid_not_found", "duplicate_name",
         "blank_parent_nonroot",
     ]
-    blocker_count = 0
     for k in blocker_keys:
         if k in issues:
             print(f"\n  [BLOCKER] {k} ({len(issues[k])}):")
