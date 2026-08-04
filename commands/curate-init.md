@@ -36,6 +36,11 @@ is best-effort prose, not a guaranteed step, and nothing is ever rewritten.
 The one exception is the lockfile, which is *merged*, never replaced. Use
 `scripts/_lockfile.py` for that; never hand-write the JSON.
 
+## Prereqs
+
+- Auto-detect needs the copied `.env` (NExtSEEK creds). Without it, init still
+  works but falls back to asking for lab/pi.
+
 ## Steps
 
 1. Resolve the plugin path from `$PLUGIN_PATH`, or from this command file's
@@ -121,7 +126,8 @@ is nothing to render.
    import _lockfile
    # normalize before storing so the lockfile matches the shape below:
    # LAB uppercased, PI lowercased. schema/report collect no lab/pi -> {}
-   values = ({"lab": "$LAB".upper(), "pi": "$PI".lower()}
+   values = ({"lab": "$LAB".upper(), "pi": "$PI".lower(),
+              "nextseek_project_id": $PROJECT_ID}   # int from detect-context, else None
              if "$MODE" == "pipeline" else {})
    doc = _lockfile.set_mode(pathlib.Path.cwd(), "$MODE", values)
    print(f"lockfile schema_version={doc['schema_version']} "
@@ -159,8 +165,18 @@ is nothing to render.
 
 - **Create what is missing; never overwrite.** No `--force` flag exists. If the
   user genuinely wants a file replaced, they delete it first.
-- If `--lab` or `--pi` is missing for pipeline mode, use `AskUserQuestion`.
-  Never guess a lab code; it becomes part of every minted UID.
+- If `--lab`/`--pi`/`--project-id` are missing in pipeline mode, AUTO-DETECT
+  before asking: run
+  `uv run --script <PLUGIN>/scripts/nextseek_api.py detect-context` (requires the
+  copied `.env`). It returns JSON with a ranked `projects`, a `chosen_project`,
+  ranked `labs` (code + count + scientists + latest), and `pi_guess`, and it
+  drops the project export into `previous_metadata/` (also the build guard's
+  fresh pull). Present ONE `AskUserQuestion` confirm of
+  `chosen_project` + top `labs[0].code` + `pi_guess`; on accept use them, on
+  change offer the ranked `projects`/`labs` lists (lab code may be free-typed
+  for a brand-new lab). **Never apply a lab code without this confirm** — a wrong
+  lab code silently overwrites another lab on upload. If detect-context fails
+  (no creds/network), fall back to `AskUserQuestion` for lab/pi as before.
 - A `.env` already present in cwd is a strong signal this is a real project.
   Report it and continue. Never read or print its contents.
 - **`.env` is copied, never rendered with secrets.** The filled source is
