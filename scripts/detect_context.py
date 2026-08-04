@@ -107,3 +107,34 @@ def extract_labs(xlsx_bytes: bytes) -> list:
     return [LabInfo(code=code, count=v["count"],
                     scientists=sorted(v["scientists"]), latest=v["latest"])
             for code, v in agg.items()]
+
+
+def _latest_int(s: str) -> int:
+    return int(s) if s.isdigit() else 0
+
+
+def rank_labs(labs: list, evidence: Evidence) -> list:
+    """Author-surname match wins; then higher count; then newer latest date."""
+    surnames = [s for s in evidence.author_surnames if len(s) >= 3]
+    for lab in labs:
+        joined = " ".join(lab.scientists).lower()
+        lab.score = 100.0 if any(s in joined for s in surnames) else 0.0
+    labs.sort(key=lambda l: (-l.score, -l.count, -_latest_int(l.latest)))
+    return labs
+
+
+def guess_pi(labs: list, evidence: Evidence, pi_arg):
+    if pi_arg:
+        return pi_arg.lower()
+    if not labs:
+        return None
+    top = labs[0]
+    surnames = [s for s in evidence.author_surnames if len(s) >= 3]
+    for sci in top.scientists:
+        low = sci.lower()
+        for sn in surnames:
+            if sn in low:
+                return sn
+    if top.scientists:
+        return top.scientists[0].split()[-1].lower()
+    return None

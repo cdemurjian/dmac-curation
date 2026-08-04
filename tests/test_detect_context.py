@@ -64,3 +64,31 @@ def test_extract_labs_aggregates_by_lab_code():
     assert labs["WHI"].latest == "260731"
     assert labs["AGA"].count == 1
     assert "AGA" in labs and labs["AGA"].scientists == ["Nathalie Agar"]
+
+
+def test_rank_labs_author_match_beats_count():
+    labs = [dc.LabInfo("AGA", 50, ["Nathalie Agar"], "260701"),
+            dc.LabInfo("WHI", 5, ["Cameron Flower", "Forest White"], "260731")]
+    ranked = dc.rank_labs(labs, dc.Evidence(author_surnames=["white", "flower"]))
+    assert ranked[0].code == "WHI"
+
+
+def test_rank_labs_recency_tiebreak_when_no_author():
+    labs = [dc.LabInfo("AAA", 10, ["X"], "260101"),
+            dc.LabInfo("BBB", 10, ["Y"], "260731")]
+    ranked = dc.rank_labs(labs, dc.Evidence())
+    assert ranked[0].code == "BBB"
+
+
+def test_guess_pi_prefers_arg():
+    assert dc.guess_pi([], dc.Evidence(), "White") == "white"
+
+
+def test_guess_pi_author_match():
+    labs = [dc.LabInfo("WHI", 5, ["Cameron Flower", "Forest White"], "260731")]
+    assert dc.guess_pi(labs, dc.Evidence(author_surnames=["white"]), None) == "white"
+
+
+def test_guess_pi_fallback_first_scientist_surname():
+    labs = [dc.LabInfo("WHI", 5, ["Forest White"], "260731")]
+    assert dc.guess_pi(labs, dc.Evidence(), None) == "white"
