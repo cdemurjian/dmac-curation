@@ -55,3 +55,14 @@ def gather_evidence(project_root) -> Evidence:
 
     return Evidence(path_tokens=path_tokens, author_surnames=author_surnames,
                     doi=None, master_tokens=master_tokens)
+
+
+def rank_projects(projects: list, evidence: Evidence) -> list:
+    """Score each project by evidence-token overlap with its title; sort desc."""
+    ev = evidence.all_tokens() | set(evidence.author_surnames)
+    out = []
+    for p in projects:
+        title_toks = set(tokenize(p.get("title", "")))
+        out.append({**p, "score": len(ev & title_toks)})
+    out.sort(key=lambda p: (-p["score"], str(p.get("title", ""))))
+    return out

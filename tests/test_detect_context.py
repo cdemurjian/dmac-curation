@@ -22,3 +22,13 @@ def test_gather_evidence_reads_path_manuscript_master(tmp_path):
     assert "flower" in ev.author_surnames     # manuscript filename token
     assert "white" in ev.author_surnames
     assert "csbc" in ev.master_tokens
+
+
+def test_rank_projects_scores_and_sorts():
+    projects = [{"id": 4, "title": "MetNet"},
+                {"id": 10, "title": "Cancer_Systems_Biology_Consortium(CSBC)"}]
+    ev = dc.Evidence(path_tokens=["csbc", "flower", "tyrosine"])
+    ranked = dc.rank_projects(projects, ev)
+    assert ranked[0]["id"] == 10
+    assert ranked[0]["score"] >= 1
+    assert ranked[-1]["id"] == 4 and ranked[-1]["score"] == 0
