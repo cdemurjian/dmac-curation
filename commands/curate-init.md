@@ -85,6 +85,31 @@ is nothing to render.
    PY
    ```
 
+   **In pipeline mode, also provision the working `.env`** by copying a
+   pre-filled credentials file pointed to by `$DMAC_ENV_FILE`. This is what lets
+   the curator immediately make the NExtSEEK API call to pull a fresh DB export
+   (by project number) into `previous_metadata/`, which the build guard then
+   checks. The source MUST live OUTSIDE any git repo so credentials are never
+   committed. Additive: never overwrite an existing `.env`; never read or print
+   its contents.
+
+   ```bash
+   # pipeline mode only: copy the filled credentials file into the project
+   if [ "$MODE" = "pipeline" ]; then
+     if [ -f "./.env" ]; then
+       echo "  exists - not modified: .env"
+     elif [ -n "$DMAC_ENV_FILE" ] && [ -f "$DMAC_ENV_FILE" ]; then
+       cp "$DMAC_ENV_FILE" "./.env" && chmod 600 "./.env"
+       echo "  created: .env  (copied from \$DMAC_ENV_FILE)"
+     else
+       echo "  NOTE: no .env copied — set DMAC_ENV_FILE to your filled credentials"
+       echo "        file (kept outside any git repo) and re-run, or fill"
+       echo "        .env.example by hand. NExtSEEK creds in .env are what the"
+       echo "        DB pull and the build stamp-guard need."
+     fi
+   fi
+   ```
+
 6. Merge the mode into the lockfile. **Do not hand-write this JSON** - the
    schema version and plugin version come from `scripts/_lockfile.py`, which is
    the single source of truth and migrates a v0 lockfile in place:
@@ -138,6 +163,12 @@ is nothing to render.
   Never guess a lab code; it becomes part of every minted UID.
 - A `.env` already present in cwd is a strong signal this is a real project.
   Report it and continue. Never read or print its contents.
+- **`.env` is copied, never rendered with secrets.** The filled source is
+  `$DMAC_ENV_FILE`; init only `cp`s it and `chmod 600`s the copy — it never reads
+  the values. If `$DMAC_ENV_FILE` is unset/missing, fall back to `.env.example`
+  (the template, which stays blank) and tell the user. Never write real
+  credentials into a template or commit a filled `.env`; the project `.gitignore`
+  already ignores `.env`, and the source must live outside any git repo.
 - Don't `git init` in the project dir; let the user decide. Suggest it.
 - `schema` and `report` modes require no scaffold at all. Running
   `/curate-init --mode schema` in a bare directory creates nothing but a
