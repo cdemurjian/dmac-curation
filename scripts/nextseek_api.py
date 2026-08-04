@@ -136,6 +136,21 @@ class NExtSEEKClient:
         """GET /projects/{id}/ — returns the full JSON:API response dict."""
         return self._get(f"/projects/{project_id}/")
 
+    def list_projects(self) -> list:
+        """GET /projects/ → [{'id': int, 'title': str}, ...] (JSON:API normalized)."""
+        doc = self._get("/projects/")
+        data = doc.get("data", doc) if isinstance(doc, dict) else doc
+        out = []
+        for r in (data or []):
+            attrs = r.get("attributes", r) if isinstance(r, dict) else {}
+            pid = r.get("id")
+            try:
+                pid = int(pid)
+            except (TypeError, ValueError):
+                pass
+            out.append({"id": pid, "title": attrs.get("title") or attrs.get("name") or ""})
+        return out
+
     def get_sample_type(self, ident) -> dict:
         """GET /sample_types/{id-or-title}/ — full schema incl. sample_attributes."""
         return self._get(f"/sample_types/{ident}/")
@@ -699,6 +714,64 @@ def cmd_pull_db(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_detect_context(args: argparse.Namespace) -> int:
+    """Suggest project + lab + pi for /curate-init as JSON (API + local evidence)."""
+    import json as _json
+    _load_dotenv()
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import detect_context as dc
+
+    client = _client_from_args(args)  # exits(2) if no creds
+    try:
+        cfg = config_from_args(args)
+        root, prev_dir = cfg.root, cfg.previous_metadata
+    except ProjectRootError:
+        root = Path(".").resolve()
+        prev_dir = root / "previous_metadata"
+
+    warnings = []
+    evidence = dc.gather_evidence(root)
+    try:
+        projects = client.list_projects()
+    except NExtSEEKError as e:
+        print(f"error: could not list projects: HTTP {e.status}", file=sys.stderr)
+        return 1
+    ranked = dc.rank_projects(projects, evidence)
+
+    if getattr(args, "project_id", None):
+        chosen = next((p for p in ranked if str(p["id"]) == str(args.project_id)),
+                      {"id": args.project_id, "title": ""})
+    else:
+        chosen = ranked[0] if ranked else None
+
+    labs, export_path = [], None
+    if chosen:
+        try:
+            content, fname = client.export_project(chosen["id"], "xlsx")
+            prev_dir.mkdir(parents=True, exist_ok=True)
+            (prev_dir / fname).write_bytes(content)
+            export_path = str(prev_dir / fname)
+            labs = dc.rank_labs(dc.extract_labs(content), evidence)
+        except NExtSEEKError as e:
+            warnings.append(f"export pull failed (HTTP {e.status}); labs unavailable")
+
+    out = {
+        "projects": ranked,
+        "chosen_project": chosen,
+        "labs": [vars(l) for l in labs],
+        "pi_guess": dc.guess_pi(labs, evidence, getattr(args, "pi", None)),
+        "export_path": export_path,
+        "evidence": {
+            "path_tokens": evidence.path_tokens[:20],
+            "author_surnames": evidence.author_surnames[:20],
+            "master_tokens": evidence.master_tokens[:20],
+        },
+        "warnings": warnings,
+    }
+    print(_json.dumps(out, indent=2))
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(
         description="NExtSEEK API helper for resolving assay titles → IDs.")
@@ -748,6 +821,25 @@ def main(argv=None) -> int:
                     help=f"NExtSEEK API base URL (default: {DEFAULT_BASE_URL}).")
     add_config_args(pd)
     pd.set_defaults(func=cmd_pull_db)
+
+    # ── detect-context ──────────────────────────────────────────────────────
+    dctx = sub.add_parser(
+        "detect-context",
+        help="Suggest project + lab code + pi for /curate-init (JSON) from the "
+             "API and local evidence.")
+    dctx.add_argument("--project-id", default=None,
+                      help="Force a project id instead of auto-ranking.")
+    # NOTE: --pi is NOT added here — add_config_args() below already registers
+    # it ("PI short name") for the project-config group, and cmd_detect_context
+    # reads it the same way (getattr(args, "pi", None): "Known PI, skips
+    # guessing"). Adding it twice raises argparse.ArgumentError (conflicting
+    # option string) at parser build time.
+    dctx.add_argument("--username", default=None)
+    dctx.add_argument("--password", default=None)
+    dctx.add_argument("--token", default=None)
+    dctx.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    add_config_args(dctx)
+    dctx.set_defaults(func=cmd_detect_context)
 
     # ── validate ────────────────────────────────────────────────────────────
     va = sub.add_parser(
