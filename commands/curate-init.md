@@ -10,8 +10,10 @@ Parse from `$ARGUMENTS`:
 - `--pi <NAME>` (e.g. `marie`, `lee`, `yufei`)
 - `--mode <NAME>` (default `pipeline`; one of `pipeline`, `report`, `schema`)
 
-`--lab` and `--pi` are required for `pipeline` mode only. If missing there, use
-`AskUserQuestion` - do NOT guess. `schema` and `report` modes need neither.
+`--lab` and `--pi` apply to `pipeline` mode only. If missing there, AUTO-DETECT
+them first (see the auto-detect behavioral rule below), then confirm once with
+`AskUserQuestion` - never silently apply a guessed lab code. `schema` and
+`report` modes need neither.
 
 If `--mode` is any value outside `{pipeline, schema, report}`, stop with a clear
 error (e.g. `unknown mode: <value>`) before doing anything else. Never call
@@ -126,8 +128,10 @@ is nothing to render.
    import _lockfile
    # normalize before storing so the lockfile matches the shape below:
    # LAB uppercased, PI lowercased. schema/report collect no lab/pi -> {}
+   # Substitute PROJECT_ID with an int (from detect-context) or the literal
+   # None — never leave it blank, or this becomes invalid Python.
    values = ({"lab": "$LAB".upper(), "pi": "$PI".lower(),
-              "nextseek_project_id": $PROJECT_ID}   # int from detect-context, else None
+              "nextseek_project_id": $PROJECT_ID}
              if "$MODE" == "pipeline" else {})
    doc = _lockfile.set_mode(pathlib.Path.cwd(), "$MODE", values)
    print(f"lockfile schema_version={doc['schema_version']} "
