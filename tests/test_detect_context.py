@@ -1,5 +1,8 @@
+import io
 import sys
 from pathlib import Path
+
+import openpyxl
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
@@ -32,3 +35,32 @@ def test_rank_projects_scores_and_sorts():
     assert ranked[0]["id"] == 10
     assert ranked[0]["score"] >= 1
     assert ranked[-1]["id"] == 4 and ranked[-1]["score"] == 0
+
+
+def _make_xlsx(sheets):
+    """sheets: list[(sheet_name, [(uid, scientist), ...])]"""
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for name, rows in sheets:
+        ws = wb.create_sheet(name)
+        ws.append(["UID", "Scientist"])
+        for uid, sci in rows:
+            ws.append([uid, sci])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_extract_labs_aggregates_by_lab_code():
+    xlsx = _make_xlsx([
+        ("CEL", [("CEL-260730WHI-1", "Cameron Flower"),
+                 ("CEL-260731WHI-2", "Forest White")]),
+        ("D.MSP", [("D.MSP-260729AGA-1", "Nathalie Agar"),
+                   ("not-a-uid", "ignored")]),
+    ])
+    labs = {l.code: l for l in dc.extract_labs(xlsx)}
+    assert labs["WHI"].count == 2
+    assert labs["WHI"].scientists == ["Cameron Flower", "Forest White"]
+    assert labs["WHI"].latest == "260731"
+    assert labs["AGA"].count == 1
+    assert "AGA" in labs and labs["AGA"].scientists == ["Nathalie Agar"]

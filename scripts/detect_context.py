@@ -66,3 +66,44 @@ def rank_projects(projects: list, evidence: Evidence) -> list:
         out.append({**p, "score": len(ev & title_toks)})
     out.sort(key=lambda p: (-p["score"], str(p.get("title", ""))))
     return out
+
+
+@dataclass
+class LabInfo:
+    code: str
+    count: int
+    scientists: list
+    latest: str
+    score: float = 0.0
+
+
+def extract_labs(xlsx_bytes: bytes) -> list:
+    """Aggregate UIDs across all sheets of a project export into per-lab records."""
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes), read_only=True, data_only=True)
+    agg: dict = {}
+    for ws in wb.worksheets:
+        rows = ws.iter_rows(values_only=True)
+        try:
+            hdr = [str(h).strip().lower() if h is not None else "" for h in next(rows)]
+        except StopIteration:
+            continue
+        if "uid" not in hdr:
+            continue
+        ui = hdr.index("uid")
+        si = hdr.index("scientist") if "scientist" in hdr else None
+        for r in rows:
+            if ui >= len(r) or not r[ui]:
+                continue
+            m = UID_RE.match(str(r[ui]).strip())
+            if not m:
+                continue
+            a = agg.setdefault(m.group("lab"),
+                               {"count": 0, "scientists": set(), "latest": ""})
+            a["count"] += 1
+            a["latest"] = max(a["latest"], m.group("date"))
+            if si is not None and si < len(r) and r[si]:
+                a["scientists"].add(str(r[si]).strip())
+    wb.close()
+    return [LabInfo(code=code, count=v["count"],
+                    scientists=sorted(v["scientists"]), latest=v["latest"])
+            for code, v in agg.items()]
