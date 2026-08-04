@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["requests>=2.31"]
+# dependencies = ["requests>=2.31", "openpyxl>=3.1"]
 # ///
 """
 Reusable NExtSEEK API client for resolving assay titles → assay IDs per project.
@@ -110,6 +110,27 @@ class NExtSEEKClient:
                                 f"Non-JSON response: {resp.text[:500]}")
 
     # ── Endpoint wrappers ───────────────────────────────────────────────────
+
+    def export_project(self, project_id,
+                       output_format: str = "xlsx") -> Tuple[bytes, str]:
+        """GET /admin/project-export/{id}/ → (content_bytes, server_filename).
+
+        The full project database export. ``output_format='xlsx'`` returns the
+        master workbook (one sheet per sample type); ``'json'`` returns JSON
+        bytes. This is the fresh DB pull the build stamp-guard checks against.
+        Returns raw bytes (not parsed) so a binary xlsx passes through intact.
+        """
+        import re
+        url = f"{self.base_url}/nextseek_api/admin/project-export/{project_id}/"
+        resp = self.session.get(url, params={"output_format": output_format},
+                                timeout=max(self.timeout, 300.0))
+        if not resp.ok:
+            raise NExtSEEKError(resp.status_code, url, resp.text[:500])
+        cd = resp.headers.get("Content-Disposition", "")
+        m = re.search(r'filename="?([^";]+)"?', cd)
+        ext = "xlsx" if output_format == "xlsx" else "json"
+        fname = m.group(1).strip() if m else f"project-{project_id}-export.{ext}"
+        return resp.content, fname
 
     def get_project(self, project_id) -> dict:
         """GET /projects/{id}/ — returns the full JSON:API response dict."""
@@ -629,6 +650,55 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0 if overall_valid else 1
 
 
+def cmd_pull_db(args: argparse.Namespace) -> int:
+    """Download a project's full DB export into previous_metadata/.
+
+    GET /admin/project-export/{id}/?output_format=xlsx → the master workbook.
+    This is the fresh DB pull the build stamp-guard requires before minting.
+    """
+    _load_dotenv()
+    client = _client_from_args(args)  # exits(2) if no creds
+
+    if args.dest:
+        dest_dir = Path(args.dest)
+    else:
+        try:
+            dest_dir = config_from_args(args).root / "previous_metadata"
+        except ProjectRootError as exc:
+            print(f"error: {exc}\n  Run inside a curation project, or pass --dest.",
+                  file=sys.stderr)
+            return 2
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Pulling project {args.project_id} export ({args.output_format}) "
+          f"from {args.base_url} …")
+    try:
+        content, server_name = client.export_project(args.project_id,
+                                                      args.output_format)
+    except NExtSEEKError as e:
+        print(f"\nAPI error: HTTP {e.status} on {e.url}\n{e.body[:800]}",
+              file=sys.stderr)
+        return 1
+
+    out = dest_dir / (args.filename or server_name)
+    out.write_bytes(content)
+    print(f"  ✓ wrote {out}  ({len(content):,} bytes)")
+
+    if args.output_format == "xlsx":
+        try:
+            import io
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True)
+            total = sum(max(sum(1 for _ in wb[sh].iter_rows()) - 1, 0)
+                        for sh in wb.sheetnames)
+            print(f"  {len(wb.sheetnames)} sheets, ~{total} data rows")
+        except Exception as e:  # introspection is best-effort
+            print(f"  (workbook introspection skipped: {e})")
+    print("  → the build stamp-guard reads the newest xlsx here as the fresh "
+          "pull.")
+    return 0
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(
         description="NExtSEEK API helper for resolving assay titles → IDs.")
@@ -656,6 +726,28 @@ def main(argv=None) -> int:
                          "(default: <project-root>/context/assay_ids_cache.json)")
     add_config_args(fa)
     fa.set_defaults(func=cmd_fetch_assays)
+
+    # ── pull-db ─────────────────────────────────────────────────────────────
+    pd = sub.add_parser(
+        "pull-db",
+        help="Download a project's full DB export (xlsx) into "
+             "previous_metadata/ — the fresh pull the build stamp-guard checks.")
+    pd.add_argument("--project-id", required=True,
+                    help="SEEK project ID (numeric), e.g. 10 for CSBC.")
+    pd.add_argument("--output-format", default="xlsx", choices=["xlsx", "json"],
+                    help="Export format (default: xlsx — the master workbook).")
+    pd.add_argument("--dest", default=None,
+                    help="Destination directory "
+                         "(default: <project-root>/previous_metadata/).")
+    pd.add_argument("--filename", default=None,
+                    help="Override output filename (default: server-provided name).")
+    pd.add_argument("--username", default=None)
+    pd.add_argument("--password", default=None)
+    pd.add_argument("--token", default=None)
+    pd.add_argument("--base-url", default=DEFAULT_BASE_URL,
+                    help=f"NExtSEEK API base URL (default: {DEFAULT_BASE_URL}).")
+    add_config_args(pd)
+    pd.set_defaults(func=cmd_pull_db)
 
     # ── validate ────────────────────────────────────────────────────────────
     va = sub.add_parser(
