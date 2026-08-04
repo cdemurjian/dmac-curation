@@ -87,11 +87,11 @@ is nothing to render.
 
    **In pipeline mode, also provision the working `.env`** by copying a
    pre-filled credentials file pointed to by `$DMAC_ENV_FILE`. This is what lets
-   the curator immediately make the NExtSEEK API call to pull a fresh DB export
-   (by project number) into `previous_metadata/`, which the build guard then
-   checks. The source MUST live OUTSIDE any git repo so credentials are never
-   committed. Additive: never overwrite an existing `.env`; never read or print
-   its contents.
+   the curator immediately pull a fresh DB export into `previous_metadata/` with
+   `nextseek_api.py pull-db --project-id N` (which the build guard then checks).
+   The source MUST live OUTSIDE any git repo so credentials are never committed.
+   Additive: never overwrite an existing `.env`; never read or print its
+   contents.
 
    ```bash
    # pipeline mode only: copy the filled credentials file into the project

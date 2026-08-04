@@ -13,6 +13,9 @@ Parse `$ARGUMENTS`: optional `<arm>` (letter or short name). If omitted, list ar
   `CSBC All …` / AllMetadata export pulled right before this session). The build
   guard checks the intended UID stamp against it; a stale pull won't show a stamp
   another curator claimed since it was exported, so the check would pass falsely.
+  Grab one with:
+  `uv run --script <PLUGIN>/scripts/nextseek_api.py pull-db --project-id N`
+  (downloads the project's master export straight into `previous_metadata/`).
 - `./CLAUDE.md` exists (lab + pi)
 - `./.env` exists (warn if missing — needed at consolidate)
 

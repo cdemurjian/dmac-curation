@@ -14,6 +14,7 @@ The user wants Phase 9 — QA pass on the consolidated upload sheets.
    **Always pass `--master-baseline` with a FRESH DB pull** — it powers the
    UID-vs-DB collision net (a new UID that already exists in the pull would
    overwrite another study on upload). Without a baseline the net can't run.
+   Refresh it with `nextseek_api.py pull-db --project-id N` before QA.
 2. Read the script's report. The script outputs raw `[BLOCKER]` / `[INFO]` findings. Categorize each row CLEAN / SOFT_FLAG / HARD_REJECT.
 3. Print per-arm summary table:
    ```
