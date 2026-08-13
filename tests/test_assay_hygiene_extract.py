@@ -23,6 +23,7 @@ import pandas as pd
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
+EXTRACT_PY = REPO / "scripts" / "assay_hygiene" / "extract.py"
 sys.path.insert(0, str(REPO / "scripts"))
 
 from assay_hygiene import _schema as S  # noqa: E402
@@ -185,8 +186,16 @@ def test_no_extract_can_write(name, query, columns):
     Word-boundary matched, not substring matched: `s.created_at` contains
     "CREATE" once uppercased, so a substring check would fail SAMPLES_SQL for
     the wrong reason and would then be "fixed" by weakening it.
+
+    `FOREACH` and `CALL` are Cypher's own write routes, and neither carries a
+    forbidden verb this check would otherwise see: `FOREACH (x IN xs | SET ...)`
+    hides its mutation inside a clause, and `CALL` reaches both write procedures
+    and write-capable subqueries. `CALL` is forbidden outright even though some
+    procedures are read-only -- no query here needs one, so the safe default is
+    that adding one has to weaken this guard deliberately first.
     """
     forbidden = ("MERGE", "CREATE", "DELETE", "SET", "REMOVE", "DETACH",
+                 "FOREACH", "CALL",
                  "INSERT", "UPDATE", "REPLACE", "DROP", "ALTER", "TRUNCATE",
                  "GRANT", "LOAD")
     upper = query.upper()
@@ -522,6 +531,72 @@ def test_check_projection_reports_both_sides():
     with pytest.raises(ValueError) as exc:
         extract._check_projection(["a", "b"], ["a", "c"])
     assert "'b'" in str(exc.value) and "'c'" in str(exc.value)
+
+
+def test_assays_row_count_is_not_the_acceptance_signal():
+    """`assays` fans out on two independent axes, so len() cannot be trusted.
+
+    A row count of 470 is equally consistent with a correct extract and with
+    "the 17 junction-less assays were dropped by the inner joins, and 29 rows
+    were duplicated by multi-project assays". The second is the exact failure
+    the LEFT JOINs exist to prevent, and it makes those assays' edges resolve
+    wrong instead of firing resolve_properties' fallback. The step 6 assertion
+    is `nunique == 458`, never `len == 458`, so main must PRINT the distinct
+    count -- the operator cannot recompute it from a number on a terminal.
+    """
+    assays = pd.DataFrame(
+        [
+            # assay 1 mapped to two projects -> two rows, one assay
+            (1, "Comet Chip", 7, 3, 2, 10, "MIT_SRP", 11, "Comet Chip"),
+            (1, "Comet Chip", 7, 3, 2, 11, "OTHER", 11, "Comet Chip"),
+            (2, "Tissue Collection", 8, 3, 2, 10, "MIT_SRP", None, None),
+        ],
+        columns=S.ASSAY_COLUMNS,
+    )
+    line = extract.count_line("assays", assays)
+    assert "3 rows" in line
+    assert "2 distinct assay_id" in line
+
+
+def test_count_line_leaves_an_unmultiplied_frame_as_a_bare_row_count():
+    line = extract.count_line("nodes", S.make_stage0_fixture()["nodes"])
+    assert "6 rows" in line
+    assert "distinct" not in line
+
+
+def test_assays_is_the_only_frame_whose_row_count_is_ambiguous():
+    """Which frames need the distinct count, argued rather than assumed.
+
+    `assays` is the only query that can emit more than one row per entity.
+    `edges`/`childof` are one row per relationship, `nodes` one per node,
+    `membership` one per assay_assets row, `sops` one per SOP, `samples` one per
+    `GROUP BY s.id`, and `parents` is built in Python. `nodes` also has a
+    strictly stronger guard already -- duplicate_uuids(), which RAISES rather
+    than printing, and which catches the one thing a distinct count on `nodes`
+    would catch.
+    """
+    assert set(extract.DISTINCT_KEYS) == {"assays"}
+    assert extract.DISTINCT_KEYS["assays"] == "assay_id"
+    # a typo here would only surface as a KeyError on the production box
+    assert extract.DISTINCT_KEYS["assays"] in S.ASSAY_COLUMNS
+
+
+def test_main_prints_the_acceptance_signal_through_count_line():
+    """main() is untestable, so pin by ast the one line of it that matters here.
+
+    The distinct assay count only helps if the operator SEES it. A revert of the
+    print loop to a bare f-string would leave every other case green while
+    removing the signal step 6 is judged on.
+    """
+    main_fn = [
+        n for n in ast.walk(ast.parse(EXTRACT_PY.read_text()))
+        if isinstance(n, ast.FunctionDef) and n.name == "main"
+    ][0]
+    assert [
+        n for n in ast.walk(main_fn)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and n.func.id == "count_line"
+    ], "main must print through count_line"
 
 
 def test_duplicate_uuids_finds_a_repeated_node_key():

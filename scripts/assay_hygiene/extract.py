@@ -152,12 +152,46 @@ SQL_EXTRACTS: dict[str, tuple[str, list[str]]] = {
     "sops": (SOPS_SQL, S.SOP_COLUMNS),
 }
 
+# Frames whose ROW COUNT is not a sound acceptance signal, and the column whose
+# distinct count is.
+#
+# `assays` is the only one, and it is the only query that can emit more than one
+# row per entity. It fans out on two INDEPENDENT axes: once per
+# investigations_projects mapping, and once per assays_internal_assays row. So a
+# row count of 470 is equally consistent with "correct" and with "the 17
+# junction-less assays were silently dropped by the inner joins, and 29 rows were
+# duplicated by multi-project assays" -- which is exactly the failure the LEFT
+# JOINs exist to prevent, and it resolves those 17 assays' edges wrong instead of
+# firing resolve_properties' fallback. The step 6 assertion is therefore
+# `nunique == 458`, never `len == 458`.
+#
+# No other frame is multiplicative: `edges`/`childof` are one row per
+# relationship, `nodes` one per node, `membership` one per assay_assets row,
+# `sops` one per SOP, `samples` one per GROUP BY s.id, and `parents` is built in
+# Python. `nodes` additionally has a STRONGER guard than a printed distinct
+# count -- duplicate_uuids() below, which raises rather than merely reporting.
+DISTINCT_KEYS = {"assays": "assay_id"}
+
 # What `field` says when the helper yielded a token no metadata field explains.
 # Deliberately not a real field name: `field` is provenance a curator reads out
 # of plan.parquet, and defaulting it to "Parent" would state in the artefact
 # that a field declared something it never declared. A visible gap beats a
 # plausible lie.
 UNATTRIBUTED_FIELD = "(unattributed)"
+
+
+def count_line(name: str, df: pd.DataFrame) -> str:
+    """One line of `main`'s summary -- the operator's step 6 acceptance signal.
+
+    For every frame but one the row count IS the signal. `assays` also reports
+    its distinct assay_id, because its row count cannot distinguish a correct
+    extract from a truncated one; see DISTINCT_KEYS.
+    """
+    line = f"{name:<12} {len(df):>10,} rows"
+    key = DISTINCT_KEYS.get(name)
+    if key:
+        line += f"   ({df[key].nunique():,} distinct {key})"
+    return line
 
 
 def _check_projection(got: Iterable[str], want: Sequence[str]) -> None:
@@ -307,7 +341,7 @@ def main(outdir: str = "/tmp/assay-hygiene-extract") -> None:
 
     for name, df in frames.items():
         df.to_parquet(out / f"{name}.parquet", compression="zstd", index=False)
-        print(f"{name:<12} {len(df):>10,} rows")
+        print(count_line(name, df))
 
     # Raised AFTER the writes, deliberately. The extract is minutes of work and
     # ~260 MB; destroying it would make the failure harder to diagnose, not
