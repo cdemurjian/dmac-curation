@@ -221,3 +221,341 @@ def resolve_properties(
         ))
 
     return pd.DataFrame(out, columns=S.STAGE0_PLAN_COLUMNS)
+
+
+def reconcile_childof(childof: pd.DataFrame, parents: pd.DataFrame) -> pd.DataFrame:
+    """CHILD_OF edges the child's CURRENT metadata no longer declares.
+
+    Reported only. Operator ruling 2026-08-13: CHILD_OF is never written,
+    modified or deleted by this pipeline, so this frame carries no action
+    column by design.
+
+    Covers both populations the spec names: an edge whose child declares some
+    other parent, and an edge whose child declares none at all. Neither is
+    special-cased -- a pair absent from the declared set is absent for the
+    operator to explain, not for this function to classify.
+    """
+    declared = set(zip(parents["child_uuid"], parents["token"]))
+    rows = [
+        (c, p, "not_declared_by_metadata")
+        for c, p in zip(childof["child_uuid"], childof["parent_uuid"])
+        if (c, p) not in declared
+    ]
+    # Columns are declared even when rows is empty: task 7 writes this straight
+    # to reconciliation.csv, and a bare 0x0 frame writes a headerless file.
+    return pd.DataFrame(rows, columns=["child_uuid", "parent_uuid", "reason"])
+
+
+# --- the dry-run report ------------------------------------------------------
+#
+# The report IS the operator's gate: they read it and then authorise a ~90,000
+# relationship write. Anything it fails to state has been dropped silently in
+# the only sense that matters operationally.
+
+# Residue keys that count something OVERLAPPING the keepers rather than
+# excluding anything, and so must never be summed into the exclusion ledger.
+# Mirrors the accounting the planner's docstring states. Every OTHER key is
+# treated as a drop reason and rendered by iteration, so a reason added to
+# plan_edges later is reported -- with its raw key if nobody labelled it --
+# instead of vanishing. A report-only counter added there and forgotten here
+# inflates the ledger visibly, which is the safe direction to fail.
+REPORT_ONLY_RESIDUES = frozenset({"prod_regex_would_reject"})
+
+# The drop reasons, in the operator's words. D_NO_NODE is the one that cannot
+# be read off its own constant: the value is "parent_not_a_node", but the
+# branch also fires when the CHILD is missing from the node index. The constant
+# is frozen (stages A-F key off it); the label is not, and the label is what
+# gets read.
+RESIDUE_LABELS = {
+    S.D_NOT_UID: "the token is not a sample UID under the corrected pattern",
+    S.D_NO_NODE: "an endpoint (the child or the parent) has no Sample node",
+    S.D_SELF_LOOP: "the child declares itself as its own parent",
+    S.D_ALREADY_EXISTS: "a DERIVED_FROM edge already joins that pair",
+    "duplicate_reference": "the same (child, parent) pair declared under two fields",
+}
+
+# How many tiebreak edges to list before summarising. The spec expects 28 on
+# production; the cap exists so a bad extract cannot bury the rest of the gate
+# under 90,000 table rows.
+TIEBREAK_LIST_CAP = 50
+
+# Why an edge carries no protocol id. Mutually exclusive and, together with
+# "the child has no samples row", exhaustive.
+_P_NO_ROW = "the child has no row in the samples extract"
+_P_EMPTY = "the child's json_metadata is empty"
+_P_UNREADABLE = "the child's json_metadata did not parse as a JSON object"
+_P_NO_URL = "the child's metadata names no `/sops/<id>` URL"
+_PROTOCOL_CAUSES = [_P_NO_ROW, _P_EMPTY, _P_UNREADABLE, _P_NO_URL]
+
+
+def _pct(n: int, total: int) -> str:
+    """A parenthesised percentage, or nothing at all when the total is zero.
+
+    The empty plan is the steady state after a successful run, and the report
+    is still the operator's receipt for it, so this cannot divide blindly.
+    """
+    return f" ({100.0 * n / total:.1f}%)" if total else ""
+
+
+def _label(value) -> str:
+    """A cell as it should print: no bare NaN, and no id turned into a float.
+
+    A Sample node's `type` can be NULL, and any id column holding one null is
+    float64 for the whole frame -- so an internal_assay_id arrives here as 11.0
+    and the operator cannot paste it into a query. Both are rendering problems
+    only; the plan itself keeps its dtypes for the applier to normalise.
+    """
+    if pd.isna(value):
+        return "(none)"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _protocol_causes(resolved: pd.DataFrame, samples: pd.DataFrame) -> dict[str, int]:
+    """Split the edges with no protocol id by cause, re-reading the metadata.
+
+    resolve_properties swallows unparseable or non-object json_metadata into
+    empty metadata and counts nothing, so a null protocol_id pools a data defect
+    with a child that genuinely declares no Protocol. The two are not equally
+    actionable, and only the samples frame separates them -- hence the recount
+    rather than an inference off the resolved frame.
+
+    Parsing mirrors resolve_properties exactly (json.loads, non-dict treated as
+    empty), so these buckets describe the run that produced `resolved` rather
+    than a stricter reading of the same data. `samples` is selected by name
+    before iterating, for the reason given there.
+    """
+    cause_by_sample: dict[object, str] = {}
+    for sid, _uuid, jmeta, _created, _projects in samples[
+        S.SAMPLE_COLUMNS
+    ].itertuples(index=False):
+        if jmeta is None or (isinstance(jmeta, float) and pd.isna(jmeta)) or jmeta == "":
+            cause_by_sample[sid] = _P_EMPTY
+            continue
+        try:
+            parsed = json.loads(jmeta)
+        except (ValueError, TypeError):
+            cause_by_sample[sid] = _P_UNREADABLE
+            continue
+        # A document that parses to a list is as unusable as one that does not
+        # parse: resolve_properties discards both, and the server would raise.
+        cause_by_sample[sid] = _P_NO_URL if isinstance(parsed, dict) else _P_UNREADABLE
+
+    counts = dict.fromkeys(_PROTOCOL_CAUSES, 0)
+    missing = resolved[resolved["protocol_id"].isna()]
+    for child_id in missing["child_id"]:
+        counts[cause_by_sample.get(child_id, _P_NO_ROW)] += 1
+    return counts
+
+
+def build_report(
+    resolved: pd.DataFrame,
+    residues: dict[str, int],
+    childof_unmatched: pd.DataFrame,
+    samples: pd.DataFrame | None = None,
+) -> str:
+    """The markdown an operator reads before authorising the write.
+
+    `samples` is optional and is used for one thing: recounting WHY an edge
+    carries no protocol id. Without it the report still states protocol
+    coverage, but says plainly that it cannot separate a child whose metadata
+    could not be read from one that declares no protocol. Pass it.
+    """
+    total = len(resolved)
+    labelled_col = resolved["internal_assay_id"].notna()
+    labelled = int(labelled_col.sum())
+    dark = total - labelled
+    shared_col = resolved["n_shared"] > 0
+    # An edge with a shared assay that stayed dark is an extract gap, not a dark
+    # edge: something the assays frame does not describe was shared by both
+    # endpoints. Pooling the two hides a broken extract behind a plausible count.
+    dark_unresolved = int((shared_col & ~labelled_col).sum())
+    dark_no_share = dark - dark_unresolved
+    # n_shared > 1 alone is not a tiebreak: if nothing resolved, nothing was
+    # chosen. Restricted to labelled edges, matching the spec's "28 out of
+    # 82,663 labelled edges". Still an upper bound -- a shared assay the extract
+    # does not describe never entered the comparison.
+    tiebreak_col = (resolved["n_shared"] > 1) & labelled_col
+    tiebreak = int(tiebreak_col.sum())
+    fallback = int((resolved["assay_source"] == "fallback").sum())
+    with_protocol = int(resolved["protocol_id"].notna().sum())
+    no_protocol = total - with_protocol
+
+    drops = {k: v for k, v in residues.items() if k not in REPORT_ONLY_RESIDUES}
+    excluded = sum(int(v) for v in drops.values())
+
+    lines = [
+        "# Stage 0 dry run: complete the lineage graph",
+        "",
+        f"**{total:,} edges to create.** {labelled:,} labelled, {dark:,} dark.",
+        "",
+        "Stage 0 writes only Neo4j DERIVED_FROM relationships. It does not touch",
+        "MySQL, assay_assets, or CHILD_OF, and it cannot delete.",
+        "",
+        "## Excluded references, by reason",
+        "",
+        "Every reference the planner read is either created or counted here, so",
+        "`references considered` must equal the row count of the parents extract.",
+        "A reason with no description is one the planner gained after this report",
+        "was written; it is counted all the same.",
+        "",
+        "| Reason | What it means | References |",
+        "|---|---|---|",
+    ]
+    # Iterated, never enumerated: an unrendered residue is a silent drop.
+    for key, count in drops.items():
+        meaning = RESIDUE_LABELS.get(key, "(no description here -- see plan_edges)")
+        lines.append(f"| `{key}` | {meaning} | {int(count):,} |")
+    lines += [
+        f"| **excluded, total** |  | **{excluded:,}** |",
+        f"| **created** |  | **{total:,}** |",
+        f"| **references considered** |  | **{excluded + total:,}** |",
+        "",
+        "## Production regex override",
+        "",
+        f"`prod_regex_would_reject`: **{int(residues.get('prod_regex_would_reject', 0)):,}** "
+        "references are valid UIDs that the live server's UID_RE rejects. Stage 0",
+        "includes them.",
+        "",
+        "The two patterns differ in three ways, and this counter separates none of",
+        "them:",
+        "",
+        "| Difference | production `UID_RE_PROD` | corrected `UID_RE_FIXED` |",
+        "|---|---|---|",
+        r"| sample-type code | `[A-Z]{3,}` | `[A-Z]{2,}` |",
+        r"| dotted prefix | `([AD]\.)?` | `([A-Z]\.)?` |",
+        r"| anchors | `^ ... $` | `\A ... \Z` |",
+        "",
+        "Only the first two can put a reference in this count. The sample-type",
+        "length is the reason the fix exists: `AB`, the antibody type, is the only",
+        "two-letter sample type in the database, so production discards every",
+        "`AntibodyParent` reference before an edge is built. The prefix difference",
+        "feeds the same count for any dotted prefix other than `A.` or `D.`. On the",
+        "2026-08-13 extract every reference here was `AB`-prefixed, but that is an",
+        "observation about that data, not something this counter proves.",
+        "",
+        "The anchor difference runs the other way and cannot add to this count:",
+        "`$` matches before a trailing newline and `\\Z` does not, so a token",
+        "carrying a trailing newline is accepted by the live server and rejected",
+        f"here, under `{S.D_NOT_UID}`.",
+        "",
+        "Until the fix ships to production, every new upload carrying an",
+        "`AntibodyParent` regenerates this gap.",
+        "",
+        "## Assay resolution",
+        "",
+        f"- labelled: **{labelled:,}** of **{total:,}** edges{_pct(labelled, total)}",
+        f"- dark because no assay is shared by both endpoints: **{dark_no_share:,}**",
+        "- dark because the only shared assay is one the assays extract does not"
+        f" describe: **{dark_unresolved:,}** (an extract gap, and expected to be 0)",
+        f"- edges resting on the min-internal_assay_id tiebreak: **{tiebreak:,}**",
+        f"- edges whose assay had no junction row (fallback path): **{fallback:,}**",
+        "",
+    ]
+
+    # The spec asks for the tiebreak edges themselves, not just the count: the
+    # choice among several shared assays is arbitrary-but-deterministic, and a
+    # curator can only settle it by hand if the report names the edges.
+    lines += ["### Edges resting on the tiebreak", ""]
+    if tiebreak == 0:
+        lines += ["None.", ""]
+    else:
+        lines += [
+            "The minimum internal_assay_id won. Deterministic, but arbitrary --",
+            "settle these by hand if it matters.",
+            "",
+            "| Child | Parent | Assays shared | internal_assay_id | Title |",
+            "|---|---|---|---|---|",
+        ]
+        listed = resolved[tiebreak_col]
+        for r in listed.head(TIEBREAK_LIST_CAP).itertuples(index=False):
+            lines.append(
+                f"| {r.child_uuid} | {r.parent_uuid} | {int(r.n_shared):,} "
+                f"| {_label(r.internal_assay_id)} | {_label(r.internal_assay_title)} |"
+            )
+        if tiebreak > TIEBREAK_LIST_CAP:
+            lines += [
+                "",
+                f"...and {tiebreak - TIEBREAK_LIST_CAP:,} more, in `plan.parquet` "
+                "where `n_shared > 1`.",
+            ]
+        lines.append("")
+
+    lines += [
+        "## Protocol coverage",
+        "",
+        f"**{with_protocol:,}** of **{total:,}** edges carry a resolvable protocol"
+        f" id{_pct(with_protocol, total)}.",
+        "",
+    ]
+    if no_protocol == 0:
+        lines += ["Every planned edge resolved one, so there is nothing to explain.", ""]
+    elif samples is None:
+        lines += [
+            f"The other **{no_protocol:,}** pool four causes this run cannot",
+            "separate, because the samples frame was not supplied: the child has no",
+            "row in the samples extract, its json_metadata is empty, its",
+            "json_metadata did not parse as a JSON object, or its metadata names no",
+            "`/sops/<id>` URL. resolve_properties reads an unreadable blob as empty",
+            "metadata, so a null protocol id is NOT a claim that the child declares",
+            "no protocol. Pass `samples` to build_report to have this split",
+            "recounted.",
+            "",
+        ]
+    else:
+        lines += [
+            f"The other **{no_protocol:,}**, recounted from the samples extract:",
+            "",
+            "| Cause | Edges |",
+            "|---|---|",
+        ]
+        causes = _protocol_causes(resolved, samples)
+        for cause in _PROTOCOL_CAUSES:
+            lines.append(f"| {cause} | {causes[cause]:,} |")
+        lines += [
+            "",
+            # Named, not numbered: "the third row" silently becomes a lie the day
+            # someone reorders _PROTOCOL_CAUSES.
+            f"`{_P_UNREADABLE}`",
+            "is a data defect rather than a missing protocol, and it is invisible",
+            "in the plan: resolve_properties reads an unparseable blob as empty",
+            "metadata, so those edges are written with a null protocol id exactly",
+            "like a child that declares none.",
+            "",
+        ]
+
+    lines += [
+        "## Hops",
+        "",
+        "| Hop | Edges | Labelled |",
+        "|---|---|---|",
+    ]
+    # Aggregated inside the groupby rather than by re-filtering the frame per
+    # group: `x == NaN` is False for every x, so a hop off an untyped node would
+    # re-filter to nothing and print 0 labelled beside a non-zero total.
+    hops = (
+        resolved.assign(_labelled=labelled_col)
+        .groupby(["child_type", "parent_type"], dropna=False)["_labelled"]
+        .agg(["size", "sum"])
+        # stable, so equal-sized hops keep the groupby's own key order and a
+        # re-run of the same extract produces a byte-identical report to diff
+        .sort_values("size", ascending=False, kind="stable")
+    )
+    for (child_type, parent_type), row in hops.iterrows():
+        lines.append(
+            f"| {_label(child_type)} -> {_label(parent_type)} "
+            f"| {int(row['size']):,} | {int(row['sum']):,} |"
+        )
+
+    lines += [
+        "",
+        "## CHILD_OF reconciliation",
+        "",
+        f"**{len(childof_unmatched):,}** CHILD_OF edges are not declared by the",
+        "child's current metadata. Reported for curation in `reconciliation.csv`.",
+        "Nothing acts on them: stage 0 never writes, modifies or deletes a",
+        "CHILD_OF relationship.",
+        "",
+    ]
+    return "\n".join(lines)

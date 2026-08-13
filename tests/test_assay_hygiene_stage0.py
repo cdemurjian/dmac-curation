@@ -485,3 +485,446 @@ def test_resolve_is_not_fooled_by_frames_whose_columns_are_reordered():
         stage0.resolve_properties(
             plan, fx["samples"].drop(columns=["json_metadata"]),
             fx["membership"], fx["assays"], fx["sops"])
+
+
+# --- reconcile_childof -------------------------------------------------------
+
+
+def test_reconciliation_surfaces_childof_edges_metadata_no_longer_declares():
+    fx = S.make_stage0_fixture()
+    recon = stage0.reconcile_childof(fx["childof"], fx["parents"])
+    pairs = set(zip(recon["child_uuid"], recon["parent_uuid"]))
+    assert pairs == {("D.IMG-260101ABC-1", "TIS-260101ABC-77")}
+    assert recon.iloc[0]["reason"] == "not_declared_by_metadata"
+
+
+def test_reconciliation_never_proposes_an_action():
+    # Operator ruling 2026-08-13: CHILD_OF is left alone. This file is a report.
+    fx = S.make_stage0_fixture()
+    recon = stage0.reconcile_childof(fx["childof"], fx["parents"])
+    assert list(recon.columns) == ["child_uuid", "parent_uuid", "reason"]
+
+
+def test_reconciliation_of_a_fully_declared_graph_keeps_its_columns():
+    """Zero unmatched edges is the good outcome, and it still has to be a frame.
+
+    Task 7 writes this straight to `reconciliation.csv`, and a bare 0x0 frame
+    writes a file with no header row -- an empty CSV and a CSV of an empty
+    result are the same artifact, which is precisely the confusion the
+    reconciliation exists to avoid.
+    """
+    fx = S.make_stage0_fixture()
+    declared = pd.DataFrame(
+        list(zip(fx["parents"]["child_uuid"], fx["parents"]["token"])),
+        columns=S.CHILDOF_COLUMNS,
+    )
+    recon = stage0.reconcile_childof(declared, fx["parents"])
+    assert len(recon) == 0
+    assert list(recon.columns) == ["child_uuid", "parent_uuid", "reason"]
+
+
+# --- build_report ------------------------------------------------------------
+#
+# The report IS the gate: the operator reads it and then authorises a ~90,000
+# relationship write. So these cases assert what an operator would act on -- a
+# count next to the noun it counts -- rather than that a digit appears
+# somewhere. Every one was mutation-tested; `assert "1" in report` passes
+# against almost any report and pins nothing.
+
+
+def _residues(overrides=None):
+    """A residues dict in plan_edges' own key order."""
+    base = {
+        S.D_NOT_UID: 0, S.D_NO_NODE: 0, S.D_SELF_LOOP: 0, S.D_ALREADY_EXISTS: 0,
+        "duplicate_reference": 0, "prod_regex_would_reject": 0,
+    }
+    base.update(overrides or {})
+    return base
+
+
+def _edge(**kw):
+    """One STAGE0_PLAN_COLUMNS row; only the columns under test vary."""
+    row = dict.fromkeys(S.STAGE0_PLAN_COLUMNS, None)
+    row.update(
+        child_id=1, child_uuid="C-260101ABC-1",
+        parent_id=2, parent_uuid="P-260101ABC-1",
+        child_type="DNA", parent_type="TIS", field="Parent",
+        n_shared=0, assay_source="none",
+    )
+    row.update(kw)
+    return row
+
+
+def _resolved_frame(*rows):
+    return pd.DataFrame(list(rows), columns=S.STAGE0_PLAN_COLUMNS)
+
+
+def _no_childof():
+    return pd.DataFrame([], columns=["child_uuid", "parent_uuid", "reason"])
+
+
+def _para(report, needle):
+    """The one blank-line-delimited block containing `needle`.
+
+    Asserting on the block rather than the whole report is what makes an
+    attribution testable: a claim is wrong if it sits in the same paragraph as
+    the wrong cause, not merely if both words appear in the document. The
+    uniqueness check is load-bearing too -- a needle that starts matching twice
+    means the report says the same thing in two places, and the case that reads
+    it is no longer reading what it thinks.
+    """
+    blocks = [b for b in report.split("\n\n") if needle in b]
+    assert len(blocks) == 1, f"expected 1 paragraph containing {needle!r}, got {len(blocks)}"
+    return blocks[0]
+
+
+def _row(report, needle):
+    """The one line containing `needle`, so a count can be pinned to its row."""
+    lines = [ln for ln in report.splitlines() if needle in ln]
+    assert len(lines) == 1, f"expected 1 line containing {needle!r}, got {len(lines)}"
+    return lines[0]
+
+
+def _fixture_report():
+    fx = S.make_stage0_fixture()
+    plan, residues = stage0.plan_edges(fx["parents"], fx["nodes"], fx["existing"])
+    resolved = stage0.resolve_properties(
+        plan, fx["samples"], fx["membership"], fx["assays"], fx["sops"]
+    )
+    recon = stage0.reconcile_childof(fx["childof"], fx["parents"])
+    return stage0.build_report(resolved, residues, recon), residues
+
+
+def test_report_states_every_residue_and_the_regex_override():
+    report, residues = _fixture_report()
+
+    assert "2 edges to create" in report
+    # Per-reason accounting, so nothing is dropped silently. Iterated off the
+    # dict rather than a hardcoded list of the four D_* constants: plan_edges
+    # has already gained a fifth reason since this case was specified, and a
+    # sixth must turn this red rather than quietly vanish from the gate.
+    assert "duplicate_reference" in residues, "non-vacuity: the fifth reason exists"
+    for reason in residues:
+        assert reason in report, f"{reason} is counted but never rendered"
+    # the override must be stated, not buried
+    assert "prod_regex_would_reject" in report
+    # labelled vs dark split
+    assert "1 labelled" in report and "1 dark" in report
+    # the tiebreak count is a standing regression guard
+    assert "min-internal_assay_id tiebreak" in report
+    # reconciliation is reported but not actioned
+    assert "**1** CHILD_OF edges are not declared" in report
+    assert "Nothing acts on them" in report
+
+
+def test_report_lists_hops_so_a_reviewer_can_spot_an_unexpected_one():
+    report, _ = _fixture_report()
+    assert "D.IMG -> TIS" in report
+    assert "D.IMG -> AB" in report
+
+
+def test_report_renders_a_drop_reason_it_has_never_heard_of():
+    """A reason added to plan_edges later must not vanish from the operator's gate.
+
+    The report cannot know what plan_edges will count next, so it iterates the
+    residues dict instead of an enumerated key list. An unlabelled reason is
+    rendered with its raw key and its count, and it still lands in the ledger
+    total -- being counted but unrendered is the same as being dropped silently,
+    which is the spec's one binding constraint.
+    """
+    report = stage0.build_report(
+        _resolved_frame(_edge()),
+        _residues({S.D_NOT_UID: 2, "invented_later": 7}),
+        _no_childof(),
+    )
+    row = _row(report, "| `invented_later` |")
+    assert row.endswith("| 7 |")
+    assert "**9**" in _row(report, "excluded, total")
+
+
+def test_report_ledger_reconciles_created_plus_excluded():
+    """created + excluded == references considered, and the override is not summed.
+
+    `prod_regex_would_reject` overlaps the keepers rather than excluding
+    anything (plan_edges counts it and then keeps the reference), so summing it
+    here would report more references than the parents extract holds and make
+    the operator's one external cross-check fail on a correct run.
+    """
+    report = stage0.build_report(
+        _resolved_frame(_edge(), _edge(child_uuid="C-260101ABC-2")),
+        _residues({S.D_NOT_UID: 3, S.D_SELF_LOOP: 1, "prod_regex_would_reject": 5}),
+        _no_childof(),
+    )
+    assert "**4**" in _row(report, "excluded, total")
+    assert "**2**" in _row(report, "| **created**")
+    assert "**6**" in _row(report, "| **references considered**")
+
+
+def test_report_calls_the_node_gap_an_endpoint_not_a_parent():
+    """D_NO_NODE's literal value understates the branch it names.
+
+    plan_edges raises it when EITHER endpoint is missing from the node index,
+    but the constant reads `parent_not_a_node` and Tasks 5-6 depend on its
+    value, so it is frozen. The operator reads the label, not the constant, so
+    the label is where this gets told truthfully.
+    """
+    report = stage0.build_report(
+        _resolved_frame(_edge()), _residues({S.D_NO_NODE: 4}), _no_childof())
+    row = _row(report, f"| `{S.D_NO_NODE}` |")
+    assert "endpoint" in row and "child" in row
+    assert row.endswith("| 4 |")
+
+
+def test_report_does_not_blame_the_antibody_fix_for_the_anchor_difference():
+    """The two regexes differ in three ways and the counter separates none of them.
+
+    Verified against the patterns themselves: `AB-260101ABC-1` (two-letter type)
+    and `X.TIS-260101ABC-1` (a dotted prefix other than A. or D.) are both
+    accepted by UID_RE_FIXED and rejected by UID_RE_PROD, so both feed this
+    count. The anchor difference runs the OTHER way -- `TIS-260101ABC-1\\n` is
+    accepted by production's `$` and rejected by `\\Z` -- so it can only ever
+    land in not_a_uid. Attributing the whole count to the antibody fix would be
+    an overclaim; attributing any of it to the anchors would be wrong in the
+    opposite direction.
+    """
+    report = stage0.build_report(
+        _resolved_frame(_edge()),
+        _residues({"prod_regex_would_reject": 9}),
+        _no_childof(),
+    )
+    for difference in (r"[A-Z]{3,}", r"[A-Z]{2,}", r"([AD]\.)?", r"([A-Z]\.)?",
+                       r"\A", r"\Z"):
+        assert difference in report, f"{difference} is never shown"
+    assert "**9**" in _para(report, "`prod_regex_would_reject`:")
+
+    # Keyed on the claim, not on the evidence: pinning only that "trailing
+    # newline" and "not_a_uid" share a paragraph lets the sentence that states
+    # the DIRECTION be deleted with every assertion still green (mutation M4).
+    anchors = _para(report, "cannot add to this count")
+    assert "trailing newline" in anchors
+    assert S.D_NOT_UID in anchors, "the anchor difference must be sent to not_a_uid"
+    assert "antibody" not in anchors.lower()
+    assert "AB" not in anchors
+
+
+def test_the_tiebreak_count_covers_only_edges_that_actually_got_a_label():
+    """n_shared > 1 alone is not a tiebreak.
+
+    The spec measures 28 tiebreaks "out of 82,663 labelled edges". An edge whose
+    shared assays are all missing from the assays extract goes out dark: nothing
+    was chosen, so reporting it as resting on the tiebreak tells the operator a
+    curator can settle an edge that has no label to settle.
+    """
+    report = stage0.build_report(
+        _resolved_frame(
+            _edge(child_uuid="C-260101ABC-1", n_shared=3, assay_source="none"),
+            _edge(child_uuid="C-260101ABC-2", n_shared=2, assay_source="junction",
+                  assay_id=4, internal_assay_id=11, internal_assay_title="Comet Chip"),
+        ),
+        _residues(), _no_childof(),
+    )
+    assert "**1**" in _row(report, "min-internal_assay_id tiebreak")
+
+
+def test_report_lists_the_tiebreak_edges_so_a_curator_can_settle_them():
+    # Spec: "report.md carries the count and lists those 28 edges, so a curator
+    # can settle them by hand if they choose." A count alone is not actionable.
+    report = stage0.build_report(
+        _resolved_frame(
+            _edge(child_uuid="C-260101ABC-7", parent_uuid="P-260101ABC-7",
+                  n_shared=3, assay_source="junction", assay_id=4,
+                  internal_assay_id=11, internal_assay_title="Comet Chip"),
+            _edge(child_uuid="C-260101ABC-8", n_shared=1, assay_source="junction",
+                  internal_assay_id=12),
+            # one dark edge, as production has 7,871 of: it makes the whole
+            # internal_assay_id column float64, which is how a labelled id
+            # reaches the report as 11.0
+            _edge(child_uuid="C-260101ABC-9", internal_assay_id=None),
+        ),
+        _residues(), _no_childof(),
+    )
+    row = _row(report, "C-260101ABC-7")
+    # `| 11 |`, not `11`: any id column holding one null is float64, so a bare
+    # substring check passes against the useless `11.0` this used to print
+    for cell in ("| P-260101ABC-7 |", "| 3 |", "| 11 |", "| Comet Chip |"):
+        assert cell in row
+    assert "C-260101ABC-8" not in report, "one shared assay is no tiebreak"
+
+
+def test_a_truncated_tiebreak_list_says_how_many_it_left_out():
+    """Truncation is fine; silent truncation in the gate report is not."""
+    rows = [
+        _edge(child_uuid=f"C-260101ABC-{i}", n_shared=2, assay_source="junction",
+              internal_assay_id=11)
+        for i in range(stage0.TIEBREAK_LIST_CAP + 3)
+    ]
+    report = stage0.build_report(_resolved_frame(*rows), _residues(), _no_childof())
+    assert f"C-260101ABC-{stage0.TIEBREAK_LIST_CAP - 1}" in report
+    assert f"C-260101ABC-{stage0.TIEBREAK_LIST_CAP}" not in report
+    assert "3 more" in report
+
+
+def test_report_separates_a_dark_edge_from_an_unresolvable_shared_assay():
+    """An edge with n_shared > 0 and no label is an extract gap, not a dark edge.
+
+    resolve_properties keeps the two apart on purpose. Pooling them in the
+    report hides a broken assays extract behind a plausible-looking dark count,
+    and the operator authorises ~90,000 writes off this document.
+    """
+    report = stage0.build_report(
+        _resolved_frame(
+            _edge(child_uuid="C-260101ABC-1", n_shared=0, assay_source="none"),
+            _edge(child_uuid="C-260101ABC-2", n_shared=2, assay_source="none"),
+            _edge(child_uuid="C-260101ABC-3", n_shared=1, assay_source="junction",
+                  assay_id=1, internal_assay_id=11),
+        ),
+        _residues(), _no_childof(),
+    )
+    assert "3 edges to create" in report
+    assert "1 labelled" in report and "2 dark" in report
+    assert "**1**" in _row(report, "no assay is shared by both endpoints")
+    assert "**1**" in _row(report, "the assays extract does not describe")
+
+
+def test_report_counts_labelled_edges_per_hop():
+    """The hop table's own arithmetic, including on an untyped node.
+
+    A Sample node with no `type` is possible in the graph, and `x == NaN` is
+    False for every x, so recomputing each row by re-filtering the frame on its
+    own group key reports 0 labelled for that hop while the same row's total
+    says 1 -- a table that disagrees with itself. Aggregated inside the groupby
+    instead, which cannot.
+    """
+    report = stage0.build_report(
+        _resolved_frame(
+            _edge(child_type="D.FLOW", parent_type="D.FCS", internal_assay_id=11),
+            _edge(child_type="D.FLOW", parent_type="D.FCS", internal_assay_id=None),
+            _edge(child_type="D.FLOW", parent_type="D.FCS", internal_assay_id=12),
+            _edge(child_type="MUS", parent_type=None, internal_assay_id=13),
+        ),
+        _residues(), _no_childof(),
+    )
+    assert _row(report, "D.FLOW -> D.FCS").endswith("| 3 | 2 |")
+    assert _row(report, "MUS ->").endswith("| 1 | 1 |")
+    # and the untyped endpoint is named as one, not printed as a float nan
+    assert "MUS -> (none)" in report
+
+
+def test_report_states_protocol_coverage_without_claiming_why_it_is_missing():
+    """A null protocol_id pools a data defect with a genuine absence.
+
+    resolve_properties swallows unparseable or non-object json_metadata into
+    empty metadata, so `protocol_id.isna()` cannot distinguish "the child
+    declares no Protocol" from "the child's metadata could not be read". With no
+    samples frame to recount from, the report states the coverage figure and
+    says which question it is not answering.
+    """
+    report = stage0.build_report(
+        _resolved_frame(
+            _edge(child_id=1, protocol_id=5),
+            _edge(child_id=2, protocol_id=None),
+            _edge(child_id=3, protocol_id=None),
+        ),
+        _residues(), _no_childof(),
+    )
+    assert "**1** of **3**" in _para(report, "carry a resolvable protocol id")
+    pooled = _para(report, "samples frame was not supplied")
+    assert "**2**" in pooled
+    assert "did not parse as a JSON object" in pooled
+
+
+def test_report_recounts_metadata_parse_failures_off_the_samples_frame():
+    """Given `samples`, the four causes are separated by re-reading the metadata.
+
+    The bucket that matters is the unreadable one: it is a data defect the
+    operator can act on before the write, and it is invisible in `resolved`.
+    A JSON document that parses to a list rather than an object belongs there
+    too -- resolve_properties treats it as empty metadata exactly like a parse
+    failure, and the server would have raised on it.
+    """
+    resolved = _resolved_frame(
+        _edge(child_id=1, protocol_id=5),      # resolved, not in the breakdown
+        _edge(child_id=2, protocol_id=None),   # no samples row
+        _edge(child_id=3, protocol_id=None),   # empty metadata
+        _edge(child_id=4, protocol_id=None),   # unparseable
+        _edge(child_id=5, protocol_id=None),   # parses, but to a list
+        _edge(child_id=6, protocol_id=None),   # readable, declares no Protocol
+    )
+    samples = pd.DataFrame(
+        [
+            (1, "C-260101ABC-1", '{"Protocol": "http://x/sops/5"}', None, "10"),
+            (3, "C-260101ABC-3", "", None, "10"),
+            (4, "C-260101ABC-4", "not json at all", None, "10"),
+            (5, "C-260101ABC-5", '["Protocol"]', None, "10"),
+            (6, "C-260101ABC-6", '{"Name": "x"}', None, "10"),
+        ],
+        columns=S.SAMPLE_COLUMNS,
+    )
+    report = stage0.build_report(resolved, _residues(), _no_childof(), samples)
+
+    # needles anchored to the leading pipe: these causes are also named in the
+    # prose beneath the table, and a bare phrase would match both
+    assert "**1** of **6**" in _para(report, "carry a resolvable protocol id")
+    assert _row(report, "| the child has no row in the samples").endswith("| 1 |")
+    assert _row(report, "| the child's json_metadata is empty").endswith("| 1 |")
+    assert _row(report, "| the child's json_metadata did not parse").endswith("| 2 |")
+    assert _row(report, "| the child's metadata names no").endswith("| 1 |")
+
+
+def test_full_protocol_coverage_prints_no_breakdown_to_read():
+    """Complete coverage is the good outcome and needs no four-row table of zeros.
+
+    Both explanatory branches are written for edges that are missing one, and
+    printing either against nothing makes the gate longer without making it say
+    more. The coverage figure itself is still stated.
+    """
+    report = stage0.build_report(
+        _resolved_frame(_edge(protocol_id=5)), _residues(), _no_childof())
+    assert "**1** of **1**" in _para(report, "carry a resolvable protocol id")
+    assert "nothing to explain" in report
+    assert "samples frame was not supplied" not in report
+    assert "no row in the samples extract" not in report
+
+
+def test_the_protocol_recount_is_not_fooled_by_reordered_sample_columns():
+    """`samples` is unpacked positionally, as in resolve_properties.
+
+    A producer emitting sample_id | json_metadata | uuid reads every uuid as the
+    metadata blob; each one then fails to parse and the report announces a
+    catastrophic parse failure that never happened. Compared against the
+    correctly-ordered report, which the case above pins.
+    """
+    resolved = _resolved_frame(_edge(child_id=1, protocol_id=None))
+    samples = pd.DataFrame(
+        [(1, "C-260101ABC-1", '{"Name": "x"}', None, "10")],
+        columns=S.SAMPLE_COLUMNS,
+    )
+    expected = stage0.build_report(resolved, _residues(), _no_childof(), samples)
+    assert _row(expected, "| the child's metadata names no").endswith("| 1 |")
+
+    swapped = samples[["sample_id", "json_metadata", "uuid",
+                       "created_at", "project_ids"]]
+    assert list(swapped.columns) != S.SAMPLE_COLUMNS
+    assert stage0.build_report(resolved, _residues(), _no_childof(), swapped) == expected
+
+
+def test_report_survives_the_steady_state_where_nothing_is_left_to_create():
+    """The idempotent re-run still has to produce a receipt.
+
+    Once stage 0 has applied, every reference is already an edge and the plan is
+    empty -- and the report's percentages divide by the edge count.
+    """
+    fx = S.make_stage0_fixture()
+    empty, _ = stage0.plan_edges(
+        fx["parents"], fx["nodes"],
+        pd.DataFrame(list(zip(fx["parents"]["child_uuid"], fx["parents"]["token"])),
+                     columns=S.CHILDOF_COLUMNS))
+    resolved = stage0.resolve_properties(
+        empty, fx["samples"], fx["membership"], fx["assays"], fx["sops"])
+    assert len(resolved) == 0, "non-vacuity: this is the empty-plan path"
+
+    report = stage0.build_report(
+        resolved, _residues({S.D_ALREADY_EXISTS: 6}), _no_childof())
+    assert "0 edges to create" in report
+    assert "0 labelled" in report and "0 dark" in report
+    assert "**6**" in _row(report, "excluded, total")
