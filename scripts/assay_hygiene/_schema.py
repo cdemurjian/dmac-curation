@@ -40,6 +40,11 @@ ASSAY_COLUMNS = [
     "internal_assay_id", "internal_assay_title",
 ]
 SAMPLE_COLUMNS = ["sample_id", "uuid", "json_metadata", "created_at", "project_ids"]
+# `sops` had no contract until stage A needed one. The same two names were
+# hand-written in three unlinked places (stage0.resolve_properties, the stage 0
+# fixture, and a test); this is the constant the extractor's projection and its
+# frame are both built from, so the producer can no longer drift from them.
+SOP_COLUMNS = ["sop_id", "title"]
 
 # --- stage 0 (lineage backfill) ----------------------------------------------
 PARENT_COLUMNS = ["child_uuid", "field", "token"]
