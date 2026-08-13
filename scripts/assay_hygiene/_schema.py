@@ -10,7 +10,19 @@ column name task N never wrote.
 """
 from __future__ import annotations
 
+import re
+
 import pandas as pd
+
+# --- UID validation ----------------------------------------------------------
+# Production (main-stable-260811 @ 83b8b99) requires a 3+ letter sample type
+# code. Exactly one type in the database is shorter: AB, the antibody type.
+# So every AntibodyParent reference is silently discarded before an edge is
+# built, and all 874 AB parents have zero incoming DERIVED_FROM.
+UID_RE_PROD = re.compile(r"^([AD]\.)?[A-Z]{3,}-\d{6}[A-Z]{2,5}-\d+(-PUB\d*)?$")
+
+# The fix, already on dev-v4-merge. Stage 0 uses this one and reports the delta.
+UID_RE_FIXED = re.compile(r"\A([A-Z]\.)?[A-Z]{2,}-\d{6}[A-Z]{2,5}-\d+(-PUB\d*)?\Z")
 
 # --- extract (stage A) -------------------------------------------------------
 EDGE_COLUMNS = [
@@ -22,12 +34,40 @@ MEMBERSHIP_COLUMNS = ["sample_id", "assay_id"]
 ASSAY_COLUMNS = [
     "assay_id", "title", "sample_type_id", "study_id",
     "investigation_id", "project_id", "project_title",
+    # resolved through dmac.assays_internal_assays; NULL for the 17 records
+    # with no junction row, which fall back to (assay_id, title) per
+    # neo4j_sync.py:1011-1021
+    "internal_assay_id", "internal_assay_title",
 ]
 SAMPLE_COLUMNS = ["sample_id", "uuid", "json_metadata", "created_at", "project_ids"]
 
+# --- stage 0 (lineage backfill) ----------------------------------------------
+PARENT_COLUMNS = ["child_uuid", "field", "token"]
+CHILDOF_COLUMNS = ["child_uuid", "parent_uuid"]
+# the graph's node index: uuid -> (sample_id, sample type). Every child_id and
+# parent_id stage 0 writes is resolved through this frame.
+NODES_COLUMNS = ["uuid", "sample_id", "type"]
+
+# Mirrors nextseek_api/batch_upload/models.py:457 DerivedFromRelRow exactly.
+# That model is extra="forbid", so an invented column is a hard rejection.
+EDGE_ROW_COLUMNS = [
+    "child_id", "child_uuid", "parent_id", "parent_uuid",
+    "protocol_id", "protocol_title", "assay_id",
+    "internal_assay_id", "internal_assay_title",
+]
+STAGE0_PLAN_COLUMNS = EDGE_ROW_COLUMNS + [
+    "child_type", "parent_type", "field", "n_shared", "assay_source",
+]
+
+D_NOT_UID = "not_a_uid"
+D_NO_NODE = "parent_not_a_node"
+D_SELF_LOOP = "self_loop"
+D_ALREADY_EXISTS = "already_has_derived_from"
+
 # --- precedent (stage B) -----------------------------------------------------
-RULE_KEY = ["project_id", "child_type", "parent_type", "assay_title"]
+RULE_KEY = ["project_id", "child_type", "parent_type", "internal_assay_id"]
 PRECEDENT_COLUMNS = RULE_KEY + [
+    "internal_assay_title",
     "n_both", "n_child_only", "n_parent_only",
     "propagation_rate", "reverse_rate",
 ]
@@ -36,10 +76,11 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 FINDING_COLUMNS = [
     "child_id", "parent_id", "child_uuid", "parent_uuid",
     "child_type", "parent_type",
-    "verdict", "matched_assay_title", "matched_rate",
-    "target_assay_id", "project_id",
-    # every assay title the child belongs to; stage D's tiebreak needs this and
-    # cannot recover it later, because membership is not carried into findings
+    "verdict", "matched_internal_assay_id", "matched_internal_assay_title",
+    "matched_rate", "target_assay_id", "project_id",
+    # every internal_assay_id the child belongs to; stage D's tiebreak needs
+    # this and cannot recover it later, because membership is not carried
+    # into findings
     "candidates",
 ]
 
@@ -129,8 +170,8 @@ def make_fixture() -> dict[str, pd.DataFrame]:
     )
     assays = pd.DataFrame(
         [
-            (1, "Comet Chip", 7, 3, 2, 10, "MIT_SRP"),
-            (2, "Tissue Collection", 8, 3, 2, 10, "MIT_SRP"),
+            (1, "Comet Chip", 7, 3, 2, 10, "MIT_SRP", 11, "Comet Chip"),
+            (2, "Tissue Collection", 8, 3, 2, 10, "MIT_SRP", 12, "Tissue Collection"),
         ],
         columns=ASSAY_COLUMNS,
     )
@@ -143,3 +184,86 @@ def make_fixture() -> dict[str, pd.DataFrame]:
     )
     return {"edges": edges, "membership": membership,
             "assays": assays, "samples": samples}
+
+
+def make_stage0_fixture() -> dict[str, pd.DataFrame]:
+    """A synthetic world for stage 0, separate from make_fixture().
+
+    make_fixture()'s rows are frozen because the companion plan hand-traces
+    counts off them. Stage 0 needs different shapes (parent tokens, a node
+    index, an AB-prefixed token), so it gets its own data rather than growing
+    that one.
+
+    parents: six declared tokens off three children, one per outcome
+      D.IMG-1 / TIS-1        keeper, both endpoints share assay 1 -> labelled
+      D.IMG-1 / AB-1         keeper, AB-prefixed, valid ONLY under the fix
+      D.IMG-1 / not-a-uid    dropped, D_NOT_UID
+      D.IMG-2 / TIS-9        dropped, D_NO_NODE (no such node)
+      D.IMG-2 / D.IMG-2      dropped, D_SELF_LOOP
+      D.IMG-3 / TIS-3        dropped, D_ALREADY_EXISTS
+    """
+    parents = pd.DataFrame(
+        [
+            ("D.IMG-260101ABC-1", "Parent", "TIS-260101ABC-1"),
+            ("D.IMG-260101ABC-1", "AntibodyParent", "AB-260101ABC-1"),
+            ("D.IMG-260101ABC-1", "Parent", "some free text"),
+            ("D.IMG-260101ABC-2", "Parent", "TIS-260101ABC-9"),
+            ("D.IMG-260101ABC-2", "Parent", "D.IMG-260101ABC-2"),
+            ("D.IMG-260101ABC-3", "Parent", "TIS-260101ABC-3"),
+        ],
+        columns=PARENT_COLUMNS,
+    )
+    # the graph's node index: uuid -> (id, type). TIS-...-9 is deliberately absent.
+    nodes = pd.DataFrame(
+        [
+            ("D.IMG-260101ABC-1", 100, "D.IMG"),
+            ("D.IMG-260101ABC-2", 101, "D.IMG"),
+            ("D.IMG-260101ABC-3", 102, "D.IMG"),
+            ("TIS-260101ABC-1", 200, "TIS"),
+            ("TIS-260101ABC-3", 202, "TIS"),
+            ("AB-260101ABC-1", 300, "AB"),
+        ],
+        columns=NODES_COLUMNS,
+    )
+    # D.IMG-3 -> TIS-3 already exists, so it must be dropped as ALREADY_EXISTS
+    existing = pd.DataFrame(
+        [("D.IMG-260101ABC-3", "TIS-260101ABC-3")],
+        columns=["child_uuid", "parent_uuid"],
+    )
+    membership = pd.DataFrame(
+        [
+            (100, 1), (200, 1),   # D.IMG-1 and TIS-1 share assay 1 -> labelled
+            (300, 2),             # AB-1 is in assay 2 only -> disjoint, dark
+        ],
+        columns=MEMBERSHIP_COLUMNS,
+    )
+    assays = pd.DataFrame(
+        [
+            (1, "Comet Chip", 7, 3, 2, 10, "MIT_SRP", 11, "Comet Chip"),
+            (2, "Antibody Panel", 8, 3, 2, 10, "MIT_SRP", None, None),
+        ],
+        columns=ASSAY_COLUMNS,
+    )
+    samples = pd.DataFrame(
+        [
+            (100, "D.IMG-260101ABC-1",
+             '{"Protocol": "http://x/sops/5", "Parent": "TIS-260101ABC-1"}', None, "10"),
+            (101, "D.IMG-260101ABC-2", '{"Protocol": ""}', None, "10"),
+            (102, "D.IMG-260101ABC-3", '{"Protocol": "http://x/sops/5"}', None, "10"),
+        ],
+        columns=SAMPLE_COLUMNS,
+    )
+    sops = pd.DataFrame([(5, "Comet Chip SOP")], columns=["sop_id", "title"])
+    childof = pd.DataFrame(
+        [
+            ("D.IMG-260101ABC-1", "TIS-260101ABC-1"),
+            # declared by nobody: the stale case reconciliation must surface
+            ("D.IMG-260101ABC-1", "TIS-260101ABC-77"),
+        ],
+        columns=CHILDOF_COLUMNS,
+    )
+    return {
+        "parents": parents, "nodes": nodes, "existing": existing,
+        "membership": membership, "assays": assays, "samples": samples,
+        "sops": sops, "childof": childof,
+    }

@@ -37,10 +37,18 @@ def test_verdict_constants_are_distinct():
     assert len(set(verdicts)) == len(verdicts)
 
 
-def test_rule_key_is_title_not_assay_id():
-    # 458 assay records share 291 titles; keying on id shatters precedent
-    assert S.RULE_KEY == ["project_id", "child_type", "parent_type", "assay_title"]
-    assert "assay_id" not in S.RULE_KEY
+def test_rule_key_is_internal_assay_id():
+    # 458 assay records collapse to 137 curated internal assays via
+    # dmac.assays_internal_assays. assays.id is too fine (the same logical
+    # assay is instantiated per study); assays.title is a different namespace
+    # from DERIVED_FROM.internal_assay_title, so findings and edges would not
+    # reconcile.
+    assert S.RULE_KEY == ["project_id", "child_type", "parent_type", "internal_assay_id"]
+    assert "assay_title" not in S.RULE_KEY
+
+
+def test_precedent_carries_internal_assay_title_for_display():
+    assert "internal_assay_title" in S.PRECEDENT_COLUMNS
 
 
 def test_precedent_columns_carry_both_directions():
@@ -84,8 +92,8 @@ def test_fixture_encodes_the_four_canonical_situations():
     assert len(both_dark) == 1
 
     # Type columns are part of the frozen contract: the rule key is
-    # (project, child_type, parent_type, title), so a changed type silently
-    # re-buckets precedent. Count the hops rather than collecting the distinct
+    # (project, child_type, parent_type, internal_assay_id), so a changed type
+    # silently re-buckets precedent. Count the hops rather than collecting the distinct
     # set -- a set still matches after a type is flipped to one that already
     # appears on another edge, which is exactly the silent edit to catch.
     hops = Counter(zip(fx["edges"]["child_type"], fx["edges"]["parent_type"]))
@@ -129,3 +137,69 @@ def test_fixture_cannot_reach_ambiguity_or_a_dark_parent():
     # No edge pairs a registered child with a wholly dark parent (MODE_1_PARENT).
     assert not [(c, p) for c, p in zip(edges["child_id"], edges["parent_id"])
                 if reg.get(c) and not reg.get(p)]
+
+
+def test_prod_uid_regex_rejects_the_two_letter_antibody_type():
+    # This is the production defect stage 0 works around. If this test ever
+    # goes green-by-passing, production has been fixed and the override can go.
+    assert S.UID_RE_PROD.match("AB-250723FOR-3") is None
+    assert S.UID_RE_FIXED.match("AB-250723FOR-3") is not None
+
+
+def test_both_regexes_agree_on_three_letter_types():
+    for uid in ("TIS-260107SES-1", "D.ADNKA-250917FOR-98", "MUS-220122SAS-125"):
+        assert S.UID_RE_PROD.match(uid) is not None
+        assert S.UID_RE_FIXED.match(uid) is not None
+
+
+def test_edge_row_columns_mirror_the_server_model():
+    # nextseek_api/batch_upload/models.py:457 DerivedFromRelRow, extra="forbid".
+    # A column stage 0 invents here is a field bulk_merge_relationships rejects.
+    assert S.EDGE_ROW_COLUMNS == [
+        "child_id", "child_uuid", "parent_id", "parent_uuid",
+        "protocol_id", "protocol_title", "assay_id",
+        "internal_assay_id", "internal_assay_title",
+    ]
+
+
+def test_drop_reasons_are_distinct():
+    reasons = [S.D_NOT_UID, S.D_NO_NODE, S.D_SELF_LOOP, S.D_ALREADY_EXISTS]
+    assert len(set(reasons)) == len(reasons)
+
+
+def test_original_fixture_still_matches_the_widened_assay_contract():
+    # ASSAY_COLUMNS grew by two; make_fixture() builds against that constant and
+    # would raise if its rows were not widened to match.
+    fx = S.make_fixture()
+    assert list(fx["assays"].columns) == S.ASSAY_COLUMNS
+    assert fx["assays"].iloc[0]["internal_assay_id"] == 11
+
+
+def test_frozen_fixture_arithmetic_is_unaffected_by_the_new_column():
+    # The companion plan hand-traces n_both=2 / n_child_only=1 off these rows.
+    # Adding a column to `assays` must not disturb edges or membership.
+    fx = S.make_fixture()
+    assert len(fx["edges"]) == 6
+    assert len(fx["membership"]) == 10
+
+
+def test_stage0_fixture_covers_every_drop_reason_and_one_keeper():
+    fx = S.make_stage0_fixture()
+    parents = fx["parents"]
+    # one token per drop reason, plus two that survive to be created
+    assert len(parents) == 6
+    assert set(parents.columns) == set(S.PARENT_COLUMNS)
+    # exactly one token is AB-*, valid only under the corrected regex
+    ab = [t for t in parents["token"] if t.startswith("AB-")]
+    assert len(ab) == 1
+    assert S.UID_RE_PROD.match(ab[0]) is None
+
+
+def test_stage0_nodes_frame_matches_the_declared_node_index_contract():
+    # `nodes` supplies every child_id / parent_id that reaches the graph, so it
+    # needs a contract its producer and consumer can both assert against.
+    # Pinned against a literal first: the fixture builds its frame FROM this
+    # constant, so asserting only frame-vs-constant is vacuous and stays green
+    # through any reordering of the constant itself.
+    assert S.NODES_COLUMNS == ["uuid", "sample_id", "type"]
+    assert list(S.make_stage0_fixture()["nodes"].columns) == S.NODES_COLUMNS
