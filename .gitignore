@@ -88,3 +88,16 @@ tmp/
 # FDH staging scratch (holds a real .env — never commit)
 # ============================================================
 working/
+
+# ============================================================
+# Agent scratch: git worktrees and SDD ledgers/briefs
+# ============================================================
+.worktrees/
+.superpowers/
+
+# ============================================================
+# Assay-hygiene working dir. extract/ carries a full dump of
+# samples.json_metadata pulled from seek_production (163k rows,
+# 260 MB of real sample metadata) — never commit it.
+# ============================================================
+assay-hygiene/
