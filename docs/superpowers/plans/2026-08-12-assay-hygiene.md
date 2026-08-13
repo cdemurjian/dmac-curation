@@ -10,6 +10,38 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-12-assay-hygiene-design.md`
 
+**Depends on:** `docs/superpowers/plans/2026-08-13-assay-hygiene-stage0.md`. Stage 0 must have run in production before stage B mines anything. It adds 90,534 `DERIVED_FROM` edges including `D.FLOW -> D.FCS`, which is 73% of the additions and does not exist in the graph at all today. Mining precedent first would mine a graph missing its largest single hop.
+
+> **STATUS 2026-08-13: this plan is NOT ready to execute.** Task 1 has moved to
+> the stage 0 plan, which owns `_schema.py`. Tasks 3 through 9 still carry the
+> superseded `assay_title` rule key in their code blocks, in 42 places. See
+> "Required rewrite" below. Do not start Task 3 until that pass is done.
+
+## Required rewrite before execution
+
+The spec inverted the rule key from `assays.title` to `internal_assay_id`, and
+the Global Constraints below already record the new key, but the task bodies do
+not. The reconciliation is mechanical but it is not trivial, and half-applying
+it would produce exactly the confidently-wrong artifact this project keeps
+getting burned by. It is its own piece of work.
+
+What changes, precisely:
+
+| Site | From | To |
+|---|---|---|
+| `_schema.RULE_KEY` | `[..., "assay_title"]` | `[..., "internal_assay_id"]` (done by stage 0 Task 1) |
+| `PRECEDENT_COLUMNS` | key only | key plus `internal_assay_title` for display |
+| `FINDING_COLUMNS` | `matched_assay_title` | `matched_internal_assay_id`, `matched_internal_assay_title` |
+| Task 3 miner | `title_of(a)` | `internal_assay_of(a)`, falling back to `(assay_id, assays.title)` for the 17 assays with no junction row |
+| Task 4 `lookup` | `(project, ct, pt, assay_title)` | `(project, ct, pt, internal_assay_id)` |
+| Tasks 6, 7, 9 | `assay_title` throughout | `internal_assay_id` for keying, `internal_assay_title` for display |
+
+The fixture data itself does not change. `make_fixture()`'s `assays` frame gains
+`internal_assay_id` and `internal_assay_title` columns (stage 0 Task 1), and
+because that is a column rather than a row, every hand-traced count in Tasks 3,
+4 and 5 still holds: `n_both=2`, `n_child_only=1`, `propagation_rate=2/3`, and
+the `iloc[0]` sort resolution on `TIS -> MUS`.
+
 ## Global Constraints
 
 - **P1 sentinel:** scripts must never create, modify, or delete anything inside the plugin checkout. All project paths resolve from the current working directory. `tests/conftest.py::plugin_sentinel` enforces this and will fail the suite otherwise.
@@ -21,13 +53,23 @@
 - **Rule key is `(project_id, child_type, parent_type, internal_assay_id)`.** NOT `assays.title`, NOT `assays.id`. `dmac.assays_internal_assays` maps 441 `assay_id`s onto 137 `internal_assay_id`s, and that canonical vocabulary is what `DERIVED_FROM.internal_assay_title` already speaks. Raw titles (291 across 458 records) are a different namespace; keying on them leaves findings and edges unreconcilable. Carry `internal_assay_title` for display. 17 assays have no junction row — handle explicitly, never drop silently.
 - **Propagation metric:** `propagation_rate = n_both / (n_both + n_child_only)`.
 - **Writes are per-SAMPLE and omission DELETES.** The proven writer is `smart_merge_assay_assets` (`nextseek_api/batch_upload/update.py:117`), keyed on one `asset_id` with a COMPLETE assay list; it computes `to_remove = old - new` and bulk-deletes. Any payload must union additions onto that sample's existing assays and send the whole set. Never a delta, never a partial list.
-- **The graph is ~11% incomplete.** 89,960 relationships exist as `CHILD_OF` with no `DERIVED_FROM` and therefore cannot carry an assay. Out of scope here; every coverage number this pipeline reports must carry that caveat.
+- **Stage 0 closes the topology gap, and every number below predates it.** 90,534 relationships that production records in metadata have no `DERIVED_FROM` edge and therefore cannot carry an assay. The stage 0 plan creates them, of which 82,663 get a correct assay immediately. **Consequence: the 87.8% unambiguous figure, the 97.2% disjoint split, the 216,114 backtest population and the whole stage B distribution were measured against the pre-stage-0 graph and must be re-measured after it runs.** Do not select a threshold from a pre-stage-0 number.
+- **Production's `UID_RE` silently drops the two-letter `AB` sample type**, so 8,131 antibody parent references never become edges. Stage 0 works around it and files the defect. Any stage here that validates a UID must use the corrected regex `\A([A-Z]\.)?[A-Z]{2,}-\d{6}[A-Z]{2,5}-\d+(-PUB\d*)?\Z`, exposed as `_schema.UID_RE_FIXED`.
 - **Verified SQL join path:** `assays -> studies -> investigations -> investigations_projects -> projects`. The `investigations` table has no `project_id` column.
 - **Correct Django DB alias is `seek`** (`seek_production`). The `default` alias is `dmac` and its `assay_assets` table is empty.
 
 ---
 
-### Task 1: Column contracts and test fixtures
+### Task 1: MOVED
+
+`_schema.py` is now owned by `docs/superpowers/plans/2026-08-13-assay-hygiene-stage0.md`
+Task 1, which applies the `internal_assay_id` rule key, widens `ASSAY_COLUMNS`,
+and adds the stage 0 contracts. The task body below is retained only as the
+record of what was originally built (commits `f8057ab`, `223fe66`) and its
+`RULE_KEY` assertion is **superseded**. Do not execute it.
+
+<details>
+<summary>Superseded Task 1 (historical)</summary>
 
 **Files:**
 - Create: `scripts/assay_hygiene/__init__.py`
@@ -232,9 +274,22 @@ git add scripts/assay_hygiene/__init__.py scripts/assay_hygiene/_schema.py tests
 git commit -m "feat(assay-hygiene): column contracts, verdict vocabulary, synthetic fixture"
 ```
 
+</details>
+
 ---
 
-### Task 2: Stage A extractor
+### Task 2: MOVED
+
+The stage A extractor is now owned by the stage 0 plan's Task 5, which builds
+the same queries plus `parents.parquet`, `childof.parquet` and `nodes.parquet`,
+and resolves `internal_assay_id` in `ASSAYS_SQL`. The body below is superseded:
+its `ASSAYS_SQL` has no junction join, so it cannot supply the rule key this
+plan now uses. Do not execute it.
+
+<details>
+<summary>Superseded Task 2 (historical)</summary>
+
+### Stage A extractor
 
 **Files:**
 - Create: `scripts/assay_hygiene/extract.py`
@@ -467,6 +522,8 @@ du -sh assay-hygiene/extract   # expect roughly 60-70 MB
 git add scripts/assay_hygiene/extract.py tests/test_assay_hygiene_extract.py
 git commit -m "feat(assay-hygiene): stage A extractor with verified SQL and Cypher"
 ```
+
+</details>
 
 ---
 
