@@ -194,6 +194,35 @@ def test_stage0_fixture_covers_every_drop_reason_and_one_keeper():
     assert len(ab) == 1
     assert S.UID_RE_PROD.match(ab[0]) is None
 
+    # Every drop reason must be REACHABLE. Tasks 2-6 hand-trace their drop
+    # accounting off this one fixture, so each branch is derived from the frames
+    # rather than restated as a literal row: retyping the free text as a UID or
+    # deleting the single `existing` row would otherwise remove a branch with
+    # all of these tests still green.
+    nodes = set(fx["nodes"]["uuid"])
+    pairs = list(zip(parents["child_uuid"], parents["token"]))
+    not_uid = [(c, t) for c, t in pairs if not S.UID_RE_FIXED.match(t)]
+    no_node = [(c, t) for c, t in pairs if S.UID_RE_FIXED.match(t) and t not in nodes]
+    self_loop = [(c, t) for c, t in pairs if c == t]
+    already = set(zip(fx["existing"]["child_uuid"], fx["existing"]["parent_uuid"]))
+
+    assert len(not_uid) == 1                       # D_NOT_UID
+    assert len(no_node) == 1                       # D_NO_NODE
+    assert len(self_loop) == 1                     # D_SELF_LOOP
+    # a pre-existing edge only causes a drop if some parent row DECLARES it
+    assert len(already) == 1 and already <= set(pairs)   # D_ALREADY_EXISTS
+
+    # the four reasons must land on four distinct rows, or one of them is
+    # shadowed by another and the branch it names is never exercised
+    dropped = set(not_uid) | set(no_node) | set(self_loop) | already
+    assert len(dropped) == 4
+
+    # ...leaving exactly two keepers, both of which must resolve in the node
+    # index. Drop the AB node and the AB keeper silently becomes a D_NO_NODE.
+    keepers = [(c, t) for c, t in pairs if (c, t) not in dropped]
+    assert len(keepers) == 2
+    assert {t for _, t in keepers} <= nodes
+
 
 def test_stage0_nodes_frame_matches_the_declared_node_index_contract():
     # `nodes` supplies every child_id / parent_id that reaches the graph, so it
