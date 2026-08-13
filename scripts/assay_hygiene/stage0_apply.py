@@ -51,12 +51,28 @@ SET r.protocol_id = row.protocol_id, r.protocol_title = row.protocol_title,
 RETURN count(r) AS processed
 """
 
-# Keyed on the pair alone, so it removes what the manifest says was created and
-# nothing else. One caveat the operator owns rather than this code: if some
-# other process has since added a SECOND DERIVED_FROM between the same two
-# nodes, this removes that one too. Stage 0 cannot create a duplicate (the
-# planner drops any pair that already has an edge, and MERGE is idempotent), so
-# the only way to reach that state is a write by something else in between.
+# Keyed on the pair alone, so it removes what the manifest says was created --
+# but "what the manifest says" was decided when `existing` was extracted, and
+# the write happens later. Two DIFFERENT things live in that window, and the
+# operator owns both:
+#
+#   Benign. Some other process added a SECOND DERIVED_FROM between the same two
+#   nodes after the write. This removes that one too. Stage 0 cannot create a
+#   duplicate (the planner drops any pair that already has an edge --
+#   stage0.py:77-79 -- and MERGE is idempotent), so only an intervening write
+#   can reach that state.
+#
+#   NOT benign, and NOT recoverable. batch_upload creates a DERIVED_FROM for a
+#   PLANNED pair inside the extract->write window. The planner never saw it, so
+#   the pair is still in the manifest; the MERGE then MATCHES that edge instead
+#   of creating it and overwrites all seven properties through the unconditional
+#   SET above; and this rollback then DELETEs a relationship stage 0 never
+#   created. Rollback restores NOTHING here -- the overwritten property values
+#   are gone with no record of what they were, and the edge itself is removed.
+#   The unconditional SET is inherited from the server mirror
+#   (neo4j_sync.py:167-172) and is not ours to change, so the mitigation is
+#   procedural: re-extract `existing` immediately before the write and reconcile
+#   the two counts, or quiesce batch_upload for the window.
 ROLLBACK_CYPHER = """
 UNWIND $rows AS row
 MATCH (c:Sample {uuid: row.child_uuid})-[r:DERIVED_FROM]->(p:Sample {uuid: row.parent_uuid})
@@ -269,22 +285,30 @@ def rollback(
 
     There is deliberately no driver_stage0_rollback.py. A file sitting next to
     the write driver that deletes 90,000 relationships is a file that gets piped
-    by mistake, so the undo is an explicit paste instead:
+    by mistake, so the undo is an explicit paste instead.
 
-        docker exec -i nextseek uv run manage.py shell <<'PY'
-        import json, sys
-        sys.path.insert(0, "/tmp/scripts")
-        from django.conf import settings
-        from neo4j import GraphDatabase
-        from assay_hygiene import stage0_apply
-        rows = [json.loads(x) for x in open("/tmp/stage0-manifest.jsonl") if x.strip()]
-        nd = settings.NEO4J_DATABASE
-        d = GraphDatabase.driver(nd["URI"], auth=nd["AUTH"])
-        try:
-            print(stage0_apply.rollback(d, nd.get("NAME") or "neo4j", rows))
-        finally:
-            d.close()
-        PY
+    Paste the block below verbatim, from `ssh` through `PY`. Its body is at
+    column 0 on purpose: `<<'PY'` preserves leading whitespace, so an indented
+    copy reaches python as an IndentationError. It echoes the row count BEFORE
+    it deletes anything, so a manifest that is not the one you meant is visible
+    while there is still time to interrupt it.
+
+ssh fairdata 'docker exec -i nextseek uv run manage.py shell' <<'PY'
+import json, sys
+sys.path.insert(0, "/tmp/scripts")
+from django.conf import settings
+from neo4j import GraphDatabase
+from assay_hygiene import stage0_apply
+rows = [json.loads(x) for x in open("/tmp/stage0-manifest.jsonl") if x.strip()]
+print(f"manifest: {len(rows):,} pairs -- about to remove their DERIVED_FROM")
+nd = settings.NEO4J_DATABASE
+d = GraphDatabase.driver(nd["URI"], auth=nd["AUTH"])
+try:
+    targeted = stage0_apply.rollback(d, nd.get("NAME") or "neo4j", rows)
+    print(f"done: {targeted:,} pairs targeted")
+finally:
+    d.close()
+PY
     """
     _check_chunk_size(chunk_size)
     pairs = [

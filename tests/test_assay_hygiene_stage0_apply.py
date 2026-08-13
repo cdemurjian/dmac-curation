@@ -380,6 +380,22 @@ def test_apply_manifest_refuses_a_nan_read_back_from_jsonl():
     assert driver.calls == []
 
 
+def test_apply_manifest_validates_every_row_before_the_first_chunk_lands():
+    # A bad row in the LAST chunk must abort before ANY chunk is sent.
+    # Production is 90,534 rows across 5 chunks, and a partial write is the
+    # expensive failure: the graph holds a prefix nobody recorded, and the
+    # manifest that rollback needs describes the whole run. The two other
+    # refusal cases use a 2-row manifest at the default chunk size, so both
+    # would survive the validation being moved inside the loop; this one would
+    # not.
+    driver = FakeDriver()
+    rows = stage0_apply.to_payload(_wide_plan(5))
+    rows[4]["child_id"] = 0
+    with pytest.raises(ValueError, match="child_id"):
+        stage0_apply.apply_manifest(driver, "neo4j", rows, chunk_size=2)
+    assert driver.calls == []
+
+
 # --- rollback ----------------------------------------------------------------
 
 def test_rollback_targets_exactly_the_manifest_pairs():
@@ -387,7 +403,13 @@ def test_rollback_targets_exactly_the_manifest_pairs():
     manifest = stage0_apply.apply_edges(FakeDriver(), "neo4j", _resolved(), dry_run=False)
     n = stage0_apply.rollback(driver, "neo4j", manifest)
     assert n == 2
-    _cypher, params, _db = driver.calls[0]
+    cypher, params, _db = driver.calls[0]
+    # Every OTHER rollback guard reads the module constant. Without this line
+    # the constant can stay pristine while the call site sends an inlined
+    # literal -- an unbound parent endpoint, an untyped `-[r]->` that reaches
+    # CHILD_OF, or a DETACH DELETE of the Sample node itself. All four of those
+    # were verified to pass the entire file before this assertion existed.
+    assert cypher == stage0_apply.ROLLBACK_CYPHER
     pairs = {(r["child_uuid"], r["parent_uuid"]) for r in params["rows"]}
     assert pairs == {
         ("D.IMG-260101ABC-1", "TIS-260101ABC-1"),
@@ -438,7 +460,10 @@ def test_rollback_carries_only_the_pair_and_chunks():
     manifest = stage0_apply.to_payload(_wide_plan(5))
     assert stage0_apply.rollback(driver, "neo4j", manifest, chunk_size=2) == 5
     assert [len(params["rows"]) for _c, params, _d in driver.calls] == [2, 2, 1]
-    for _c, params, _d in driver.calls:
+    for cypher, params, _d in driver.calls:
+        # EVERY chunk, not just the first: a call site that sent the constant
+        # once and a literal thereafter would still satisfy a head-only check.
+        assert cypher == stage0_apply.ROLLBACK_CYPHER
         for row in params["rows"]:
             # Properties must not travel: a rollback keyed on anything but the
             # pair could match a relationship this run did not create.
@@ -459,8 +484,10 @@ def test_rollback_refuses_a_chunk_size_below_one():
 
 
 def test_rollback_refuses_a_manifest_row_with_no_pair():
+    driver = FakeDriver()
     with pytest.raises((KeyError, ValueError)):
-        stage0_apply.rollback(FakeDriver(), "neo4j", [{"child_id": 1}])
+        stage0_apply.rollback(driver, "neo4j", [{"child_id": 1}])
+    assert driver.calls == []
 
 
 # --- the mirror and the in-container driver ----------------------------------
