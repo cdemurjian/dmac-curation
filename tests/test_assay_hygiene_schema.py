@@ -188,7 +188,12 @@ def test_stage0_fixture_covers_every_drop_reason_and_one_keeper():
     parents = fx["parents"]
     # one token per drop reason, plus two that survive to be created
     assert len(parents) == 6
-    assert set(parents.columns) == set(S.PARENT_COLUMNS)
+    # Pinned as a LIST, like `nodes` two cases below. stage0.plan_edges unpacks
+    # this frame positionally, so order is part of the contract: a producer
+    # emitting child_uuid | token | field swaps two fields and every reference
+    # then fails UID validation -- an empty plan with a full not_a_uid count,
+    # which is a silent wrong answer rather than a crash.
+    assert list(parents.columns) == S.PARENT_COLUMNS
     # exactly one token is AB-*, valid only under the corrected regex
     ab = [t for t in parents["token"] if t.startswith("AB-")]
     assert len(ab) == 1

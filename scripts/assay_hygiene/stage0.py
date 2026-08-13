@@ -29,14 +29,21 @@ def plan_edges(
     nodes    : uuid | sample_id | type      (the graph's node index)
     existing : child_uuid | parent_uuid     (DERIVED_FROM edges already present)
 
-    Returns (plan, residues). Every excluded reference is counted in residues,
-    so the row count of `parents` is fully accounted for.
+    Returns (plan, residues). Nothing is dropped silently: every excluded
+    reference is counted under a drop reason, so
+
+        len(plan) + <every drop reason in residues> == len(parents)
+
+    holds for any input. "prod_regex_would_reject" is NOT a drop reason and is
+    excluded from that sum -- it is a report-only count that overlaps the
+    keepers, recording what the live server would have thrown away.
     """
     residues = {
         S.D_NOT_UID: 0,
         S.D_NO_NODE: 0,
         S.D_SELF_LOOP: 0,
         S.D_ALREADY_EXISTS: 0,
+        "duplicate_reference": 0,
         "prod_regex_would_reject": 0,
     }
 
@@ -47,7 +54,11 @@ def plan_edges(
     kept: list[tuple] = []
     seen: set[tuple[str, str]] = set()
 
-    for child_uuid, field, token in parents.itertuples(index=False):
+    # Selected by name before iterating: itertuples unpacks POSITIONALLY, so a
+    # producer emitting these three columns in another order would swap field
+    # and token and fail every reference on UID validation. This is a no-op for
+    # a correctly-ordered frame and a KeyError for a missing column.
+    for child_uuid, field, token in parents[S.PARENT_COLUMNS].itertuples(index=False):
         if not S.UID_RE_FIXED.match(str(token)):
             residues[S.D_NOT_UID] += 1
             continue
@@ -65,6 +76,9 @@ def plan_edges(
             continue
         if (child_uuid, token) in seen:
             # The same pair declared under two fields is one edge, not two.
+            # Counted, not skipped silently: an operator reading the ledger
+            # must be able to tell a collapsed duplicate from a lost reference.
+            residues["duplicate_reference"] += 1
             continue
         seen.add((child_uuid, token))
         kept.append((
