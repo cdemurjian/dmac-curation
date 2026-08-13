@@ -16,10 +16,12 @@
 - **Output root** is `assay-hygiene/` under the current working directory.
 - **PEP 723 header** on every script: `requires-python = ">=3.11"` plus explicit dependencies.
 - **Test command:** `uv run --with pytest --with pandas --with pyarrow --with openpyxl pytest tests/<file> -v`
-- **Read by SQL and neo4j, write by API.** Never write to MySQL or neo4j directly.
+- **Read by SQL and neo4j.** Never write to MySQL or neo4j directly.
 - **Dry run is the default.** `--write` must be explicit and never inferred.
-- **Rule key is `(project_id, child_type, parent_type, assay_title)`.** Title, not `assay_id`: 458 assay records share 291 titles.
+- **Rule key is `(project_id, child_type, parent_type, internal_assay_id)`.** NOT `assays.title`, NOT `assays.id`. `dmac.assays_internal_assays` maps 441 `assay_id`s onto 137 `internal_assay_id`s, and that canonical vocabulary is what `DERIVED_FROM.internal_assay_title` already speaks. Raw titles (291 across 458 records) are a different namespace; keying on them leaves findings and edges unreconcilable. Carry `internal_assay_title` for display. 17 assays have no junction row — handle explicitly, never drop silently.
 - **Propagation metric:** `propagation_rate = n_both / (n_both + n_child_only)`.
+- **Writes are per-SAMPLE and omission DELETES.** The proven writer is `smart_merge_assay_assets` (`nextseek_api/batch_upload/update.py:117`), keyed on one `asset_id` with a COMPLETE assay list; it computes `to_remove = old - new` and bulk-deletes. Any payload must union additions onto that sample's existing assays and send the whole set. Never a delta, never a partial list.
+- **The graph is ~11% incomplete.** 89,960 relationships exist as `CHILD_OF` with no `DERIVED_FROM` and therefore cannot carry an assay. Out of scope here; every coverage number this pipeline reports must carry that caveat.
 - **Verified SQL join path:** `assays -> studies -> investigations -> investigations_projects -> projects`. The `investigations` table has no `project_id` column.
 - **Correct Django DB alias is `seek`** (`seek_production`). The `default` alias is `dmac` and its `assay_assets` table is empty.
 
@@ -1631,50 +1633,72 @@ git commit -m "feat(assay-hygiene): stage E rule sheet and row-level expansion"
 
 ---
 
-### Task 8: Prove the rollback path on the dev box
+### Task 8: Prove an ADDITION lands via smart_merge_assay_assets (dev box)
 
 **Files:**
-- Create: `scripts/assay_hygiene/ROLLBACK_PROBE.md`
+- Create: `scripts/assay_hygiene/WRITE_PROBE.md`
 
-No production writes may happen until this task produces a documented answer. The
-assays API exposes `list`, `retrieve`, `create`, `partial_update` and no delete,
-so removal is unproven. This task is exploratory and has no unit test; its
-deliverable is a written finding.
+**AMENDED 2026-08-13 — this task previously aimed at the wrong thing.** It was
+written as "prove rollback", on the belief that removal was unproven because
+`AssayProxyViewSet` has no delete. That belief was wrong: the real writer is
+`smart_merge_assay_assets` (`nextseek_api/batch_upload/update.py:117`), which
+computes `to_remove = old - new` and bulk-DELETEs against `assay_assets` in
+direct SQL, and it ran across ~200k rows in production. **Removal is the solved
+half.**
 
-- [ ] **Step 1: Create a throwaway assay on nextseek-dev**
+The unproven half is ADDITION. Every id in those production payloads was
+round-tripped out of `assay_assets`, so `to_add` was plausibly always empty —
+and addition is exactly what this pipeline does. Prove that first.
 
-Work against `fairdata-dev`, never production. Use the `nextseek` container there.
-Create an assay under a test study, then add two samples to it via
-`PATCH /nextseek_api/assays/<id>/`.
+No production writes may happen until this task produces a documented answer.
+Exploratory, no unit test; the deliverable is a written finding.
 
-- [ ] **Step 2: Attempt removal by PATCHing the membership minus one sample**
+- [ ] **Step 1: Pick a throwaway sample and assay on nextseek-dev**
 
-Record the exact request body, the HTTP status, and the response body. Per the
-plugin's documented pitfall the proxy converts SEEK's 422 into a generic 502, so
-capture the upstream body if the proxy exposes it.
+Work against `fairdata-dev`, never production. Record the sample's CURRENT assay
+set from `assay_assets` before touching anything — that set is what you must send
+back plus your addition.
+- [ ] **Step 2: Send a batch_upload payload adding ONE assay to that sample**
 
-- [ ] **Step 3: Verify by re-reading the assay**
+Build an `update_existing: true` payload whose `assay_ids` is the sample's
+existing set PLUS one new assay id. Shape it like
+`batch_payload_project_10.json.zip`: `{rows: [...], project_id, update_existing}`
+with each row carrying `UID`, `SampleType`, `json_metadata`, `assay_ids`.
 
-Confirm whether the sample was actually detached or whether the PATCH was a
-no-op that reported success.
+Record the exact payload, the HTTP status, and the response body. The proxy
+converts SEEK's 422 into a generic 502, so capture the upstream body if exposed.
 
-- [ ] **Step 4: Write the finding**
+- [ ] **Step 3: Verify the addition landed in assay_assets**
 
-Create `scripts/assay_hygiene/ROLLBACK_PROBE.md` recording: the request shape
-that worked or failed, the observed status codes, whether removal is possible,
-and if not, what the fallback is (direct SQL delete run by the operator, or
-`sampletype_attr.py`-style native-endpoint driving).
+Query `assay_assets` directly for that `asset_id`. Confirm the new row exists
+AND that every pre-existing row survived. A success report with no new row is
+the exact failure mode this task exists to catch.
 
-- [ ] **Step 5: Report to the user and stop**
+- [ ] **Step 4: Prove the reversal, and prove the hazard**
 
-If rollback does not work, say so plainly and do not proceed to Task 9 without a
-decision. Batching strategy depends entirely on this answer.
+Re-send the payload with the original assay set (the addition omitted) and
+confirm the added row is deleted — that demonstrates rollback. Then, separately,
+send a payload with a DELIBERATELY partial list and confirm it destroys the
+omitted memberships. Restore afterwards. Documenting the hazard concretely is
+worth more than asserting it.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Write the finding**
+
+Create `scripts/assay_hygiene/WRITE_PROBE.md` recording: whether addition lands,
+whether reversal works, the observed status codes, the confirmed blast radius of
+a partial list, and any auth or permission scoping encountered.
+
+- [ ] **Step 6: Report to the user and stop**
+
+If addition does NOT land, say so plainly and do not proceed to Task 9 without a
+decision — the entire pipeline depends on it. Batching strategy depends on this
+answer too.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add scripts/assay_hygiene/ROLLBACK_PROBE.md
-git commit -m "docs(assay-hygiene): record rollback probe findings from dev box"
+git add scripts/assay_hygiene/WRITE_PROBE.md
+git commit -m "docs(assay-hygiene): record write probe findings from dev box"
 ```
 
 ---
@@ -1685,13 +1709,29 @@ git commit -m "docs(assay-hygiene): record rollback probe findings from dev box"
 - Create: `scripts/assay_hygiene/apply.py`
 - Test: `tests/test_assay_hygiene_apply.py`
 
-**Interfaces:**
-- Consumes: `_schema.RULE_KEY`, `emit.read_approvals`
-- Produces: `plan_writes(rules: pandas.DataFrame, expansion: pandas.DataFrame) -> dict[int, set[int]]`; `apply_writes(plan, client, manifest_path, write: bool = False) -> dict`
+**AMENDED 2026-08-13 — the axis in the code below is WRONG and must be inverted
+before implementing.** As written, `plan_writes` returns `dict[assay_id, set[sample_id]]`
+and `apply_writes` unions members onto an assay. The proven production writer
+works the other way round: `smart_merge_assay_assets` takes ONE `asset_id` with
+a COMPLETE assay list and computes `to_remove = old_assays - new_assays`.
 
-`client` is any object with `get_members(assay_id) -> set[int]` and
-`set_members(assay_id, members: set[int]) -> None`, so tests use a fake and no
-network is touched.
+Re-specify as:
+
+- `plan_writes(rules, expansion) -> dict[int, set[int]]` keyed by **`sample_id`**,
+  valued by the set of `assay_id`s to ADD to that sample.
+- `apply_writes(plan, client, manifest_path, write=False)` where `client` exposes
+  `get_assays(sample_id) -> set[int]` and `set_assays(sample_id, assays: set[int])`.
+- The union happens on the **sample's** assay set:
+  `client.set_assays(sid, client.get_assays(sid) | additions)`. Sending anything
+  less than the sample's complete assay set deletes the difference.
+
+The tests below carry the same inversion: `test_write_unions_rather_than_overwriting`
+and `test_manifest_records_only_the_additions` are the right *ideas* on the wrong
+axis. Keep their intent, swap sample and assay throughout, and add a test that a
+partial list would delete — asserting the guard refuses to send one.
+
+Everything else in this task (dry-run default, approval gating, manifest,
+read-verify bracket) stands unchanged.
 
 - [ ] **Step 1: Write the failing test**
 

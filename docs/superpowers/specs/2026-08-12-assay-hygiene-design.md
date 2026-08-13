@@ -79,7 +79,50 @@ intersection rule correct without a code change.
   intersection rule starts working on its own.
 - Creating or moving Study or Investigation records.
 - Deleting assays.
-- Touching sample lineage. Topology is correct and is not in scope.
+- **Creating the 89,960 missing `DERIVED_FROM` edges** — see the boundary below.
+  This pipeline annotates the edges that exist.
+
+### Boundary: the graph is missing edges, and this pipeline does not fix that
+
+An earlier draft of this spec claimed "topology is correct and is not in scope."
+**That was wrong.** Measured on production 2026-08-13:
+
+```
+CHILD_OF total                742,534
+DERIVED_FROM total            704,059
+CHILD_OF without DERIVED_FROM  89,960
+DERIVED_FROM without CHILD_OF  51,485
+
+samples naming a parent ONLY via a variant field   17,038
+those variant-only parent references               84,920
+of which have no DERIVED_FROM edge                 84,920  (all of them)
+```
+
+Variant fields carrying values: `AntibodyParent` 12,367, `Treatment1Parent`
+4,108, `CompensationFCSParent` 3,934, `Treatment2Parent` 2,512, plus a tail.
+
+The relationships are not absent — they exist as `CHILD_OF`, created by the
+legacy substring matcher at `seek/dbtable_sample.py::extractParents`
+(`if "Parent" in k`). What is missing is `DERIVED_FROM`, the only edge type
+carrying assay properties. So 89,960 relationships are structurally incapable of
+holding an assay and are invisible to every query this pipeline builds.
+
+The server-side half is already fixed:
+`nextseek_api/batch_upload/helpers.py:27 collect_parent_tokens` substring-matches
+(`if "parent" not in key.lower(): continue`) in both v4-stable-wt and
+dev-v3-merge, and the running production container carries it. The gap is
+historical, from samples ingested before that fix.
+
+**Operator ruling (2026-08-13): `*Parent*` as a wildcard SHOULD be included.**
+All variant parent fields are intended to become `DERIVED_FROM` edges, matching
+the server's existing `"parent" in key.lower()` behavior.
+
+Acting on that ruling is workstream B, not this spec, and it is awkward:
+`neo4j_sync.upload_all` is reachable only from `batch_upload/orchestrator.py`, so
+there is no standalone re-sync. Closing the gap means an export-and-re-upload
+cycle per project, carrying the membership-deletion hazard under Write safety.
+Until it lands, this pipeline's coverage is computed against a graph ~11% smaller
+than the recorded relationships, and that caveat belongs on any report it emits.
 
 ## Taxonomy
 
@@ -105,21 +148,42 @@ question: does this hop, under this assay, normally register both sides?
 Key:
 
 ```
-project_id | child_type | parent_type | assay_title
+project_id | child_type | parent_type | internal_assay_id
 ```
 
-Keyed on **title, not `assay_id`**. Verified 2026-08-12: SEEK holds 458 assay
-records under only 291 distinct titles, because the same logical assay is
-instantiated once per study. "Tissue Collection - Metadata" exists as 14 records
-across 14 studies. Keying on `assay_id` would shatter the evidence into
-per-study fragments too thin to judge.
+**Keyed on `internal_assay_id`, not `assays.title` and not `assays.id`.**
+An earlier draft keyed on raw title; that was a worse version of a mapping that
+already exists. Measured 2026-08-13:
 
-The write target is still a specific `assay_id`, and it is never ambiguous: in
+```
+dmac.internal_assays          137 rows / 137 distinct titles   (canonical)
+seek_production.assays        458 rows / 291 distinct titles   (raw)
+dmac.assays_internal_assays   441 rows: 441 assay_ids -> 137 internal_ids
+```
+
+Three reasons the junction wins over string matching:
+
+1. **`assays.id` is too fine.** The same logical assay is instantiated once per
+   study — "Tissue Collection - Metadata" exists as 14 records across 14 studies
+   — so an id-keyed rule shatters evidence into unjudgeable fragments.
+2. **`assays.title` is the wrong vocabulary.** Raw titles carry suffix
+   conventions (`- Metadata`, `- Data Linked`) on top of the `X` / `X Analysis`
+   split, and collapsing them by string heuristic re-derives, badly, a mapping
+   curators already approved.
+3. **It is the vocabulary the edge already speaks.** `DERIVED_FROM.internal_assay_title`
+   is the canonical name, resolved through this same junction by
+   `neo4j_sync._resolve_internal_assays`. Keying on raw title means findings and
+   edges cannot be reconciled on assay identity — the two sides are in different
+   namespaces.
+
+Carry `internal_assay_title` alongside the id for human-readable output.
+
+Note 17 of the 458 assays have no junction row. Stage B must decide explicitly
+what to do with them (skip, or fall back to `assays.id`) rather than dropping
+them silently.
+
+The write target is still a specific `assays.id`, and it is never ambiguous: in
 Mode 2 we add the parent to the assay record the child is already in.
-
-Titles also carry suffix conventions (`- Metadata`, `- Data Linked`) layered on
-top of the `X` / `X Analysis` split. Whether to normalise these before grouping
-is decided in Stage B against the data, not assumed here.
 
 Mined columns:
 
@@ -382,6 +446,23 @@ Running under `manage.py shell` is deliberate: it inherits the configured
 `seek` connection and `NEO4J_DATABASE` settings, so no credential ever has to be
 read, passed, or stored by these scripts.
 
+That choice proved load-bearing on 2026-08-13, when two credential facts
+surfaced that break hand-rolled connections while leaving the settings path
+working. Anyone verifying by hand needs both:
+
+- **Neo4j's password was rotated.** `docker-compose.yml`'s
+  `NEO4J_AUTH: "neo4j/demopassword"` is stale; the live value is
+  `NEO4J_PASSWORD` in `.env`. `cypher-shell -p demopassword` now fails with an
+  access-denied error while the driver keeps working.
+- **MySQL `root@localhost` and `root@%` have different passwords.** Socket
+  connections from inside `seek-mysql` fail; `-h127.0.0.1` forces TCP and
+  succeeds. This is why `docker exec seek-mysql mysqldump -uroot` alone returns
+  `Access denied` and the same command with `-h127.0.0.1` does not.
+
+Also note the correct Django alias is `seek` (`seek_production`). The `default`
+alias is `dmac`, whose `assay_assets` table exists but is EMPTY — querying it
+yields a confident, entirely wrong answer.
+
 Extraction runs **inside the `nextseek` container**, which already has
 everything needed, verified 2026-08-12:
 
@@ -444,17 +525,44 @@ the run refuses to write when the bar is unmet unless explicitly overridden.
 - Start with the smallest project, verify in the UI, then widen.
 - Manifest per run recording every membership added, so removal targets exactly
   what was created.
-- Read by SQL and neo4j, write by API. The API is for writes only, where
-  validation and auth matter. Extraction via API would be slow and would hit the
+- Read by SQL and neo4j. Extraction via API would be slow and would hit the
   documented `page[size]` bug.
+
+### The write path is per-SAMPLE, and omission deletes
+
+An earlier draft assumed writes go through the assays API, one assay at a time
+with a full member list. **That is the wrong axis.** The proven production writer
+is `nextseek_api/batch_upload/update.py:117 smart_merge_assay_assets`, with the
+bulk path at `:429-447`. It is keyed per SAMPLE — one `asset_id`, one complete
+assay list — and it does:
+
+```python
+to_add    = new_assays - old_assays
+to_remove = old_assays - new_assays     # <-- the hazard
+```
+
+then bulk-DELETEs and INSERTs against `assay_assets` in direct SQL. Exercised in
+production across ~200k rows via `update_existing: true` payloads (verified in
+`batch_payload_project_10.json.zip`: 2,843 of 2,844 rows carry `assay_ids`).
+
+Two consequences, both binding:
+
+1. **A sample's assay list must always be COMPLETE.** Sending a partial list
+   deletes every membership omitted from it. Stage F must union our additions
+   onto the sample's existing assays and send the whole set, never a delta.
+2. **Removal is already proven; addition is not.** Every id in those production
+   payloads was round-tripped out of `assay_assets`, so `to_remove` did the work
+   and `to_add` was plausibly always empty. Addition at scale is the unverified
+   half, and it is the half this pipeline depends on.
 
 ## Open risks
 
-1. **Rollback is unverified.** `AssayProxyViewSet` exposes `list`, `retrieve`,
-   `create`, `partial_update` and no delete. Removal likely means PATCHing the
-   assay with its membership list minus our additions. This must be proven on
-   the dev box against a throwaway assay before any production write. If
-   rollback does not work cleanly, batching must become more conservative.
+1. **Addition at scale is unverified — rollback is not.** An earlier draft had
+   this backwards. `smart_merge_assay_assets` demonstrably removes memberships
+   at scale in production, so rollback is the *solved* half. What is unproven is
+   that a genuine `to_add` lands, because the production payloads only ever
+   round-tripped ids that were already present. The dev-box probe must therefore
+   test an ADDITION (and its reversal), not a deletion.
 2. **The proxy masks SEEK 422s as generic 502s.** Apply-stage failures will be
    uninformative unless the client inspects the upstream body. Precedent for
    working around this exists in `scripts/sampletype_attr.py`.
