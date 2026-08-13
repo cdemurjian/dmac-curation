@@ -105,8 +105,21 @@ question: does this hop, under this assay, normally register both sides?
 Key:
 
 ```
-project_id | child_type | parent_type | assay_id | assay_title
+project_id | child_type | parent_type | assay_title
 ```
+
+Keyed on **title, not `assay_id`**. Verified 2026-08-12: SEEK holds 458 assay
+records under only 291 distinct titles, because the same logical assay is
+instantiated once per study. "Tissue Collection - Metadata" exists as 14 records
+across 14 studies. Keying on `assay_id` would shatter the evidence into
+per-study fragments too thin to judge.
+
+The write target is still a specific `assay_id`, and it is never ambiguous: in
+Mode 2 we add the parent to the assay record the child is already in.
+
+Titles also carry suffix conventions (`- Metadata`, `- Data Linked`) layered on
+top of the `X` / `X Analysis` split. Whether to normalise these before grouping
+is decided in Stage B against the data, not assumed here.
 
 Mined columns:
 
@@ -193,10 +206,181 @@ assay-hygiene/
   applied/                     F, one manifest per apply run
 ```
 
+## Stage detail
+
+All SQL below was verified against `seek_production` on 2026-08-12.
+
+### A. Extract
+
+One self-contained script run in-container. Four outputs.
+
+`extract/edges.parquet` (704,059 rows), from neo4j:
+
+```cypher
+MATCH (c:Sample)-[r:DERIVED_FROM]->(p:Sample)
+RETURN c.id AS child_id, p.id AS parent_id,
+       c.UID AS child_uuid, p.UID AS parent_uuid,
+       c.type AS child_type, p.type AS parent_type,
+       r.internal_assay_id AS edge_assay_id,
+       r.internal_assay_title AS edge_assay_title,
+       r.protocol_id AS edge_protocol_id
+```
+
+`extract/membership.parquet` (214,489 rows):
+
+```sql
+SELECT asset_id AS sample_id, assay_id
+FROM assay_assets WHERE asset_type = 'Sample'
+```
+
+`extract/assays.parquet` (458 rows). Note `investigations` has **no**
+`project_id`; the link is the `investigations_projects` join table:
+
+```sql
+SELECT a.id AS assay_id, a.title, a.sample_type_id, a.study_id,
+       i.id AS investigation_id, ip.project_id, p.title AS project_title
+FROM assays a
+JOIN studies s              ON s.id  = a.study_id
+JOIN investigations i       ON i.id  = s.investigation_id
+JOIN investigations_projects ip ON ip.investigation_id = i.id
+JOIN projects p             ON p.id  = ip.project_id
+```
+
+`extract/samples.parquet` (163,393 rows, ~50 MB). `projects_samples` gives
+sample-to-project directly (206,533 rows / 162,959 distinct samples), which is
+simpler than inferring project through assays:
+
+```sql
+SELECT s.id AS sample_id, s.uuid, s.json_metadata, s.created_at,
+       GROUP_CONCAT(ps.project_id) AS project_ids
+FROM samples s
+LEFT JOIN projects_samples ps ON ps.sample_id = s.id
+GROUP BY s.id
+```
+
+### B. Mine precedent
+
+For every edge, for every assay either endpoint belongs to:
+
+```python
+for child, parent in edges:
+    ca, pa = membership[child], membership[parent]
+    for a in ca | pa:
+        key = (project_of(a), child_type, parent_type, title_of(a))
+        if   a in ca and a in pa: counts[key].both        += 1
+        elif a in ca:             counts[key].child_only  += 1
+        else:                     counts[key].parent_only += 1
+```
+
+The metric that matters for Mode 2 is **propagation rate**, not a symmetric
+share rate:
+
+```
+propagation_rate = both / (both + child_only)
+```
+
+read as "when the child is in this assay, how often is the parent too". The
+reverse direction gets its own `both / (both + parent_only)` for
+`ADD_CHILD_TO_ASSAY`.
+
+A global cross-project rollup is emitted alongside, as fallback for projects
+with too few observations to judge on their own.
+
+**Open and consequential:** observed rates are moderate, not bimodal.
+`D.TITR -> TIS` under Titer Assay is both=1,640 / child_only=1,057, a rate of
+0.608. That would not clear a naive 0.80 threshold. Threshold selection is
+therefore an output of the Stage B distribution plus the backtest, not a number
+picked in advance. If the distribution has no clean separation, that is itself a
+finding and the deterministic band shrinks in favour of review.
+
+### C. Classify
+
+Per edge, first match wins:
+
+```
+edge already carries an assay          -> CLEAN (labeled)
+child_assays and parent_assays empty   -> MODE_1_BOTH_DARK
+child_assays empty                     -> MODE_1_CHILD
+parent_assays empty                    -> MODE_1_PARENT
+sets disjoint                          -> per child assay a, look up rule:
+    propagation_rate >= HIGH           -> MODE_2_PROPAGATE
+    propagation_rate <= LOW            -> CLEAN (hop legitimately does not propagate)
+    otherwise                          -> MODE_2_AMBIGUOUS  (to D)
+child assay contradicts a dominant
+  precedent with near-zero support     -> MODE_3_FLAG
+```
+
+The `CLEAN` branch on low propagation rate is the guard against the failure I
+walked into during design: without it every dark edge reads as actionable.
+
+### D. Adjudicate
+
+Order: deterministic thresholds, then the `D.*` / `A.*` tiebreak, then LLM for
+what remains.
+
+LLM input contract, one call per ambiguous group rather than per edge:
+
+- child and parent `json_metadata`, restricted to the discriminating keys
+  (`Protocol`, `Name`, `Treatment*`, `Notes`, `Type`, `SampleCreationDate`)
+- candidate assay titles with their precedent counts
+- the project's assay catalog
+
+Returns `{assay_title, confidence, rationale}`. Cached on
+`hash(inputs + prompt_version)` so an approved decision cannot drift on re-run.
+
+### E. Emit
+
+`ASSAY_HYGIENE-update.xlsx`, one row per rule:
+
+```
+project | child_type | parent_type | assay_title | verdict | action
+n_both | n_child_only | n_parent_only | propagation_rate | affected_count
+decided_by | rationale | APPROVE | NOTES
+```
+
+`APPROVE` and `NOTES` are curator-owned and preserved across regeneration.
+`expansion.parquet` carries the row-level edges behind each rule for spot checks.
+
+### F. Apply
+
+```
+read approved rules -> join expansion -> group additions by target assay_id
+for each assay_id:
+    GET  current membership
+    PATCH with current + additions        (never a bare overwrite)
+    GET  again and verify the delta
+    append manifest line
+```
+
+Grouping by assay keeps the call count in the hundreds rather than the hundreds
+of thousands, and the read-verify bracket is what makes the manifest
+trustworthy enough to roll back against.
+
 ## Access architecture
 
 MySQL is not reachable from the laptop and no new port may be opened (only
 22/80/443 reach the box, and SELinux confines nginx to `http_port_t`).
+
+### What runs where
+
+Only Stage A runs on the box, and nothing is installed there. No Claude, no
+`curation_skill` checkout. The extractor is a single self-contained file driven
+from the laptop over ssh, exactly as every query in the design session was:
+
+```bash
+ssh fairdata 'docker cp /tmp/extract.py nextseek:/tmp/extract.py'
+ssh fairdata 'docker exec -i nextseek uv run manage.py shell' < extract.py
+ssh fairdata 'docker cp nextseek:/tmp/assay-hygiene-extract .'
+scp -r fairdata:/tmp/assay-hygiene-extract ./assay-hygiene/extract
+```
+
+Stages B through F run on the laptop against the pulled files. Stage F is the
+only other thing that touches production, and it goes over HTTPS to the API, not
+to the box.
+
+Running under `manage.py shell` is deliberate: it inherits the configured
+`seek` connection and `NEO4J_DATABASE` settings, so no credential ever has to be
+read, passed, or stored by these scripts.
 
 Extraction runs **inside the `nextseek` container**, which already has
 everything needed, verified 2026-08-12:
@@ -221,11 +405,23 @@ fragile mid-transfer and buys nothing over running in-container.
 |---|---|---|
 | edges | 704,059 | ~10 MB gz |
 | membership | 214,489 | ~1 MB gz |
+| samples incl. `json_metadata` | 163,393 | 260 MB raw, ~50 MB parquet+zstd |
 | assay catalog, study, investigation, project | thousands | tiny |
 
-`samples.json_metadata` is deliberately **not** extracted wholesale. 163k JSON
-blobs are needed only for the narrow LLM slice and are fetched on demand for
-those samples.
+`samples.json_metadata` **is** extracted wholesale. Measured 2026-08-12: 260.0 MB
+total, 1,669 B average, 25,928 B max. That is one transfer, and on-demand lookup
+would mean hundreds of thousands of round trips against production.
+
+It is also load-bearing rather than optional. Sample type alone cannot decide
+whether an assay is correct. The discriminating fields live in the metadata, and
+a 3,000-sample probe found 479 distinct keys with the relevant ones densely
+populated: `Protocol` (2,998/3,000), `Parent` (2,997), `Name` (2,600),
+`Treatment` (1,976), `TreatmentType` (1,995), `TreatmentDose` (1,976),
+`Notes` (2,866). Those are exactly what separates DNA Extraction from Bacterial
+Extraction on a `BAC -> TIS` hop.
+
+Stored as one parquet with `json_metadata` kept as a raw string column and
+parsed locally per stage, rather than exploded into 479 sparse columns.
 
 ## Validation
 
