@@ -66,13 +66,40 @@ A_FLAG_ONLY = "FLAG_ONLY"
 
 
 def make_fixture() -> dict[str, pd.DataFrame]:
-    """A six-edge synthetic world covering every branch of stage C.
+    """A six-edge synthetic world for the precedent and classify stages.
 
     assay 1 "Comet Chip"        project 10, propagating   (D.IMG -> TIS)
     assay 2 "Tissue Collection" project 10, non-propagating
 
     samples: 100/101 D.IMG children, 200/201 TIS parents,
-             300 dark child, 400 dark parent
+             300/301 dark children, 400 dark parent
+
+    Branches this data DOES reach:
+      CLEAN             100 -> 200 and 101 -> 201, both endpoints co-registered
+                        in Comet Chip; plus the 203 -> 500 TIS -> MUS hop, whose
+                        precedent does not propagate
+      MODE_1_CHILD      300 -> 200, child registered nowhere
+      MODE_1_BOTH_DARK  301 -> 400, neither endpoint registered
+      MODE_2_PROPAGATE  102 -> 202, child in Comet Chip and parent only in
+                        Tissue Collection, on a hop whose precedent propagates
+
+    Branches this data does NOT reach:
+      MODE_1_PARENT     no edge pairs a registered child with a wholly dark
+                        parent. 102 -> 202 is not this case: its parent is
+                        registered, just in a different assay, which is mode 2.
+      MODE_2_AMBIGUOUS  no child is registered in 2+ assays, so ``candidates``
+                        is single-element on every row and no tiebreak can fire
+                        here. Proving the stage-D tiebreak works needs a fixture
+                        of its own; a tiebreak that never fires is
+                        indistinguishable from a correct one.
+      MODE_3_FLAG       nothing in this world produces it.
+
+    The data is frozen. Later stages hand-trace counts off these exact rows
+    (for D.IMG -> TIS under Comet Chip: n_both=2, n_child_only=1, hence
+    propagation_rate=2/3), so editing a membership row or a type column
+    silently invalidates their arithmetic. tests/test_assay_hygiene_schema.py
+    pins this structure, including the two unreached branches above, so the
+    data and this docstring cannot drift apart.
     """
     edges = pd.DataFrame(
         [

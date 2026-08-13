@@ -1,4 +1,5 @@
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,26 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
 from assay_hygiene import _schema as S
+
+
+def _registration(fx):
+    """sample_id -> set of assay_ids it is registered in, derived from membership.
+
+    The structural assertions below are computed through this helper rather than
+    written against literal ids, so they describe the fixture's shape instead of
+    restating its rows.
+    """
+    reg = {}
+    for sid, aid in zip(fx["membership"]["sample_id"], fx["membership"]["assay_id"]):
+        reg.setdefault(sid, set()).add(aid)
+    return reg
+
+
+def _edge_registration(fx):
+    """One (child_assays, parent_assays) pair per edge, in edge order."""
+    reg = _registration(fx)
+    return [(reg.get(c, set()), reg.get(p, set()))
+            for c, p in zip(fx["edges"]["child_id"], fx["edges"]["parent_id"])]
 
 
 def test_verdict_constants_are_distinct():
@@ -35,8 +56,76 @@ def test_fixture_shapes_match_declared_columns():
     assert list(fx["assays"].columns) == S.ASSAY_COLUMNS
 
 
+def test_finding_columns_end_with_candidates():
+    # `candidates` carries every assay title the child belongs to. Stage D's
+    # tiebreak reads it and membership is NOT carried into findings, so if this
+    # column is dropped or reordered off the end the tiebreak silently never
+    # fires -- which looks exactly like a tiebreak that is working.
+    assert "candidates" in S.FINDING_COLUMNS
+    assert S.FINDING_COLUMNS[-1] == "candidates"
+
+
 def test_fixture_encodes_the_four_canonical_situations():
     fx = S.make_fixture()
     # 1 propagating hop, 1 non-propagating hop, 1 dark child, 1 dark pair
     assert len(fx["edges"]) == 6
     assert set(fx["assays"]["title"]) == {"Comet Chip", "Tissue Collection"}
+
+    # The four situations, derived from the frames rather than asserted by id.
+    pairs = _edge_registration(fx)
+    co_registered = [1 for c, p in pairs if c & p]
+    disjoint_but_registered = [1 for c, p in pairs if c and p and not (c & p)]
+    dark_child = [1 for c, _ in pairs if not c]
+    both_dark = [1 for c, p in pairs if not c and not p]
+
+    assert len(co_registered) == 2           # the precedent-establishing hops
+    assert len(disjoint_but_registered) == 2  # mode-2 candidate + the CLEAN hop
+    assert len(dark_child) == 2               # mode-1 child + the both-dark pair
+    assert len(both_dark) == 1
+
+    # Type columns are part of the frozen contract: the rule key is
+    # (project, child_type, parent_type, title), so a changed type silently
+    # re-buckets precedent. Count the hops rather than collecting the distinct
+    # set -- a set still matches after a type is flipped to one that already
+    # appears on another edge, which is exactly the silent edit to catch.
+    hops = Counter(zip(fx["edges"]["child_type"], fx["edges"]["parent_type"]))
+    assert dict(hops) == {("D.IMG", "TIS"): 3, ("DNA", "TIS"): 2, ("TIS", "MUS"): 1}
+
+
+def test_comet_chip_hop_carries_the_frozen_propagation_counts():
+    # Later stages hand-trace n_both=2 / n_child_only=1 -> propagation_rate 2/3
+    # off these exact rows. Pin the counts here so an edit to a membership row
+    # fails at its source instead of as mysterious arithmetic three tasks later.
+    fx = S.make_fixture()
+    reg = _registration(fx)
+    assays = fx["assays"]
+    comet = assays.loc[assays["title"] == "Comet Chip", "assay_id"].iloc[0]
+    edges = fx["edges"]
+    hop = edges[(edges["child_type"] == "D.IMG") & (edges["parent_type"] == "TIS")]
+
+    n_both = sum(1 for c, p in zip(hop["child_id"], hop["parent_id"])
+                 if comet in reg.get(c, set()) and comet in reg.get(p, set()))
+    n_child_only = sum(1 for c, p in zip(hop["child_id"], hop["parent_id"])
+                       if comet in reg.get(c, set()) and comet not in reg.get(p, set()))
+
+    assert (n_both, n_child_only) == (2, 1)
+
+
+def test_fixture_cannot_reach_ambiguity_or_a_dark_parent():
+    """Pins the branches make_fixture's docstring says it does NOT reach.
+
+    Executable so the frozen data and that docstring cannot drift apart. If one
+    of these ever starts failing, the fixture gained a branch and the docstring
+    is now lying -- update both together.
+    """
+    fx = S.make_fixture()
+    reg = _registration(fx)
+    edges = fx["edges"]
+
+    # No child sits in 2+ assays, so `candidates` is single-element on every
+    # row and no stage-D tiebreak can fire against this fixture.
+    assert not [c for c in edges["child_id"] if len(reg.get(c, set())) > 1]
+
+    # No edge pairs a registered child with a wholly dark parent (MODE_1_PARENT).
+    assert not [(c, p) for c, p in zip(edges["child_id"], edges["parent_id"])
+                if reg.get(c) and not reg.get(p)]
