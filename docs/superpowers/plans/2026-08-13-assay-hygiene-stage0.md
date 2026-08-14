@@ -152,7 +152,7 @@ ASSAY_COLUMNS = [
     "investigation_id", "project_id", "project_title",
     # resolved through dmac.assays_internal_assays; NULL for the 17 records
     # with no junction row, which fall back to (assay_id, title) per
-    # neo4j_sync.py:1011-1021
+    # neo4j_sync.py:1418-1431 (v4-stable-wt; 944-957 in NExtSEEK/dev-v3-merge)
     "internal_assay_id", "internal_assay_title",
 ]
 
@@ -565,7 +565,7 @@ def test_output_carries_exactly_the_server_model_fields_plus_reporting_columns()
 
 
 def test_assay_with_no_junction_row_falls_back_to_assay_id_and_title():
-    # neo4j_sync.py:1011-1021. 17 of 458 production assays have no junction row;
+    # neo4j_sync.py:1418-1431 (v4-stable-wt; 944-957 in NExtSEEK/dev-v3-merge). 17 of 458 production assays have no junction row;
     # the server does NOT skip them, it uses (assay_id, assays.title).
     fx = S.make_stage0_fixture()
     # put BOTH endpoints of the AB edge in assay 2, which has no junction row

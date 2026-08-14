@@ -503,7 +503,7 @@ Two server behaviours stage 0 must mirror rather than improve on:
   assay assignments rest on the tiebreak. `report.md` carries the count and lists
   those 28 edges, so a curator can settle them by hand if they choose.
 - **Assays with no junction row.** The server already falls back to
-  `(assay_id, assays.title)` (`neo4j_sync.py:1011-1021`). This resolves the
+  `(assay_id, assays.title)` (`neo4j_sync.py:1418-1431 (v4-stable-wt; 944-957 in NExtSEEK/dev-v3-merge)`). This resolves the
   question the previous draft left open about the 17 unmapped assays: there is an
   existing documented behaviour and stage 0 adopts it. `report.md` counts how
   many edges took the fallback.

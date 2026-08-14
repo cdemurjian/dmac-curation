@@ -22,7 +22,7 @@
 - **Read-only.** Nothing in this increment writes to MySQL, Neo4j, or the NExtSEEK API. No stage here needs production access at all: it reads the parquet extract already on disk at `assay-hygiene/extract/`.
 - **Rule key is `(project_id, child_type, parent_type, internal_assay_id)`.** NOT `assays.title`, NOT `assays.id`.
 - **`internal_assay_id` is NULLABLE and is a RULE_KEY component.** A pandas `groupby(RULE_KEY)` defaults to `dropna=True` and would silently discard the 17 assay records with no junction row, violating the spec's binding "nothing is dropped silently". Pass `dropna=False`, or apply the `(assay_id, assays.title)` fallback first so the key is never null.
-- **The 17 assays with no junction row** fall back to `(assay_id, assays.title)` as their identity, the same rule `neo4j_sync.py:1011-1021` uses.
+- **The 17 assays with no junction row** fall back to `(assay_id, assays.title)` as their identity, the same rule `neo4j_sync.py:1418-1431 (v4-stable-wt; 944-957 in NExtSEEK/dev-v3-merge)` uses.
 - **Every measured figure carries its scope in the sentence that states it.** The spec documents three figures that are each measurable three ways, where two readings are wrong. Do not restate a number without its scope.
 - **Percentages quoted in this plan are justification, not fixtures.** Task 2 re-derives them. If a re-derived number disagrees with this document by more than a point, stop and report it rather than adjusting the assertion.
 - **The judgment steps are slash commands, not API calls.** This plugin has no LLM client and does not gain one. Deterministic work lives in `scripts/`; judgment lives in `commands/*.md` where Claude reads a file and writes a file. The artifact on disk is the cache.
@@ -1175,6 +1175,30 @@ so the key is never null. This module counts into a dict rather than grouping,
 so it avoids the `groupby(dropna=True)` trap by construction — but the fallback
 is still required, because a `None` key would collapse all 17 into one rule.
 
+**This task deliberately does the opposite of what Task 3 decided, and the
+difference is not an oversight.** Task 3 refused the same fallback for the
+`internal_assay_title` and left 14 vocabulary rows blank instead, because a
+blank is diagnostic of a missing junction row while a filled-in value hides it.
+Here the fallback is right, because the alternative is a null in a `RULE_KEY`
+component, which collapses 17 unrelated assays into a single rule. **The
+fallback is correct for the KEY and wrong for the TITLE.** Do not "harmonise"
+the two.
+
+It is safe today only by luck of numbering. Measured on the live extract:
+**124 of the 458 SEEK `assay_id`s collide numerically with genuine internal
+ids, under wholly unrelated titles** — seek 13 `Short Read Sequencing` against
+internal 13 `Cell Sorting`, seek 24 `Single Cell Clustering Analysis` against
+internal 24 `DNA Extraction`. The 17 junction-less assays happen to sit at
+466-482, above the internal range of 1-188, so no collision occurs. One new
+junction-less assay with a low seek id would silently merge two unrelated
+assays' precedent into one rule.
+
+**So this task must add a guard test**, beyond the ones listed below, asserting
+against the real extract that the fallback ids and the genuine internal ids do
+not intersect. It is the only thing standing between the fallback and a silent
+wrong answer, and 473 of 360,027 labelled edges already carry a seek id in
+`edge_internal_assay_id` because the server applies this same fallback.
+
 - [ ] **Step 1: Write the failing test**
 
 ```python
@@ -1208,7 +1232,7 @@ def test_assay_index_resolves_to_the_internal_namespace():
 
 def test_assay_index_falls_back_when_there_is_no_junction_row():
     # 17 assay records resolve to no internal_assay_id. They fall back to
-    # (assay_id, title) -- the same rule neo4j_sync.py:1011-1021 uses -- so the
+    # (assay_id, title) -- the same rule neo4j_sync.py:1418-1431 (v4-stable-wt; 944-957 in NExtSEEK/dev-v3-merge) uses -- so the
     # RULE_KEY is never null. A null would collapse all 17 into one rule.
     assays = pd.DataFrame(
         [(2, "Antibody Panel", 8, 3, 2, 10, "MIT_SRP", None, None)],
@@ -1308,7 +1332,7 @@ def assay_index(assays: pd.DataFrame) -> dict[int, tuple[int, int, str]]:
     """assay_id -> (project_id, internal_assay_id, internal_assay_title).
 
     17 assay records have no junction row and resolve to no internal id. They
-    fall back to their own (assay_id, title), matching neo4j_sync.py:1011-1021,
+    fall back to their own (assay_id, title), matching neo4j_sync.py:1418-1431 (v4-stable-wt; 944-957 in NExtSEEK/dev-v3-merge),
     so the rule key is never null. Dropping them would violate the spec's
     binding "nothing is dropped silently"; leaving the key null would collapse
     all 17 into a single meaningless rule.
