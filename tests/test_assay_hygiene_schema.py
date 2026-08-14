@@ -317,10 +317,78 @@ def test_fixture_samples_exercise_every_tier():
     assert "Type" not in by_uuid["DNA-1"]                 # -> none
 
 
-def test_fixture_edge_and_assay_shape_is_unchanged():
-    # Tasks 5 and 6 hand-trace counts off this fixture (n_both=2,
-    # n_child_only=1, propagation_rate=2/3). Adding sample rows must not move
-    # them, so the edge and assay frames are pinned here.
+def test_fixture_membership_content_pins_the_propagation_arithmetic():
+    """The rows n_both=2 / n_child_only=1 / propagation_rate=2/3 are computed FROM.
+
+    Those counts are a function of the membership frame's CONTENT, not of its
+    length: retyping row (102, 1) to (102, 2) moves n_child_only from 1 to 0
+    while `len(membership) == 10` stays green. The derived assertions further up
+    do catch that particular edit, but each of them averages the frame down to a
+    handful of numbers, so a compensating pair of edits -- or any edit to the
+    TIS -> MUS rows, which no derived test resolves individually -- can still
+    slip past. This is the literal pin, in the same spirit as the NODES_COLUMNS
+    test above: assert the rows, then re-derive the headline rate from them so
+    the two cannot drift apart.
+
+    Deliberately NOT re-asserted here: len(edges), the assay titles, the hop
+    Counter and (n_both, n_child_only) itself. All four are already covered
+    above, and restating them was what made the previous version of this test
+    vacuous.
+    """
     fx = S.make_fixture()
-    assert len(fx["edges"]) == 6
-    assert set(fx["assays"]["title"]) == {"Comet Chip", "Tissue Collection"}
+    assert set(zip(fx["membership"]["sample_id"], fx["membership"]["assay_id"])) == {
+        (100, 1), (200, 1),          # both in Comet Chip
+        (101, 1), (201, 1),          # both in Comet Chip
+        (102, 1), (202, 2),          # disjoint -> the mode 2 case
+        (203, 2), (500, 1),          # disjoint, but hop does not propagate
+        (200, 2), (201, 2),          # parents also in Tissue Collection
+    }
+
+    # the rate Tasks 5 and 6 actually quote, re-derived from the rows above
+    reg = _registration(fx)
+    assays = fx["assays"]
+    comet = assays.loc[assays["title"] == "Comet Chip", "assay_id"].iloc[0]
+    edges = fx["edges"]
+    hop = edges[(edges["child_type"] == "D.IMG") & (edges["parent_type"] == "TIS")]
+    n_both = sum(1 for c, p in zip(hop["child_id"], hop["parent_id"])
+                 if comet in reg.get(c, set()) and comet in reg.get(p, set()))
+    n_child_only = sum(1 for c, p in zip(hop["child_id"], hop["parent_id"])
+                       if comet in reg.get(c, set()) and comet not in reg.get(p, set()))
+    assert n_both / (n_both + n_child_only) == 2 / 3
+
+
+def test_fixture_sample_uuids_agree_with_the_edge_frame():
+    # The samples frame gained three rows (101, 102, 200) when the claim tiers
+    # were added, and besides edges it is the only frame carrying sample_id and
+    # uuid TOGETHER. Stage B2 and the mode-3 audit produce claims keyed by uuid
+    # and join them to edges, so a uuid that disagrees with the edge frame's
+    # child_uuid / parent_uuid for the same id does not raise -- it drops or
+    # mis-joins rows and reports a smaller, entirely plausible answer.
+    fx = S.make_fixture()
+    edges = fx["edges"]
+    by_id = dict(zip(edges["child_id"], edges["child_uuid"]))
+    by_id.update(zip(edges["parent_id"], edges["parent_uuid"]))
+    for sid, uuid in zip(fx["samples"]["sample_id"], fx["samples"]["uuid"]):
+        assert by_id[sid] == uuid, f"sample {sid} uuid disagrees with the edge frame"
+
+
+def test_audit_columns_carry_both_sides_of_the_comparison():
+    # Mode 3 flags a sample whose own metadata claims an assay it is NOT
+    # registered in, so an audit row has to carry both sides -- the registered
+    # ids and the claimed one -- or a curator cannot see what the disagreement
+    # was. The claim's evidence rides along for the same reason: a verdict with
+    # no tier / source_field / raw_value is not auditable, it is just an
+    # assertion.
+    for col in ("sample_id", "uuid", "sample_type",
+                "registered_internal_assay_ids", "claimed_internal_assay_id",
+                "claimed_internal_assay_title", "tier", "source_field",
+                "raw_value", "verdict"):
+        assert col in S.AUDIT_COLUMNS
+    # The claimed side is named distinctly from the registered side on purpose.
+    # A bare `internal_assay_id` here would sit in an adjacent frame to
+    # CLAIM_COLUMNS' column of that exact name, where joining the wrong one is a
+    # one-token edit that yields a populated, wrong column rather than an error
+    # -- the same hazard EDGE_COLUMNS documents for edge_internal_assay_id.
+    assert "internal_assay_id" not in S.AUDIT_COLUMNS
+    assert "internal_assay_title" not in S.AUDIT_COLUMNS
+    assert len(set(S.AUDIT_COLUMNS)) == len(S.AUDIT_COLUMNS)
