@@ -55,6 +55,7 @@ entry-point commands, a reference doc loaded on demand, and optionally its own s
 | command | does |
 |---|---|
 | `/curate-sampletype` | propose or bolster a NExtSEEK sample type; writes a `<TYPE>.review.md` for a human to apply. The explicit `apply` verb can also **write the change to a live server** via `scripts/sampletype_attr.py` |
+| `/curate-assay-vocabulary` | settle the unresolved tail of the assay vocabulary: reads `assay-hygiene/vocabulary-unresolved.csv` plus the registration evidence from `scripts/assay_hygiene/vocabulary_evidence.py`, writes `vocabulary-proposed.csv` for a curator to overrule. Read-only against the database |
 
 **`report`** (reference: `REPORTS.md`)
 

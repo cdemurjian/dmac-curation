@@ -29,7 +29,7 @@ is nothing to declare in `plugin.json`.
 |---|---|---|---|
 | `pipeline` | `/curate-init`, `/curate-inventory`, `/curate-sample-tree`, `/curate-questions`, `/curate-build`, `/curate-consolidate`, `/curate-resolve-assays`, `/curate-qa`, `/curate-qc`, `/curate-deposit`, `/curate-retrieve`, `/curate-validate`, `/curate-email`, `/curate-status` | `PHASES.md` | project - needs a lockfile and scaffold |
 | `fdh` | `/fdh-upload`, `/fdh-api` | `FDH.md` | credentials only - no project needed |
-| `schema` | `/curate-sampletype` | `SCHEMA.md` | cwd - writes where you are, no project needed |
+| `schema` | `/curate-sampletype`, `/curate-assay-vocabulary` | `SCHEMA.md` | cwd - writes where you are, no project needed |
 | `report` | `/curate-report` | `REPORTS.md` | input - reads a lockfile if present, never requires one |
 
 Load a mode's reference doc when you enter that mode, not before. For each
@@ -141,6 +141,7 @@ marker, and a blank there fails silently.
 - "upload to FairDomHub" / "FDH upload" → `/fdh-upload` (interactive `submit.py`)
 - "access the FDH API" / "find/delete/patch … on FDH" → `/fdh-api` reuse-or-generate loop
 - "bolster X" / "what should we collect for X" / "define a sample type" → `schema` mode (`/curate-sampletype`)
+- "unresolved terms" / "which assay does this metadata value mean" / "the assay vocabulary" → `schema` mode (`/curate-assay-vocabulary`), the assay-hygiene stage B2 judgment step
 - "turn this into a GEO submission" / "build the SRA sheet" / "PRIDE report" → `report` mode (`/curate-report`)
 - "the mapping" → `report` mode's `<FORMAT>.mapping.json`, the reviewable spec the LLM writes once
 - "what mode am I in" → `/curate-status`
