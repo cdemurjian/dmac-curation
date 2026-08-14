@@ -224,10 +224,11 @@ def merge_vocabulary(
     strings and be the wrong call twice over. It would hide the missing junction
     row, which is a hygiene defect of precisely the kind this package exists to
     surface; and it would key a lookup on a column that collides -- 124 of the
-    458 seek assay_ids equal a genuine internal_assay_id, and all 124 name a
-    DIFFERENT assay (seek 13 `Short Read Sequencing` against internal 13 `Cell
-    Sorting`, seek 24 `Single Cell Clustering Analysis` against internal 24 `DNA
-    Extraction`). Today's junction-less block happens to sit at 466-482, above
+    458 seek assay_ids equal a genuine internal_assay_id, and 122 of those 124
+    name a DIFFERENT assay (seek 13 `Short Read Sequencing` against internal 13
+    `Cell Sorting`, seek 24 `Single Cell Clustering Analysis` against internal 24
+    `DNA Extraction`; only ids 47 and 74 happen to agree). Today's junction-less
+    block happens to sit at 466-482, above
     the 1-188 internal range, and that accident is the only thing keeping such a
     fallback from returning another assay's title. The fix belongs upstream, in
     the junction table. A test guards this; see
@@ -245,10 +246,16 @@ def merge_vocabulary(
     usually discards the curator's newest decision, and silently -- the losing
     row leaves no trace in the output to notice.
     """
+    # `pd.notna(t)` is not redundant with `pd.notna(i)`. An assays row with a
+    # real internal_assay_id but a NULL title would otherwise enter this dict as
+    # the literal string "nan" (str(float('nan'))), and since the rebuild below
+    # prefers this dict over the row's own value, that string would overwrite a
+    # curator's hand-typed title -- the exact case the fallthrough exists to
+    # protect. Zero such rows in today's extract, so this is a latent guard.
     titles = {
         int(i): str(t)
         for i, t in zip(assays.internal_assay_id, assays.internal_assay_title)
-        if pd.notna(i)
+        if pd.notna(i) and pd.notna(t)
     }
     frames = [f for f in (learned, proposed, curator) if f is not None and len(f)]
     if not frames:
@@ -337,11 +344,29 @@ def load_vocabulary(path) -> pd.DataFrame:
     `keep_default_na=False` matters: a raw_value of `nan` or `null` is a real
     string a curator may have typed, and pandas would otherwise read it back as
     a missing value and silently change what the row maps.
+
+    The `dtype=` pin on the two KEY columns matters more, and it is not
+    hypothetical. read_csv infers per column, so a file whose raw_value column
+    happens to be entirely numeric comes back as int64 -- and the merge
+    normalises its key through `normalise_value`, which returns None for a
+    non-str. Every row in such a file then collapses onto a single None key and
+    all but one curator decision is deleted, silently.
+
+    That file is a natural unit of work, not a contrived one: the live
+    unresolved queue holds 12 bare-numeric Protocol terms (18032418, 22010444,
+    22071552, ...), and a curator ruling on exactly that batch writes a
+    wholly-numeric curator.csv. Measured on those 12: 13 rows in, 2 out, 11
+    decisions lost. A single-row numeric file is voided the same way.
+
+    The pin is here rather than in `normalise_value` on purpose -- this package
+    has ONE normaliser and it stays that way. This is a parsing concern: the
+    keys are text, so they are read as text.
     """
     p = Path(path)
     if not p.exists():
         return pd.DataFrame(columns=S.VOCAB_COLUMNS)
-    df = pd.read_csv(p, keep_default_na=False, na_values=[""])
+    df = pd.read_csv(p, keep_default_na=False, na_values=[""],
+                     dtype={"source_field": str, "raw_value": str})
     for col in S.VOCAB_COLUMNS:
         if col not in df.columns:
             df[col] = None

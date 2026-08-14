@@ -182,11 +182,17 @@ def _assays():
     both internal columns. It is what makes the seek-fallback guard below
     non-vacuous -- without such a row in the frame, a merge that wrongly keyed
     titles off `assay_id` would have nothing to wrongly find.
+
+    Row 4 has a real internal_assay_id but a NULL internal_assay_title. No such
+    row exists in today's extract, so it is here to keep a latent defect from
+    going live: `str(float('nan'))` is the string `"nan"`, so an unguarded
+    titles lookup would hand that string out as a display title.
     """
     return pd.DataFrame(
         [(1, "Comet Chip", 7, 3, 2, 10, "MIT_SRP", 11, "Comet Chip"),
          (2, "Tissue Collection", 8, 3, 2, 10, "MIT_SRP", 12, "Tissue Collection"),
-         (466, "Library Prep", 9, 3, 2, 10, "MIT_SRP", None, None)],
+         (466, "Library Prep", 9, 3, 2, 10, "MIT_SRP", None, None),
+         (3, "Untitled Internal", 9, 3, 2, 10, "MIT_SRP", 13, None)],
         columns=S.ASSAY_COLUMNS,
     )
 
@@ -325,10 +331,11 @@ def test_a_junction_less_id_is_never_titled_from_the_seek_assays_frame():
     # strings. It is still wrong. `edge_internal_assay_id` carries a SEEK
     # assays.id for the 17 junction-less assays and a dmac internal_assays.id
     # for every other row, and the two spaces overlap: measured 2026-08-14,
-    # 124 of the 458 seek assay_ids equal a genuine internal_assay_id, and all
-    # 124 name a DIFFERENT assay -- seek 13 is `Short Read Sequencing` where
-    # internal 13 is `Cell Sorting`, seek 24 is `Single Cell Clustering
-    # Analysis` where internal 24 is `DNA Extraction`. Today's junction-less
+    # 124 of the 458 seek assay_ids equal a genuine internal_assay_id, and 122
+    # of those 124 name a DIFFERENT assay -- seek 13 is `Short Read Sequencing`
+    # where internal 13 is `Cell Sorting`, seek 24 is `Single Cell Clustering
+    # Analysis` where internal 24 is `DNA Extraction`. (Only ids 47 and 74 carry
+    # the same title in both spaces.) Today's junction-less
     # ids happen to sit at 466-482, above the 1-188 internal range, and that
     # accident is the only reason such a fallback is not already mislabelling
     # rows. One new junction-less assay with a low id ends the accident.
@@ -365,3 +372,55 @@ def test_a_hand_typed_title_survives_where_no_authoritative_title_exists():
                        0, 0, 0.0, S.P_CURATOR)])
     out = V.merge_vocabulary(_vocab([]), _vocab([]), curator, _assays())
     assert out.iloc[0].internal_assay_title == "Library Prep (per PI)"
+
+
+def test_a_wholly_numeric_curator_file_survives_the_round_trip(tmp_path):
+    # These are the 12 bare-numeric Protocol terms sitting in the live
+    # unresolved queue on 2026-08-14. A curator ruling on exactly this batch is
+    # a natural unit of work and writes a curator.csv whose raw_value column is
+    # entirely numeric -- whereupon read_csv infers int64, the merge's
+    # normalise_value returns None for every non-str, all 12 rows collapse onto
+    # one None key and 11 curator decisions are deleted without a trace.
+    # Measured before the dtype pin: 13 rows in, 2 out.
+    #
+    # The keys are text. They are read as text. The pin lives in the loader and
+    # not in normalise_value, because this package has exactly one normaliser.
+    ids = ["18032418", "22010444", "22071552", "23012317", "21048970",
+           "17050656", "17029987", "15066174", "19014206", "24095281",
+           "18052927", "25036254"]
+    curator = _vocab([("Protocol", v, 11, None, 0, 0, 0.0, S.P_CURATOR)
+                      for v in ids])
+    p = tmp_path / "curator.csv"
+    V.save_vocabulary(curator, p)
+    back = V.load_vocabulary(p)
+
+    assert list(back.raw_value) == ids, "numeric keys did not survive the load"
+    assert all(isinstance(v, str) for v in back.raw_value)
+
+    learned = _vocab([("Type", "cometchip", 11, None, 900, 850, 0.99, S.P_LEARNED)])
+    out = V.merge_vocabulary(learned, _vocab([]), back, _assays())
+    assert len(out) == 13, "curator decisions were collapsed by the merge"
+    assert sorted(out[out.provenance == S.P_CURATOR].raw_value) == sorted(ids)
+    assert out.raw_value.notna().all()
+
+    # A single-row numeric file is voided by the same mechanism, and a one-row
+    # file cannot show up as a row-count drop, so pin it separately.
+    solo = _vocab([("Protocol", "18032418", 11, None, 0, 0, 0.0, S.P_CURATOR)])
+    q = tmp_path / "solo.csv"
+    V.save_vocabulary(solo, q)
+    assert V.load_vocabulary(q).iloc[0].raw_value == "18032418"
+
+
+def test_a_null_authoritative_title_does_not_overwrite_a_hand_typed_one():
+    # assays row 4 has internal_assay_id 13 and a NULL title. Unguarded, that
+    # enters the titles dict as the literal string "nan" -- str(float('nan')) --
+    # and because the rebuild prefers the dict over the row's own value, it
+    # OVERWRITES the curator's title. That inverts the rule the conditional
+    # rebuild exists to enforce: a null is not an authoritative title, so the
+    # row must keep its own. No such assays row exists today; this is a latent
+    # guard, and the failure mode it prevents is a curator seeing the word "nan"
+    # where they typed a name.
+    curator = _vocab([("Type", "somevalue", 13, "Hand Typed By Curator",
+                       0, 0, 0.0, S.P_CURATOR)])
+    out = V.merge_vocabulary(_vocab([]), _vocab([]), curator, _assays())
+    assert out.iloc[0].internal_assay_title == "Hand Typed By Curator"
