@@ -1,3 +1,4 @@
+import json
 import sys
 from collections import Counter
 from pathlib import Path
@@ -252,3 +253,74 @@ def test_stage0_nodes_frame_matches_the_declared_node_index_contract():
     # through any reordering of the constant itself.
     assert S.NODES_COLUMNS == ["uuid", "sample_id", "type"]
     assert list(S.make_stage0_fixture()["nodes"].columns) == S.NODES_COLUMNS
+
+
+def test_claim_and_vocab_contracts_are_declared():
+    for col in ("sample_id", "uuid", "internal_assay_id",
+                "internal_assay_title", "tier", "source_field", "raw_value"):
+        assert col in S.CLAIM_COLUMNS
+    for col in ("source_field", "raw_value", "internal_assay_id",
+                "internal_assay_title", "support", "purity", "provenance"):
+        assert col in S.VOCAB_COLUMNS
+
+
+def test_tier_and_provenance_constants_are_distinct():
+    tiers = [S.T_CORROBORATED, S.T_STRONG, S.T_WEAK, S.T_CONFLICT, S.T_NONE]
+    assert len(set(tiers)) == len(tiers)
+    prov = [S.P_LEARNED, S.P_PROPOSED, S.P_CURATOR]
+    assert len(set(prov)) == len(prov)
+
+
+def test_strong_and_weak_fields_are_disjoint_and_ordered_strong_first():
+    # Tier assignment reads CLAIM_FIELDS in order and the strong fields must be
+    # seen first, so a sample carrying both a strong and a weak field is graded
+    # on the strong one. Overlap would make a field both deciding and merely
+    # corroborating, which is not a state the tier logic can represent.
+    assert not set(S.STRONG_FIELDS) & set(S.WEAK_FIELDS)
+    assert S.CLAIM_FIELDS == S.STRONG_FIELDS + S.WEAK_FIELDS
+
+
+def test_protocol_is_a_weak_field_not_a_strong_one():
+    # Measured 2026-08-14, held out by sample against the 360,027 labelled
+    # edges: strong fields alone score 98.4% accuracy at 65.9% coverage;
+    # adding Protocol and DataType raises coverage to 92.3% and drops accuracy
+    # to 90.4%, under the 95% bar. Protocol corroborates, it does not decide.
+    assert "Protocol" in S.WEAK_FIELDS
+    assert "Protocol" not in S.STRONG_FIELDS
+    assert "Type" in S.STRONG_FIELDS
+
+
+def test_normalise_value_folds_case_and_whitespace():
+    # `Liver`, `liver` and `LIVER` occur as three values on the same field in
+    # production; these are curator-entered free text with no controlled
+    # vocabulary.
+    assert S.normalise_value("  CometChip ") == "cometchip"
+    assert S.normalise_value("Comet  Chip") == "comet chip"
+    assert S.normalise_value("") is None
+    assert S.normalise_value(None) is None
+    assert S.normalise_value(7) is None
+
+
+def test_fixture_samples_exercise_every_tier():
+    fx = S.make_fixture()
+    assert list(fx["samples"].columns) == S.SAMPLE_COLUMNS
+    by_uuid = {r.uuid: json.loads(r.json_metadata)
+               for r in fx["samples"].itertuples()}
+    assert by_uuid["D.IMG-1"]["Type"] == "CometChip"      # -> corroborated
+    assert by_uuid["D.IMG-1"]["Protocol"] == "comet.docx"
+    assert by_uuid["D.IMG-2"]["Type"] == "CometChip"      # -> strong
+    assert "Protocol" not in by_uuid["D.IMG-2"]
+    assert by_uuid["D.IMG-3"]["Protocol"] == "comet.docx"  # -> weak
+    assert "Type" not in by_uuid["D.IMG-3"]
+    assert by_uuid["TIS-1"]["Type"] == "CometChip"        # -> conflict
+    assert by_uuid["TIS-1"]["Instrument"] == "tissue scope"
+    assert "Type" not in by_uuid["DNA-1"]                 # -> none
+
+
+def test_fixture_edge_and_assay_shape_is_unchanged():
+    # Tasks 5 and 6 hand-trace counts off this fixture (n_both=2,
+    # n_child_only=1, propagation_rate=2/3). Adding sample rows must not move
+    # them, so the edge and assay frames are pinned here.
+    fx = S.make_fixture()
+    assert len(fx["edges"]) == 6
+    assert set(fx["assays"]["title"]) == {"Comet Chip", "Tissue Collection"}

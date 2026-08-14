@@ -108,6 +108,73 @@ RULE_COLUMNS = PRECEDENT_COLUMNS + [
     "APPROVE", "NOTES",
 ]
 
+# --- claims (stage B2) -------------------------------------------------------
+#
+# A sample's own metadata naming the assay it belongs to. Measured 2026-08-14,
+# learning the value->assay mapping on half the samples and scoring the held-out
+# half against the 360,027 curator-labelled edges (split BY SAMPLE, because a
+# sample fans out to many edges and an edge-level split scores memorised
+# answers):
+#
+#   strong fields alone                     65.9% coverage   98.4% accuracy
+#   strong then Protocol/DataType           92.3% coverage   90.4% accuracy
+#   Type and Protocol predict and agree     35.0% coverage   99.9% accuracy
+#
+# So the strong fields decide and the weak ones corroborate. Order matters:
+# tier assignment walks CLAIM_FIELDS and must see strong fields first.
+STRONG_FIELDS = ["Type", "Instrument", "Stimulation", "Software",
+                 "SlideStain", "Assay", "Channels", "Stains"]
+WEAK_FIELDS = ["Protocol", "DataType"]
+CLAIM_FIELDS = STRONG_FIELDS + WEAK_FIELDS
+
+T_CORROBORATED = "corroborated"
+T_STRONG = "strong"
+T_WEAK = "weak"
+T_CONFLICT = "conflict"
+T_NONE = "none"
+
+CLAIM_COLUMNS = [
+    "sample_id", "uuid", "internal_assay_id", "internal_assay_title",
+    "tier", "source_field", "raw_value",
+]
+
+# --- vocabulary alignment ----------------------------------------------------
+#
+# provenance records where a mapping came from, because the three are trusted
+# differently: `learned` is backed by curator-labelled edges and carries a
+# support count, `proposed` is a model's suggestion for a term with no
+# empirical anchor, and `curator` is a human decision that outranks both.
+P_LEARNED = "learned"
+P_PROPOSED = "proposed"
+P_CURATOR = "curator"
+
+VOCAB_COLUMNS = [
+    "source_field", "raw_value", "internal_assay_id", "internal_assay_title",
+    "support", "purity", "provenance",
+]
+
+# --- audit (mode 3) ----------------------------------------------------------
+AUDIT_COLUMNS = [
+    "sample_id", "uuid", "sample_type",
+    "registered_internal_assay_ids", "claimed_internal_assay_id",
+    "claimed_internal_assay_title", "tier", "source_field", "raw_value",
+    "verdict",
+]
+
+
+def normalise_value(v) -> str | None:
+    """Free text to a comparable key, or None when there is nothing to compare.
+
+    `Liver`, `liver` and `LIVER` appear as three values on the same field in
+    production. These are curator-entered fields with no controlled vocabulary,
+    so every comparison in this package goes through here.
+    """
+    if not isinstance(v, str):
+        return None
+    s = " ".join(v.split()).strip().lower()
+    return s or None
+
+
 # --- vocabulary --------------------------------------------------------------
 V_CLEAN = "CLEAN"
 V_MODE1_CHILD = "MODE_1_CHILD"
@@ -193,9 +260,24 @@ def make_fixture() -> dict[str, pd.DataFrame]:
         ],
         columns=ASSAY_COLUMNS,
     )
+    # One sample per claim tier, so every branch of claims.sample_claims has a
+    # case here. assay 1 is "Comet Chip" (internal 11), assay 2 is
+    # "Tissue Collection" (internal 12); tests build an explicit vocabulary
+    # rather than learning one, so these raw values map wherever a test says.
     samples = pd.DataFrame(
         [
-            (100, "D.IMG-1", '{"Protocol": "/sops/5", "Name": "img1"}', None, "10"),
+            # strong AND weak agree -> corroborated
+            (100, "D.IMG-1",
+             '{"Type": "CometChip", "Protocol": "comet.docx", "Name": "img1"}',
+             None, "10"),
+            # strong only -> strong
+            (101, "D.IMG-2", '{"Type": "CometChip", "Name": "img2"}', None, "10"),
+            # weak only -> weak
+            (102, "D.IMG-3", '{"Protocol": "comet.docx", "Name": "img3"}', None, "10"),
+            # two strong fields naming different assays -> conflict
+            (200, "TIS-1",
+             '{"Type": "CometChip", "Instrument": "tissue scope"}', None, "10"),
+            # nothing that names an assay -> none
             (300, "DNA-1", '{"Protocol": "/sops/9", "Name": "dna1"}', None, "10"),
         ],
         columns=SAMPLE_COLUMNS,
