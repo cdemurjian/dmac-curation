@@ -45,25 +45,98 @@ from pathlib import Path
 
 import pandas as pd
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from assay_hygiene import _schema as S  # noqa: E402
+
 EXTRACT = Path("assay-hygiene/extract")
 
-# Free-text fields that plausibly name an assay. Chosen by inspecting the
-# populated keys on the CometChip block; scored independently below so a field
-# that turns out to be noise is visible rather than averaged away.
-CANDIDATE_FIELDS = [
-    "Type", "Protocol", "DataType", "SlideStain", "Instrument",
-    "Assay", "Software", "Channels", "Stains", "Stimulation",
-]
-
+# The candidate fields, their strong/weak split and the cascade ORDER all come
+# from _schema now. They used to be a local CANDIDATE_FIELDS list holding the
+# same ten fields in a different order, with Protocol second; that ordering is
+# what made this script disagree with the figures it is cited for, because the
+# cascade below is decided by whichever field predicts FIRST. Reading the
+# constants means the script and the contract cannot drift again.
+#
+# Likewise the normaliser: `norm()` used to be defined here, byte-identical to
+# _schema.normalise_value. Two copies of the key function in a measurement and
+# the code the measurement justifies is one edit away from silently scoring a
+# different vocabulary than production uses.
 MIN_SUPPORT = 3  # a value seen fewer times than this in train predicts nothing
 
 
-def norm(v) -> str | None:
-    """Free text, lowercased and stripped. `Liver/liver/LIVER` is three values."""
-    if not isinstance(v, str):
-        return None
-    s = " ".join(v.split()).strip().lower()
-    return s or None
+def learn(field: str, rows, meta, in_train) -> dict[str, int]:
+    """value -> most common internal_assay_id, learned from TRAIN rows only.
+
+    Values seen fewer than MIN_SUPPORT times in train predict nothing: a value
+    that appeared once and happened to sit on one assay is memorisation, not a
+    mapping.
+    """
+    tally: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    for child_id, iaid in rows:
+        if not in_train(child_id):
+            continue
+        v = S.normalise_value((meta.get(child_id) or {}).get(field))
+        if v:
+            tally[v][iaid] += 1
+    return {v: c.most_common(1)[0][0]
+            for v, c in tally.items() if sum(c.values()) >= MIN_SUPPORT}
+
+
+def predict(fields, tallies, d) -> int | None:
+    """First field in `fields` that resolves wins. ORDER IS THE MEASUREMENT.
+
+    Put a weak field early and it decides rows a strong field would have decided
+    correctly, which lowers accuracy without moving coverage by a single edge --
+    the fields are the same ten either way.
+    """
+    for field in fields:
+        v = S.normalise_value(d.get(field))
+        if v:
+            p = tallies[field].get(v)
+            if p is not None:
+                return p
+    return None
+
+
+def score(fields, tallies, rows, meta, in_train, test_n) -> tuple[float, float, int]:
+    """(coverage, accuracy, n_covered) of a cascade, on HELD-OUT rows only."""
+    hit = miss = 0
+    for child_id, iaid in rows:
+        if in_train(child_id):
+            continue
+        p = predict(fields, tallies, meta.get(child_id) or {})
+        if p is None:
+            continue
+        if p == iaid:
+            hit += 1
+        else:
+            miss += 1
+    covered = hit + miss
+    return (covered / test_n if test_n else 0.0,
+            hit / covered if covered else 0.0,
+            covered)
+
+
+def score_agreement(a, b, tallies, rows, meta, in_train, test_n):
+    """(coverage, accuracy, n) over held-out rows where BOTH a and b predict and agree."""
+    hit = miss = 0
+    for child_id, iaid in rows:
+        if in_train(child_id):
+            continue
+        d = meta.get(child_id) or {}
+        va, vb = S.normalise_value(d.get(a)), S.normalise_value(d.get(b))
+        pa = tallies[a].get(va) if va else None
+        pb = tallies[b].get(vb) if vb else None
+        if pa is None or pb is None or pa != pb:
+            continue
+        if pa == iaid:
+            hit += 1
+        else:
+            miss += 1
+    covered = hit + miss
+    return (covered / test_n if test_n else 0.0,
+            hit / covered if covered else 0.0,
+            covered)
 
 
 def main() -> int:
@@ -95,107 +168,52 @@ def main() -> int:
     print(f"train edges {n_train:>10,}   test edges {len(rows) - n_train:>10,}")
     print()
 
-    results = []
-    for field in CANDIDATE_FIELDS:
-        # learn: value -> most common internal_assay_id, from TRAIN only
-        tally: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
-        for child_id, iaid in rows:
-            if not in_train(child_id):
-                continue
-            v = norm((meta.get(child_id) or {}).get(field))
-            if v:
-                tally[v][iaid] += 1
-
-        mapping: dict[str, int] = {}
-        purity_num = purity_den = 0
-        for v, c in tally.items():
-            total = sum(c.values())
-            if total < MIN_SUPPORT:
-                continue
-            best, best_n = c.most_common(1)[0]
-            mapping[v] = best
-            purity_num += best_n
-            purity_den += total
-
-        # predict on TEST
-        hit = miss = nopred = 0
-        for child_id, iaid in rows:
-            if in_train(child_id):
-                continue
-            v = norm((meta.get(child_id) or {}).get(field))
-            pred = mapping.get(v) if v else None
-            if pred is None:
-                nopred += 1
-            elif pred == iaid:
-                hit += 1
-            else:
-                miss += 1
-
-        covered = hit + miss
-        acc = hit / covered if covered else 0.0
-        cov = covered / (len(rows) - n_train) if rows else 0.0
-        purity = purity_num / purity_den if purity_den else 0.0
-        results.append((field, len(mapping), cov, acc, purity))
-
-    print(f"{'field':<14} {'terms':>6} {'coverage':>9} {'accuracy':>9} {'train purity':>13}")
-    print("-" * 56)
-    for field, terms, cov, acc, purity in sorted(results, key=lambda r: -r[2] * r[3]):
-        print(f"{field:<14} {terms:>6,} {cov:>8.1%} {acc:>8.1%} {purity:>12.1%}")
-
-    # --- combined: first field that predicts wins, in the order above --------
-    tallies = {}
-    for field in CANDIDATE_FIELDS:
-        t: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
-        for child_id, iaid in rows:
-            if in_train(child_id):
-                v = norm((meta.get(child_id) or {}).get(field))
-                if v:
-                    t[v][iaid] += 1
-        tallies[field] = {
-            v: c.most_common(1)[0][0]
-            for v, c in t.items() if sum(c.values()) >= MIN_SUPPORT
-        }
-
-    hit = miss = nopred = 0
-    agree_hit = agree_miss = disagree = 0
-    for child_id, iaid in rows:
-        if in_train(child_id):
-            continue
-        d = meta.get(child_id) or {}
-        preds = []
-        for field in CANDIDATE_FIELDS:
-            v = norm(d.get(field))
-            p = tallies[field].get(v) if v else None
-            if p is not None:
-                preds.append(p)
-        if not preds:
-            nopred += 1
-            continue
-        if len(set(preds)) == 1:
-            (p,) = set(preds)
-            if p == iaid:
-                agree_hit += 1
-            else:
-                agree_miss += 1
-        else:
-            disagree += 1
-        if preds[0] == iaid:
-            hit += 1
-        else:
-            miss += 1
-
     test_n = len(rows) - n_train
+
+    # learn every field's mapping once; the per-field table and all three tiers
+    # below read the same tallies, so no tier can be scored against a mapping
+    # the others did not see
+    tallies = {f: learn(f, rows, meta, in_train) for f in S.CLAIM_FIELDS}
+
+    results = []
+    for field in S.CLAIM_FIELDS:
+        cov, acc, covered = score([field], tallies, rows, meta, in_train, test_n)
+        kind = "strong" if field in S.STRONG_FIELDS else "weak"
+        results.append((field, kind, len(tallies[field]), cov, acc, covered))
+
+    print(f"{'field':<14} {'':<7} {'terms':>6} {'coverage':>9} {'accuracy':>9} {'n':>9}")
+    print("-" * 60)
+    for field, kind, terms, cov, acc, covered in sorted(results, key=lambda r: -r[3] * r[4]):
+        print(f"{field:<14} {kind:<7} {terms:>6,} {cov:>8.1%} {acc:>8.1%} {covered:>9,}")
+
+    # --- the tiered cascade --------------------------------------------------
+    #
+    # These three rows are the ones quoted in the design spec and in _schema's
+    # CLAIM_FIELDS comment, so they are computed here rather than assembled by
+    # hand from the per-field table above.
+    #
+    # Rows 1 and 2 differ ONLY in whether the two weak fields are allowed to
+    # decide. They see the same held-out edges and the same learned mappings, so
+    # the gap between them is the price of the extra coverage and nothing else.
+    strong_cov, strong_acc, strong_n = score(
+        S.STRONG_FIELDS, tallies, rows, meta, in_train, test_n)
+    all_cov, all_acc, all_n = score(
+        S.CLAIM_FIELDS, tallies, rows, meta, in_train, test_n)
+    agree_cov, agree_acc, agree_n = score_agreement(
+        "Type", "Protocol", tallies, rows, meta, in_train, test_n)
+
     print()
-    print("--- combined, first populated field wins --------------------------")
-    print(f"predicted   {hit + miss:>9,}  {(hit + miss) / test_n:>6.1%} of test")
-    print(f"  correct   {hit:>9,}  {hit / (hit + miss) if hit + miss else 0:>6.1%} accuracy")
-    print(f"no prediction {nopred:>7,}  {nopred / test_n:>6.1%}")
+    print("--- tiered cascade, held out by sample ------------------------------")
+    print(f"{'tier':<38} {'coverage':>9} {'accuracy':>9} {'n':>9}")
+    print("-" * 68)
+    print(f"{'strong fields only':<38} {strong_cov:>8.1%} {strong_acc:>8.1%} {strong_n:>9,}")
+    print(f"{'strong, then Protocol / DataType':<38} {all_cov:>8.1%} {all_acc:>8.1%} {all_n:>9,}")
+    print(f"{'Type and Protocol predict and agree':<38} {agree_cov:>8.1%} {agree_acc:>8.1%} {agree_n:>9,}")
     print()
-    print("--- when every populated field agrees ------------------------------")
-    tot_agree = agree_hit + agree_miss
-    print(f"unanimous   {tot_agree:>9,}  {tot_agree / test_n:>6.1%} of test")
-    print(f"  correct   {agree_hit:>9,}  {agree_hit / tot_agree if tot_agree else 0:>6.1%} accuracy")
-    print(f"fields disagree {disagree:>7,}  {disagree / test_n:>6.1%}  (-> the LLM slice)")
+    print(f"the weak fields buy {all_cov - strong_cov:+.1%} coverage "
+          f"for {all_acc - strong_acc:+.1%} accuracy")
+    print(f"uncovered by any field {test_n - all_n:>9,}  {1 - all_cov:>6.1%}"
+          "  (-> the LLM slice)")
     return 0
 
 

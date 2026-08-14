@@ -39,13 +39,24 @@ and an edge-level split scores memorised answers.
 
 | Signal | Coverage | Accuracy |
 |---|---|---|
-| strong fields: `Type`, `Instrument`, `Stimulation`, `Software`, `SlideStain`, `Assay` | 65.9% | **98.4%** |
+| strong fields: `Type`, `Instrument`, `Stimulation`, `Software`, `SlideStain`, `Assay`, `Channels`, `Stains` | 65.9% | **98.4%** |
 | strong, then `Protocol` / `DataType` | 92.3% | 90.4% |
 | `Type` and `Protocol` both predict and agree | 35.0% | **99.9%** |
+
+All eight strong fields are 100% accurate on held-out data except `Type`
+(97.6%) and `Software` (99.8%), but the last two are thin: `Channels` is
+supported by 66 held-out edges and `Stains` by 13, against 77,212 for `Type`,
+so their contribution is real but rests on very few observations and should not
+be leaned on alone. The headline row is 65.9% / 98.4% with or without them.
 
 Strong fields clear the 95% bar on their own. `Protocol` buys 26 points of
 coverage and costs the bar, which makes it a corroborating signal rather than a
 deciding one.
+
+These three rows are reproduced by `scripts/measure_metadata_accuracy.py`, which
+reads its field lists and its cascade order from
+`scripts/assay_hygiene/_schema.py` (`STRONG_FIELDS` / `WEAK_FIELDS` /
+`CLAIM_FIELDS`) so the measurement and the contract cannot diverge.
 
 **3. Metadata answers a different question than Mode 2 asks.**
 
