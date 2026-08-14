@@ -67,6 +67,27 @@ All variant parent fields are intended to become `DERIVED_FROM` edges, matching
 the server's `"parent" in key.lower()` behavior. This puts reagent relationships
 (`AntibodyParent`, 12,367 references) into the ancestry graph, which is intended.
 
+**Operator ruling (2026-08-14), confirmed against the measured consequence:
+`CompensationFCSParent` counts as parentage.** The 2026-08-13 ruling was made in
+the abstract. When the dry run was reviewed it turned out that only **7.3%** of
+what stage 0 would write is a plain `Parent` field:
+
+| Declaring field | Meaning | Edges | Share |
+|---|---|---|---|
+| `CompensationFCSParent` | compensation bead control | 66,529 | **73.5%** |
+| `AntibodyParent` | staining reagent | 11,934 | 13.2% |
+| `Parent` | biological parentage | 6,616 | **7.3%** |
+| `Treatment*Parent`, `BacterialParent` | dosing agent | 5,425 | 6.0% |
+
+So nearly three quarters of the write asserts that a flow-cytometry sample
+derives from its calibration file, e.g.
+`D.FLOW-220720SAS-12 -> D.FCS-230206SAS-47 ("...IL6 APC (Beads).fcs")`. That is
+a much larger share than the original ruling implied, and excluding
+`CompensationFCSParent` would have been a one-line change dropping stage 0 from
+90,534 edges to roughly 24,000. It was put back to the operator with the measured
+numbers and confirmed: compensation controls are parents. The write stands at
+90,534.
+
 ### Defect 2 (annotation): 426,695 `DERIVED_FROM` edges carry no assay
 
 `nextseek_api/batch_upload/neo4j_sync.py:934` writes an assay onto an edge only
