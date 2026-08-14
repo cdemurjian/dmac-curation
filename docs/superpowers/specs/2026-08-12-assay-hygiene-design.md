@@ -375,7 +375,7 @@ a pipeline-produced one:
 | `assay_id` | from `shared = child_assays & parent_assays` |
 | `internal_assay_id`, `internal_assay_title` | `assays_internal_assays` junction |
 
-### OPEN DECISION: protocol resolution is effectively dead on this data
+### Protocol resolution: the spec was wrong, and the house rule is elsewhere
 
 **Found 2026-08-13 by the whole-branch review, running the dry run against the live extract. This
 is a defect in this spec, not in the implementation, and it is unresolved.**
@@ -414,16 +414,61 @@ archived `plan.parquet` and pushing it through `stage0_apply.apply_manifest`, re
 unconditional `SET` to update in place. That path works and is tested, but it is outside the built
 pipeline. This is close to a one-way door.
 
-**The two options, both legitimate:**
+### RESOLVED by provenance: the house rule already exists, and it is not the URL regex
 
-- **(a) Accept 90,533 null protocols.** Stage 0 stays a strict mirror of the current server. The
-  edges are correct in every other respect and the assay annotation, which is the point of the
-  work, is unaffected. Record the reason so the nulls are not later read as data loss.
-- **(b) Amend this spec to permit title-based resolution** (`sops.title == Protocol`, plus the
-  `seek/sop/uid=<title>` form) and add it to `resolve_properties`, recovering ~85,100 edges. This
-  is a deliberate *divergence* from the current server, so it belongs here in the spec rather than
-  as a quiet code change, and it makes stage 0 edges match the graph's existing convention rather
-  than the current upload path's.
+**Investigated 2026-08-14 at the operator's direction, before choosing.** The question was how the
+561,389 existing edges actually got their `protocol_id`. Neither resolution rule in the current
+server explains it:
+
+- The **legacy** path (`seek/dbtable_sample.py::getConnectingRelationships`) joins
+  `sops.id = SUBSTRING_INDEX(REPLACE(JSON_EXTRACT(json_metadata,'$.Protocol'),'"',''),'/',-1)`.
+  On a title-form Protocol that is `sops.id = 'Behar_Flow'`, which MySQL coerces to 0 and matches
+  nothing.
+- The **modern** path's `_SOP_URL_RE` is `/sops/(\d+)`, which title-form values do not match.
+
+The real source is the **upload sheet's explicit `sop_id` column**, which
+`_build_derived_from_payloads` prefers over the regex (`provided_sop_by_uid`, `neo4j_sync.py:908`).
+The prior migration's payloads carry it, beside a title-form Protocol:
+
+```
+sop_id: 45   Protocol: P.FOR-200623-V1_Bacterial-inoculum-batch-preparation-protocol.docx
+```
+
+And that column was computed by `internal-assays-migration/phase4_sample_export.py::resolve_sop_id`,
+which handles exactly three formats against a `{sops.title: sops.id}` lookup:
+
+```
+1. URL with integer id   https://fairdata.mit.edu/sops/39   -> 39
+2. URL with UID          .../uid=P.WHI-200519-V1_...pdf/    -> title lookup
+3. Plain UID filename    P.FOR-200623-V1_...docx            -> title lookup
+```
+
+Applying that rule verbatim to production:
+
+```
+reproduces the stored protocol_id on 200,000 of 200,000 sampled existing edges   100.0%
+disagreements                                                                        0
+unresolved                                                                           0
+
+on the stage 0 population (90,534 edges):
+  fmt3 plain title     85,093   fmt2 uid= URL   10   fmt1 /sops/<id>    1
+  no Protocol value     5,248   unresolvable   182
+  would gain a VALID protocol_id                              85,104  (94.0%)
+  would resolve to a NONEXISTENT sops.id                           0
+```
+
+**This settles it.** The three-format rule is not a divergence from the house convention; it *is*
+the house convention, proven by exact reproduction on 200,000 edges with zero disagreements. The
+server's `_SOP_URL_RE` is only the fallback for when no sheet supplies `sop_id`, and a backfill has
+no sheet — so reconstructing what the sheet would have supplied is precisely the faithful act. The
+earlier framing of this as "a deliberate divergence" was wrong, and cautious in the wrong direction:
+adopting the rule makes stage 0 edges indistinguishable from pipeline-produced ones, while declining
+it makes 90,533 of 90,534 anomalous.
+
+**Decision: adopt the three-format rule**, ported from `resolve_sop_id` with the same
+`{sops.title: sops.id}` lookup, and validated by a test asserting it reproduces `edge_protocol_id`
+on a sample of already-labelled edges. The remaining 5,430 edges (5,248 with no `Protocol` value,
+182 unresolvable) keep a null `protocol_id`, which is correct rather than a gap.
 
 Whichever is chosen, stage 0's report must state protocol coverage from the run rather than assume
 it, which it now does.
