@@ -44,8 +44,9 @@ def main() -> int:
 
     # --- assay_id -> internal identity, with the documented fallback ----------
     # 17 assays have no junction row and resolve to no internal_assay_id. They
-    # fall back to (assay_id, title), the same rule neo4j_sync.py:1011-1021
-    # uses, so the key is never null and nothing is dropped.
+    # fall back to (assay_id, title), the same rule neo4j_sync.py:1418-1431
+    # (v4-stable-wt; 944-957 in NExtSEEK/dev-v3-merge) uses, so the key is
+    # never null and nothing is dropped.
     no_junction = assays.internal_assay_id.isna().sum()
     ainfo: dict[int, tuple[int, int, str]] = {}
     for a, p, t, ia, it in zip(assays.assay_id, assays.project_id, assays.title,

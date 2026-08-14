@@ -43,7 +43,7 @@ ASSAY_COLUMNS = [
     "investigation_id", "project_id", "project_title",
     # resolved through dmac.assays_internal_assays; NULL for the 17 records
     # with no junction row, which fall back to (assay_id, title) per
-    # neo4j_sync.py:1011-1021
+    # neo4j_sync.py:1418-1431 (v4-stable-wt; 944-957 in NExtSEEK/dev-v3-merge)
     "internal_assay_id", "internal_assay_title",
 ]
 SAMPLE_COLUMNS = ["sample_id", "uuid", "json_metadata", "created_at", "project_ids"]

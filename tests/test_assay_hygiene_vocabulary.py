@@ -175,9 +175,18 @@ def _vocab(rows):
 
 
 def _assays():
+    """Two registered assays plus one junction-less one, as production has.
+
+    Row 3 mirrors the 17 production assays with no row in
+    `dmac.assays_internal_assays`: a seek `assay_id` and a `title`, but NULL in
+    both internal columns. It is what makes the seek-fallback guard below
+    non-vacuous -- without such a row in the frame, a merge that wrongly keyed
+    titles off `assay_id` would have nothing to wrongly find.
+    """
     return pd.DataFrame(
         [(1, "Comet Chip", 7, 3, 2, 10, "MIT_SRP", 11, "Comet Chip"),
-         (2, "Tissue Collection", 8, 3, 2, 10, "MIT_SRP", 12, "Tissue Collection")],
+         (2, "Tissue Collection", 8, 3, 2, 10, "MIT_SRP", 12, "Tissue Collection"),
+         (466, "Library Prep", 9, 3, 2, 10, "MIT_SRP", None, None)],
         columns=S.ASSAY_COLUMNS,
     )
 
@@ -291,3 +300,68 @@ def test_vocabulary_round_trips_through_csv(tmp_path):
     assert back.iloc[0].raw_value == "cometchip"
     assert back.iloc[1].raw_value == "nan"
     assert isinstance(back.iloc[1].raw_value, str)
+
+
+def test_a_curator_spelling_variant_overrides_the_learned_row():
+    # The curator writes the term the way it appears in the metadata; the
+    # learned row carries it normalised. If the merge keys on the raw string
+    # these are two terms, so BOTH rows survive and every consumer -- which
+    # looks up the normalised metadata value -- finds the learned row. The
+    # curator's override is not merely lost, it is unobservable: the artifact
+    # shows their row sitting right there in the file, apparently in effect.
+    learned = _vocab([("Type", "cometchip", 11, None, 900, 850, 0.99, S.P_LEARNED)])
+    curator = _vocab([("Type", "CometChip", 12, None, 0, 0, 0.0, S.P_CURATOR)])
+    out = V.merge_vocabulary(learned, _vocab([]), curator, _assays())
+    assert len(out) == 1                       # one term, not two
+    assert out.iloc[0].raw_value == "cometchip"
+    assert out.iloc[0].internal_assay_id == 12
+    assert out.iloc[0].provenance == S.P_CURATOR
+
+
+def test_a_junction_less_id_is_never_titled_from_the_seek_assays_frame():
+    # THIS TEST IS A GUARD, and the edit it guards against is an attractive one:
+    # id 466 is right there in the assays frame with the title "Library Prep",
+    # and titling off `assay_id` fills 14 otherwise-blank rows with correct
+    # strings. It is still wrong. `edge_internal_assay_id` carries a SEEK
+    # assays.id for the 17 junction-less assays and a dmac internal_assays.id
+    # for every other row, and the two spaces overlap: measured 2026-08-14,
+    # 124 of the 458 seek assay_ids equal a genuine internal_assay_id, and all
+    # 124 name a DIFFERENT assay -- seek 13 is `Short Read Sequencing` where
+    # internal 13 is `Cell Sorting`, seek 24 is `Single Cell Clustering
+    # Analysis` where internal 24 is `DNA Extraction`. Today's junction-less
+    # ids happen to sit at 466-482, above the 1-188 internal range, and that
+    # accident is the only reason such a fallback is not already mislabelling
+    # rows. One new junction-less assay with a low id ends the accident.
+    #
+    # A blank title is also the only signal that the junction row is missing,
+    # which is a hygiene defect of exactly the kind this package surfaces.
+    learned = _vocab([("Type", "libraryprep", 466, None, 4, 4, 1.0, S.P_LEARNED)])
+    out = V.merge_vocabulary(learned, _vocab([]), _vocab([]), _assays())
+    assert out.iloc[0].internal_assay_id == 466
+    assert pd.isna(out.iloc[0].internal_assay_title), (
+        "a junction-less internal_assay_id was titled from assays.assay_id; "
+        "see this test's comment for why that is wrong even though the title "
+        "it produces looks right"
+    )
+
+
+def test_an_authoritative_title_overrides_a_hand_typed_one():
+    # The rebuild half of the rule: where the assays frame has a title, it is
+    # the truth, so a stale or wrong hand-edit cannot travel onward.
+    curator = _vocab([("Type", "cometchip", 11, "Stale Renamed Assay",
+                       0, 0, 0.0, S.P_CURATOR)])
+    out = V.merge_vocabulary(_vocab([]), _vocab([]), curator, _assays())
+    assert out.iloc[0].internal_assay_title == "Comet Chip"
+
+
+def test_a_hand_typed_title_survives_where_no_authoritative_title_exists():
+    # The other half, and the reason the rebuild is conditional. vocabulary.csv
+    # is the durable artifact this project produces and it exists to be
+    # hand-corrected. For a junction-less id the assays frame has nothing to
+    # rebuild from, so an unconditional rebuild would discard the curator's
+    # title on every run and leave those 14 rows permanently blank -- the one
+    # gap a curator can actually close, held open by the tool.
+    curator = _vocab([("Type", "libraryprep", 466, "Library Prep (per PI)",
+                       0, 0, 0.0, S.P_CURATOR)])
+    out = V.merge_vocabulary(_vocab([]), _vocab([]), curator, _assays())
+    assert out.iloc[0].internal_assay_title == "Library Prep (per PI)"

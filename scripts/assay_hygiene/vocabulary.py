@@ -191,30 +191,47 @@ def merge_vocabulary(
     `proposed` and `curator` accept None, so this works before Task 4 has ever
     run and produced either file.
 
-    Display titles are filled from the assays frame rather than trusted from
-    the input, so a stale title in a hand-edited file cannot travel onward. The
-    evidence columns (`support`, `n_samples`, `purity`) travel untouched from
-    whichever row wins: a merge is a choice between rows, never a recount.
+    `raw_value` is normalised before the dedup key is taken. Without that, a
+    curator row spelled `CometChip` and a learned row spelled `cometchip` are
+    two different terms: both survive the merge, and every consumer -- which
+    looks up the NORMALISED metadata value -- finds the learned row and never
+    sees the curator's override. The failure is total and silent, so the
+    normalisation belongs here, on the key itself, and not only in the
+    consumers that happen to remember to normalise.
 
-    A BLANK title is a real finding, not a lookup bug, and is left blank on
-    purpose. Measured 2026-08-14 on the extract, 14 of 736 rows come back
-    untitled, all pointing at one of 6 ids (466, 469, 470, 471, 472, 481) that
-    are absent from `assays.internal_assay_id` because those assays have no
-    row in `dmac.assays_internal_assays`. neo4j_sync.py:1011-1021 falls back to
-    writing the seek `(assay_id, title)` pair into the edge's internal-assay
-    fields for exactly those 17 junction-less assays, so `edge_internal_assay_id`
-    -- and therefore the learned `internal_assay_id` -- carries a seek assays.id
-    on those rows, in a different id space from every other row.
+    Display titles are rebuilt from the assays frame WHERE THAT FRAME HAS ONE,
+    so a stale title in a hand-edited file cannot travel onward. Where it has
+    none, the row keeps whatever title it already carried. Both halves matter:
+    rebuilding is right when there is an authoritative source to rebuild from,
+    and wrong when there is not, because vocabulary.csv exists to be
+    hand-corrected and an unconditional rebuild silently discards the only
+    title those rows will ever have. The evidence columns (`support`,
+    `n_samples`, `purity`) travel untouched from whichever row wins: a merge is
+    a choice between rows, never a recount.
+
+    A BLANK title is therefore a real finding, not a lookup bug. Measured
+    2026-08-14 on the extract, 14 of 736 rows come back untitled, all pointing
+    at one of 5 ids (466, 469, 470, 471, 472) that are absent from
+    `assays.internal_assay_id` because those assays have no row in
+    `dmac.assays_internal_assays`. neo4j_sync.py:1418-1431 (v4-stable-wt;
+    944-957 in NExtSEEK/dev-v3-merge) falls back to writing the seek
+    `(assay_id, title)` pair into the edge's internal-assay fields for exactly
+    those 17 junction-less assays, so `edge_internal_assay_id` -- and therefore
+    the learned `internal_assay_id` -- carries a seek assays.id on those rows,
+    in a different id space from every other row.
 
     Titling them off `assays.assay_id` would fill the blanks with the right
     strings and be the wrong call twice over. It would hide the missing junction
     row, which is a hygiene defect of precisely the kind this package exists to
-    surface; and it would bake an id-space mix into the merge that is only
-    accidentally safe -- the junction-less ids happen to be 466-482 while the
-    genuine internal ids run 1-188, but seek assay_ids start at 8, so one new
-    junction-less assay with a low id makes the two spaces overlap and the
-    lookup silently returns another assay's title. The fix belongs upstream, in
-    the junction table.
+    surface; and it would key a lookup on a column that collides -- 124 of the
+    458 seek assay_ids equal a genuine internal_assay_id, and all 124 name a
+    DIFFERENT assay (seek 13 `Short Read Sequencing` against internal 13 `Cell
+    Sorting`, seek 24 `Single Cell Clustering Analysis` against internal 24 `DNA
+    Extraction`). Today's junction-less block happens to sit at 466-482, above
+    the 1-188 internal range, and that accident is the only thing keeping such a
+    fallback from returning another assay's title. The fix belongs upstream, in
+    the junction table. A test guards this; see
+    test_a_junction_less_id_is_never_titled_from_the_seek_assays_frame.
 
     The sort is explicitly STABLE, which is what makes "the last row for a key
     wins" a real rule rather than an accident. Precedence separates the three
@@ -237,6 +254,9 @@ def merge_vocabulary(
     if not frames:
         return pd.DataFrame(columns=S.VOCAB_COLUMNS)
     allrows = pd.concat(frames, ignore_index=True)
+    # normalise the key BEFORE deduping, so a curator spelling and a learned
+    # spelling of one term are one term. See the docstring.
+    allrows["raw_value"] = [S.normalise_value(v) for v in allrows.raw_value]
     # an unrecognised provenance ranks below all three known sources rather
     # than raising: a junk value in a hand-edited file must not be able to
     # outrank a curator, and must not stop the run either.
@@ -244,9 +264,12 @@ def merge_vocabulary(
     allrows = allrows.sort_values("_rank", kind="stable").drop_duplicates(
         subset=["source_field", "raw_value"], keep="last"
     )
+    # rebuild from the assays frame where it HAS a title; otherwise keep the
+    # one the row carries, which for a junction-less id is the only title it
+    # will ever have.
     allrows["internal_assay_title"] = [
-        titles.get(int(i)) if pd.notna(i) else None
-        for i in allrows.internal_assay_id
+        titles.get(int(i), t) if pd.notna(i) else t
+        for i, t in zip(allrows.internal_assay_id, allrows.internal_assay_title)
     ]
     return allrows.drop(columns="_rank").reset_index(drop=True)[S.VOCAB_COLUMNS]
 
