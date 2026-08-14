@@ -1520,7 +1520,10 @@ recon = stage0.reconcile_childof(f["childof"], f["parents"])
 manifest = stage0_apply.apply_edges(None, "neo4j", resolved)     # dry run
 
 out = pathlib.Path("assay-hygiene/stage0"); out.mkdir(parents=True, exist_ok=True)
-(out / "report.md").write_text(stage0.build_report(resolved, residues, recon))
+# `samples` is REQUIRED here, not optional. Without it build_report cannot tell a
+# json_metadata parse failure from a genuinely absent Protocol key, and degrades to
+# a pooled figure. The report is the operator's gate, so the distinction has to reach it.
+(out / "report.md").write_text(stage0.build_report(resolved, residues, recon, f["samples"]))
 recon.to_csv(out / "reconciliation.csv", index=False)
 resolved.to_parquet(out / "plan.parquet", compression="zstd", index=False)
 with open(out / "manifest.jsonl", "w") as fh:
@@ -1538,15 +1541,28 @@ Open `assay-hygiene/stage0/report.md` and confirm, against the spec's measured v
 edges to create                  90,534
 labelled                         82,663   (91.3%)
 dark                              7,871
-prod_regex_would_reject           8,131   (all AB-*)
-not_a_uid                         2,392
+prod_regex_would_reject           8,127   (all AB-*)
+not_a_uid                         2,119
+duplicate_reference                   7
 parent_not_a_node                     6
 self_loop                             1
 min-internal_assay_id tiebreak       28
 top hop  D.FLOW -> D.FCS         66,529   (100% labelled)
+AB-parent edges                   8,120   (of which 4,020 labelled)
 ```
 
 A material deviation means the extract or the planner is wrong. Stop and diagnose rather than proceeding.
+
+**Corrected 2026-08-13.** Two of these were first written from a probe that counted RAW parent
+tokens, while the extractor emits the token list `collect_parent_tokens` produces, which
+deduplicates across keys. `prod_regex_would_reject` was 8,131 and `not_a_uid` was 2,392 against
+795,687 raw tokens; the deduplicated figures are the ones above. Left uncorrected, this gate fired
+on a correct run.
+
+The exclusion ledger must also balance exactly:
+`len(plan) + every drop reason == len(parents)`, i.e. `90,534 + 705,153 == 795,687`.
+`prod_regex_would_reject` is NOT part of that sum: it is a report-only counter that overlaps
+whichever bucket the reference lands in.
 
 - [ ] **Step 3: Replay-test the Neo4j backup**
 
@@ -1563,6 +1579,38 @@ Report: the headline counts, the regex override and its 8,131 antibody reference
 ### Task 8: The production write, staged
 
 Runs only after Task 7's approval.
+
+- [ ] **Step 0: Re-extract `existing` and reconcile, immediately before writing**
+
+The plan was computed against an extract taken earlier, on a live system that accepts uploads. If
+`batch_upload` creates a `DERIVED_FROM` for a pair stage 0 has already planned, inside that window,
+then the `MERGE` **matches instead of creating**, the unconditional `SET` overwrites all seven of
+that edge's properties with no record of the previous values, and a later rollback deletes an edge
+stage 0 never created. Rollback restores nothing in that case. See `stage0_apply.py`'s rollback
+caveat.
+
+Re-run the `edges` Cypher only, and reconcile:
+
+```bash
+cat > /tmp/recheck.py <<'PY'
+import sys
+sys.path.insert(0, "/tmp/scripts")
+from django.conf import settings
+from neo4j import GraphDatabase
+from assay_hygiene import extract
+nd = settings.NEO4J_DATABASE
+drv = GraphDatabase.driver(nd["URI"], auth=nd["AUTH"])
+recs, _, _ = drv.execute_query(extract.EDGES_CYPHER, {}, database_=nd.get("NAME") or "neo4j")
+print(f"DERIVED_FROM now: {len(recs):,}")
+drv.close()
+PY
+ssh fairdata 'docker exec -i nextseek uv run manage.py shell' < /tmp/recheck.py
+```
+
+Expected: **704,059**, unchanged from the extract. If it has moved, do not write. Re-extract
+`edges.parquet`, re-run the Task 7 dry run, and drop any planned pair that now appears in
+`existing` from the manifest — do not merge over it. Alternatively quiesce `batch_upload` for the
+write window.
 
 - [ ] **Step 1: Write one hop first**
 

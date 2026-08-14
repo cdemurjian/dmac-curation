@@ -271,9 +271,9 @@ Diffed against the graph:
    current metadata declares, dominated by `A.IMG -> D.IMG`, an analysis-to-data
    hop.
 2. **It is more conservative.** 125 gap `CHILD_OF` edges are no longer declared
-   by the child's metadata, and across the whole `CHILD_OF` set 3,829 edges are
-   undeclared plus roughly 5,000 more whose children now declare no parent at
-   all. Promotion would resurrect parent references a curator has since changed.
+   by the child's metadata, and across the whole `CHILD_OF` set 881 edges are
+   undeclared, over 291 distinct children of which 240 declare no parent at all.
+   Promotion would resurrect parent references a curator has since changed.
    A worked example: `DNA-260224SES-7` now declares `Parent: TIS-260107SES-1`,
    while `CHILD_OF` still points at six DNA siblings.
 3. **It is idempotent against future ingests.** Deriving from metadata makes
@@ -332,7 +332,13 @@ Three consequences, all binding:
 edges, **89,834 (99.9%)** are still named by the child's current metadata by UID.
 That agreement is what makes stage 0 safe to run behind a light gate.
 
-The undeclared `CHILD_OF` edges (125 within the gap, 3,829 across the whole
+**Corrected 2026-08-13, measured on the live extract.** The figures below were first computed with
+production's broken `UID_RE`, which discards the `AB` references that in fact declare many of these
+edges. Filtering the declared set through `UID_RE_PROD` reproduces the old 8,842; with the corrected
+regex the real count is **881**, over 291 distinct children, 240 of which declare no parent at all.
+A reader working from the superseded figure would read a correct reconciliation as a tenfold failure.
+
+The undeclared `CHILD_OF` edges (125 within the gap, 881 across the whole
 `CHILD_OF` set, plus roughly 5,000 from children declaring no parent) go to
 `stage0/reconciliation.csv` as a curation report. Nothing acts on them.
 
@@ -369,10 +375,58 @@ a pipeline-produced one:
 | `assay_id` | from `shared = child_assays & parent_assays` |
 | `internal_assay_id`, `internal_assay_title` | `assays_internal_assays` junction |
 
-Protocol coverage is complete on the population measured: all 17,538 children in
-the `CHILD_OF` gap carry a `Protocol` key. The `AB`-parent children added by the
-regex fix were not separately measured, so stage 0's report must state protocol
-coverage rather than assume it.
+### OPEN DECISION: protocol resolution is effectively dead on this data
+
+**Found 2026-08-13 by the whole-branch review, running the dry run against the live extract. This
+is a defect in this spec, not in the implementation, and it is unresolved.**
+
+An earlier draft of this section said "Protocol coverage is complete on the population measured:
+all 17,538 children carry a `Protocol` key." Carrying the *key* is not carrying a *resolvable id*,
+and conflating the two hid the following:
+
+```
+existing DERIVED_FROM edges carrying a protocol_id      561,389 of 704,059  (79.7%)
+of a 200,000 sample, resolved by sops.title == Protocol 198,209            (99.1%)
+of the same, resolved by the /sops/<id> URL this spec specifies   1,779     ( 0.9%)
+
+stage 0 children whose Protocol is a /sops/<id> URL           1
+stage 0 children whose Protocol exactly matches a sops.title  14,251
+stage 0 children with no Protocol value                        3,233
+stage 0 children with a Protocol that resolves neither way       133
+
+sops.title uniqueness                                        553 / 553
+```
+
+So the rule this spec mandates would set `protocol_id` on **1 edge out of 90,534**, while 79.7% of
+the graph's existing edges carry one, resolvable for 94% of the planned population by a rule the
+database demonstrably uses. Production `Protocol` values are overwhelmingly SOP titles
+(`P.FOR-200623-V1_BL2-Monocytes-Isolation-Protocol-v1.docx`), not `/sops/<id>` URLs.
+
+The implementation is faithful: `_build_derived_from_payloads` really does use `_SOP_URL_RE`. But
+that function is normally fed an upload sheet carrying `sop_id` explicitly, and the URL regex is
+only its fallback. A backfill has no sheet, so the fallback is all that remains, and it is nearly
+always absent.
+
+**Why this must be decided before the write, not after.** Stage 0 is idempotent by design: once
+these pairs exist, `plan_edges` drops them under `already_has_derived_from`, so re-running with a
+corrected rule creates and updates nothing. Recovery would mean hand-building a payload from the
+archived `plan.parquet` and pushing it through `stage0_apply.apply_manifest`, relying on `MERGE`'s
+unconditional `SET` to update in place. That path works and is tested, but it is outside the built
+pipeline. This is close to a one-way door.
+
+**The two options, both legitimate:**
+
+- **(a) Accept 90,533 null protocols.** Stage 0 stays a strict mirror of the current server. The
+  edges are correct in every other respect and the assay annotation, which is the point of the
+  work, is unaffected. Record the reason so the nulls are not later read as data loss.
+- **(b) Amend this spec to permit title-based resolution** (`sops.title == Protocol`, plus the
+  `seek/sop/uid=<title>` form) and add it to `resolve_properties`, recovering ~85,100 edges. This
+  is a deliberate *divergence* from the current server, so it belongs here in the spec rather than
+  as a quiet code change, and it makes stage 0 edges match the graph's existing convention rather
+  than the current upload path's.
+
+Whichever is chosen, stage 0's report must state protocol coverage from the run rather than assume
+it, which it now does.
 
 Two server behaviours stage 0 must mirror rather than improve on:
 
@@ -401,8 +455,7 @@ Each of these is a reported count in `report.md`, never a silent drop:
 | Tokens valid only with the regex fix | 8,131 | included, and reported as a defect |
 | Declared parents with no Sample node | 6 | reported |
 | Self-loops | 1 | excluded, reported |
-| `CHILD_OF` not declared by metadata | 3,829 | `reconciliation.csv` |
-| `CHILD_OF` from children declaring no parent | ~5,000 | `reconciliation.csv` |
+| `CHILD_OF` not declared by metadata | 881 | `reconciliation.csv` |
 | Labelled edges resting on the min-id tiebreak | 28 | listed in `report.md` |
 | Edges created dark | 7,871 | flow into stages A-F |
 
