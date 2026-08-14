@@ -148,9 +148,18 @@ P_LEARNED = "learned"
 P_PROPOSED = "proposed"
 P_CURATOR = "curator"
 
+# `n_samples` sits immediately after `support` because it is the check on it.
+# `support` counts EDGES and one sample fans out to many, so a term can clear
+# min_support off a single curator's single row: measured 2026-08-14 on the real
+# extract, 83 of the 736 learned terms rest on fewer than 3 distinct samples and
+# 50 rest on exactly ONE -- `Software: matlab` reads as support 132 from one
+# sample, `Type: github` as support 73 from one. Edge-weighted support is
+# deliberate and stays, because every figure this design rests on was measured
+# against it; this column exists so that weakness is visible in the artifact
+# rather than hidden behind a reassuring support count.
 VOCAB_COLUMNS = [
     "source_field", "raw_value", "internal_assay_id", "internal_assay_title",
-    "support", "purity", "provenance",
+    "support", "n_samples", "purity", "provenance",
 ]
 
 # --- audit (mode 3) ----------------------------------------------------------

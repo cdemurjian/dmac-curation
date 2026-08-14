@@ -12,12 +12,21 @@ from assay_hygiene import vocabulary as V
 
 
 def _edges(rows):
-    """(child_id, edge_internal_assay_id) pairs as an EDGE_COLUMNS frame."""
-    return pd.DataFrame(
-        [(c, 900, f"C-{c}", "P-900", "D.IMG", "TIS", a, None, None)
-         for c, a in rows],
-        columns=S.EDGE_COLUMNS,
-    )
+    """(child_id, edge_internal_assay_id[, parent_id]) as an EDGE_COLUMNS frame.
+
+    `parent_id` defaults to 900 and is worth passing explicitly whenever a
+    sample needs SEVERAL edges. With one edge per sample, a by-sample split and
+    an edge-level split are indistinguishable, so the module's headline claim --
+    that the hold-out is by sample, because a child fans out to as many as 146
+    parents -- cannot be observed at all.
+    """
+    out = []
+    for row in rows:
+        child_id, assay_id = row[0], row[1]
+        parent_id = row[2] if len(row) > 2 else 900
+        out.append((child_id, parent_id, f"C-{child_id}", f"P-{parent_id}",
+                    "D.IMG", "TIS", assay_id, None, None))
+    return pd.DataFrame(out, columns=S.EDGE_COLUMNS)
 
 
 def _meta(rows):
@@ -72,11 +81,42 @@ def test_learn_takes_the_majority_and_records_impurity():
     assert row.purity == pytest.approx(0.75)
 
 
+def test_n_samples_separates_fan_out_from_independent_support():
+    # `support` counts EDGES, so a term clears min_support off a single sample
+    # that happens to have many parents. On the real extract 50 of the 736
+    # learned terms are exactly that -- `Software: matlab` reads as support 132
+    # from one sample. The two terms below are indistinguishable by support,
+    # purity and provenance alike; n_samples is the only column separating one
+    # curator's row from three independent ones.
+    edges = _edges([(1, 11, 900), (1, 11, 901), (1, 11, 902),
+                    (2, 11, 900), (3, 11, 900), (4, 11, 900)])
+    meta = _meta([(1, {"Type": "one sample, three parents"})]
+                 + [(i, {"Type": "three separate samples"}) for i in (2, 3, 4)])
+    vocab = V.learn_vocabulary(edges, meta, min_support=3)
+    fan = vocab[vocab.raw_value == "one sample, three parents"].iloc[0]
+    indep = vocab[vocab.raw_value == "three separate samples"].iloc[0]
+    assert fan.support == 3 and indep.support == 3       # identical by support
+    assert fan.purity == 1.0 and indep.purity == 1.0     # and by purity
+    assert fan.n_samples == 1                            # but one sample backs it
+    assert indep.n_samples == 3                          # against three
+
+
 def test_learn_ignores_dark_edges_because_they_are_not_ground_truth():
     # A dark edge is the thing being fixed. Learning from it would launder the
     # defect into the vocabulary as if a curator had asserted it.
-    edges = _edges([(1, None), (2, None), (3, None)])
-    meta = _meta([(i, {"Type": "cometchip"}) for i in (1, 2, 3)])
+    #
+    # Sample 4 is labelled and carries the SAME value as the three dark ones,
+    # and it is here for two reasons. It makes the assertion below sharp: only
+    # one labelled edge backs "cometchip", so a run that counted the dark three
+    # would reach support 4, clear min_support and return a row. And an all-dark
+    # column infers as object dtype holding None, whereas production's
+    # edges.parquet is float64 holding NaN (434,566 of 794,593 rows); mixing a
+    # labelled row in reproduces the production dtype, so a guard narrowed to
+    # `iaid is None` fails here instead of passing here and raising on the real
+    # extract.
+    edges = _edges([(1, None), (2, None), (3, None), (4, 11)])
+    meta = _meta([(i, {"Type": "cometchip"}) for i in (1, 2, 3, 4)])
+    assert edges.edge_internal_assay_id.dtype == "float64"
     assert V.learn_vocabulary(edges, meta, min_support=3).empty
 
 
@@ -103,8 +143,17 @@ def test_score_holds_out_by_sample_and_reports_per_field():
     #   13     TEST side, no metadata at all -> it still counts against
     #          coverage, whose denominator is labelled EDGES and not
     #          edges-that-have-the-field
+    #   9      additionally FANS OUT to parents 901 and 903. Every other sample
+    #          here has one edge, and with one edge per sample a by-sample split
+    #          and an edge-level split are the same function, so the property
+    #          this test is named for is unobservable. Under a split on
+    #          (child_id + parent_id), 9's two extra edges land on the train
+    #          side while 9 itself is test-side, which is precisely the leak the
+    #          by-sample split exists to prevent: Instrument would be learned
+    #          off a sample the scorer then grades.
     edges = _edges([(i, 12 if i == 2 else 11)
-                    for i in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13)])
+                    for i in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13)]
+                   + [(9, 11, 901), (9, 11, 903)])
     meta = _meta(
         [(i, {"Type": "cometchip"}) for i in range(1, 9)]
         + [(10, {"Type": "seen once in train"})]
@@ -114,7 +163,7 @@ def test_score_holds_out_by_sample_and_reports_per_field():
     scored = V.score_vocabulary(edges, meta, min_support=2)
     typ = scored[scored.source_field == "Type"].iloc[0]
     assert typ.terms == 1
-    assert typ.coverage == pytest.approx(6 / 7)
+    assert typ.coverage == pytest.approx(8 / 9)
     assert typ.accuracy == 1.0       # sample 2's miss is on the train side
     inst = scored[scored.source_field == "Instrument"].iloc[0]
     assert inst.terms == 0           # a test-side-only value is never learned

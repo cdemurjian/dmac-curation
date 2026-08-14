@@ -260,8 +260,19 @@ def test_claim_and_vocab_contracts_are_declared():
                 "internal_assay_title", "tier", "source_field", "raw_value"):
         assert col in S.CLAIM_COLUMNS
     for col in ("source_field", "raw_value", "internal_assay_id",
-                "internal_assay_title", "support", "purity", "provenance"):
+                "internal_assay_title", "support", "n_samples", "purity",
+                "provenance"):
         assert col in S.VOCAB_COLUMNS
+
+    # Membership alone cannot see position, and position is part of this
+    # contract: `n_samples` qualifies `support` and is only read as its
+    # qualifier if it sits next to it. Pinned against a literal, like
+    # NODES_COLUMNS above, so that reordering the constant cannot satisfy its
+    # own test.
+    assert S.VOCAB_COLUMNS == [
+        "source_field", "raw_value", "internal_assay_id", "internal_assay_title",
+        "support", "n_samples", "purity", "provenance",
+    ]
 
 
 def test_tier_and_provenance_constants_are_distinct():

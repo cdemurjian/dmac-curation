@@ -47,11 +47,19 @@ def parse_metadata(samples: pd.DataFrame) -> dict[int, dict]:
     return out
 
 
-def _tally(edges: pd.DataFrame, meta: dict[int, dict], keep) -> dict:
-    """(field, normalised value) -> Counter of the assay ids curators assigned."""
+def _tally(edges: pd.DataFrame, meta: dict[int, dict], keep) -> tuple[dict, dict]:
+    """Two views of one walk, both keyed by (field, normalised value).
+
+    The Counter is EDGE-weighted -- how many labelled edges named each assay --
+    and is what `support`, `purity` and every measured figure in this design are
+    defined against. The set of child sample ids is that same evidence counted
+    the other way, and it is the only thing separating a term backed by many
+    curators from one backed by a single heavily fanned-out sample.
+    """
     tally: dict[tuple[str, str], collections.Counter] = collections.defaultdict(
         collections.Counter
     )
+    samples: dict[tuple[str, str], set[int]] = collections.defaultdict(set)
     for child_id, iaid in zip(edges.child_id, edges.edge_internal_assay_id):
         if pd.isna(iaid):
             continue                      # dark: not ground truth, see module docstring
@@ -65,7 +73,8 @@ def _tally(edges: pd.DataFrame, meta: dict[int, dict], keep) -> dict:
             value = S.normalise_value(d.get(field))
             if value:
                 tally[(field, value)][int(iaid)] += 1
-    return tally
+                samples[(field, value)].add(child_id)
+    return tally, samples
 
 
 def learn_vocabulary(
@@ -75,13 +84,23 @@ def learn_vocabulary(
 ) -> pd.DataFrame:
     """Derive the (field, value) -> internal assay mapping from labelled edges.
 
-    `support` is how many labelled edges back the mapping and `purity` is the
+    `support` is how many labelled EDGES back the mapping and `purity` is the
     winning assay's share of them. Both are carried so a reader can tell a term
     seen 40,000 times at 0.99 from one seen 3 times at 0.67 -- a distinction the
     mapping alone destroys.
+
+    `n_samples` is the check on `support`, and reading support without it is the
+    trap. A sample fans out to many edges, so support cannot distinguish a term
+    backed by 132 curator-labelled samples from one backed by a single sample
+    with 132 edges; on the real extract 50 of 736 learned terms are the latter,
+    `Software: matlab` and `Type: github` among them. `min_support` still counts
+    edges on purpose -- every figure this design rests on was measured that way,
+    so changing it would invalidate the measurement rather than improve it. The
+    column makes the weakness legible without moving a number.
     """
     rows = []
-    for (field, value), counter in _tally(edges, meta, lambda _: True).items():
+    tally, samples = _tally(edges, meta, lambda _: True)
+    for (field, value), counter in tally.items():
         total = sum(counter.values())
         if total < min_support:
             continue
@@ -92,6 +111,7 @@ def learn_vocabulary(
             "internal_assay_id": best,
             "internal_assay_title": None,   # filled by merge_vocabulary from assays
             "support": total,
+            "n_samples": len(samples[(field, value)]),
             "purity": best_n / total,
             "provenance": S.P_LEARNED,
         })
@@ -114,7 +134,7 @@ def score_vocabulary(
     vocabulary once and applying it everywhere is the production behaviour; it
     is specific samples that must not leak.
     """
-    train = _tally(edges, meta, lambda sid: sid % 2 == 0)
+    train, _ = _tally(edges, meta, lambda sid: sid % 2 == 0)
     mapping = {
         k: c.most_common(1)[0][0]
         for k, c in train.items() if sum(c.values()) >= min_support
