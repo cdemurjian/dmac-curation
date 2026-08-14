@@ -18,7 +18,7 @@
 - **Output root** is `assay-hygiene/` under the current working directory.
 - **PEP 723 header** on every script: `requires-python = ">=3.11"` plus explicit dependencies.
 - **Test command:** `uv run --with pytest --with pandas --with pyarrow --with openpyxl pytest tests/<file> -v`
-- **Full suite must stay green:** 784 passed, 12 skipped as of `7f23b70`. Never weaken an existing assertion to make new work pass.
+- **Full suite must stay green.** Measure the baseline yourself with `pytest tests/ -q` before you start, and check your work against the DELTA, not against an absolute. An absolute recorded on 2026-08-14 turned out not to be reproducible, so every task below states how many tests it adds rather than what the total should read. Never weaken an existing assertion to make new work pass; a zero-deletion diff on an existing test file is the thing to verify.
 - **Read-only.** Nothing in this increment writes to MySQL, Neo4j, or the NExtSEEK API. No stage here needs production access at all: it reads the parquet extract already on disk at `assay-hygiene/extract/`.
 - **Rule key is `(project_id, child_type, parent_type, internal_assay_id)`.** NOT `assays.title`, NOT `assays.id`.
 - **`internal_assay_id` is NULLABLE and is a RULE_KEY component.** A pandas `groupby(RULE_KEY)` defaults to `dropna=True` and would silently discard the 17 assay records with no junction row, violating the spec's binding "nothing is dropped silently". Pass `dropna=False`, or apply the `(assay_id, assays.title)` fallback first so the key is never null.
@@ -254,7 +254,7 @@ Expected: PASS, 25 tests
 - [ ] **Step 6: Run the full suite**
 
 Run: `uv run --with pytest --with pandas --with pyarrow --with openpyxl pytest tests/ -q`
-Expected: 791 passed, 12 skipped. If any previously-passing test now fails, the fixture change broke a contract — fix the fixture, never the assertion.
+Expected: **your measured baseline + 7 passed**, skips unchanged. If any previously-passing test now fails, the fixture change broke a contract — fix the fixture, never the assertion.
 
 - [ ] **Step 7: Commit**
 
@@ -1843,8 +1843,8 @@ agreement with a human and cannot be measured any other way.
 - [ ] **Step 6: Run the full suite**
 
 Run: `uv run --with pytest --with pandas --with pyarrow --with openpyxl pytest tests/ -q`
-Expected: 825 passed, 12 skipped (784 at `7f23b70`, plus 7 in Task 1, 11 across
-Tasks 2 and 3, 7 in Task 5, 8 in Task 6, 6 in Task 7, 2 here)
+Expected: **your measured baseline + 41 passed**, skips unchanged — 7 in Task 1,
+11 across Tasks 2 and 3, 7 in Task 5, 8 in Task 6, 6 in Task 7, and 2 here.
 
 - [ ] **Step 7: Commit**
 
