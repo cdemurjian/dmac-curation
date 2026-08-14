@@ -1185,12 +1185,15 @@ fallback is correct for the KEY and wrong for the TITLE.** Do not "harmonise"
 the two.
 
 It is safe today only by luck of numbering. Measured on the live extract:
-**124 of the 458 SEEK `assay_id`s collide numerically with genuine internal
-ids, under wholly unrelated titles** — seek 13 `Short Read Sequencing` against
-internal 13 `Cell Sorting`, seek 24 `Single Cell Clustering Analysis` against
-internal 24 `DNA Extraction`. The 17 junction-less assays happen to sit at
-466-482, above the internal range of 1-188, so no collision occurs. One new
-junction-less assay with a low seek id would silently merge two unrelated
+**124 of the 458 SEEK `assay_id`s collide numerically with a genuine internal
+id, and 122 of those 124 name a different assay** — seek 13 `Short Read
+Sequencing` against internal 13 `Cell Sorting`, seek 24 `Single Cell Clustering
+Analysis` against internal 24 `DNA Extraction`. (The two that agree are ids 47
+`Mass Spectrometry Analysis` and 74 `Tissue Collection`; an earlier draft of
+this section said all 124 disagreed, which overstated it in the direction that
+made the argument look stronger.) The 17 junction-less assays happen to sit at
+466-482, above the internal range of 1-188, so no collision occurs today. One
+new junction-less assay with a low seek id would silently merge two unrelated
 assays' precedent into one rule.
 
 **So this task must add a guard test**, beyond the ones listed below, asserting
