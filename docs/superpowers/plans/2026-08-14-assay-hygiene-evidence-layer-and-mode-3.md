@@ -56,7 +56,7 @@ when a claim looks wrong you need to know which half to distrust.
 - Test: `tests/test_assay_hygiene_schema.py` (existing file, add tests)
 
 **Interfaces:**
-- Produces: `CLAIM_COLUMNS`, `VOCAB_COLUMNS`, `AUDIT_COLUMNS`, `STRONG_FIELDS`, `WEAK_FIELDS`, `CLAIM_FIELDS`, tier constants `T_CORROBORATED` / `T_STRONG` / `T_WEAK` / `T_CONFLICT` / `T_NONE`, provenance constants `P_LEARNED` / `P_PROPOSED` / `P_CURATOR`, `normalise_value(v) -> str | None`, and an extended `make_fixture()` whose `samples` frame exercises every tier.
+- Produces: `CLAIM_COLUMNS`, `VOCAB_COLUMNS`, `AUDIT_COLUMNS`, `STRONG_FIELDS`, `WEAK_FIELDS`, `CLAIM_FIELDS`, tier constants `T_CORROBORATED` / `T_STRONG` / `T_WEAK` / `T_CONFLICT` / `T_NONE`, provenance constants `P_LEARNED` / `P_PROPOSED` / `P_CURATOR`, `normalise_value(v) -> str | None`, and an extended `make_fixture()` whose `samples` frame exercises every tier. (Task 5 later adds `contested` and `provenance` to `CLAIM_COLUMNS` and retires `T_CONFLICT` as an emitted tier; the constant stays.)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -907,21 +907,80 @@ git commit -m "$(printf 'feat(assay-hygiene): add the vocabulary judgment comman
 
 **Files:**
 - Create: `scripts/assay_hygiene/claims.py`
+- Modify: `scripts/assay_hygiene/_schema.py` — `CLAIM_COLUMNS` gains `contested` (bool) and `provenance` (str)
+- Modify: `tests/test_assay_hygiene_schema.py` — extend the `CLAIM_COLUMNS` contract test for the two new columns
 - Test: `tests/test_assay_hygiene_claims.py`
 
 **Interfaces:**
 - Consumes: `_schema.CLAIM_COLUMNS`, `STRONG_FIELDS`, `WEAK_FIELDS`, `CLAIM_FIELDS`, tier constants, `normalise_value`; `vocabulary.parse_metadata`
-- Produces: `claim_index(vocab: pd.DataFrame) -> dict[tuple[str, str], tuple[int, str]]`; `sample_claims(meta: dict[int, dict], uuids: dict[int, str], vocab: pd.DataFrame) -> pd.DataFrame` returning `CLAIM_COLUMNS`
+- Produces: `claim_index(vocab: pd.DataFrame) -> dict[tuple[str, str], tuple[int, str, str]]` mapping `(field, value) -> (internal_assay_id, title, provenance)`; `sample_claims(meta: dict[int, dict], uuids: dict[int, str], vocab: pd.DataFrame) -> pd.DataFrame` returning `CLAIM_COLUMNS`
+- Also modifies `_schema.CLAIM_COLUMNS`, which gains `contested` (bool) and `provenance` (str).
 
-**Tier rules**, applied per sample:
+### Tiering is PER CLAIM, and contestedness is a column, not a tier
+
+This replaced an earlier design where the tier was assigned per SAMPLE and any
+disagreement between fields collapsed the sample to `T_CONFLICT`. That design was
+measured and found to be **non-monotone: adding evidence removed audit coverage.**
+Simulating proposals for the unresolved terms and running the audit as specified
+suppressed 102 existing Mode 3 flags while adding 13 — because a sample that had
+a clean strong claim contradicting its registration gained a second, weaker claim,
+collapsed to `T_CONFLICT`, and `T_CONFLICT` sits below the audit floor. The
+auditor saw less the more it was told.
+
+Three measurements shaped the replacement, all against the real extract:
+
+1. **A population accuracy does not transfer to a disagreement subset.** Strong
+   fields are 98.4% accurate overall and weak fields 90.4%, but on the 5,089
+   disagreeing samples with a curator-labelled edge as truth, strong is right
+   **70.3%** and weak **62.3%**. Letting the strong field simply win there would
+   raise flags whose mapping is wrong about 30% of the time — three times the
+   error rate the design already refuses as too noisy for a curator.
+2. **Most disagreement is not contradiction.** On that same subset, **34% of the
+   time both claims are right**: the sample genuinely belongs to both assays.
+   That argues for recording both, not for picking a winner.
+3. **A proposal is not evidence of the same kind.** A `proposed` mapping has
+   `support = 0` and no empirical anchor, so it must never be able to unseat or
+   contest a learned or curator mapping.
+
+**The rules.** Emit one row per (sample, claimed assay). Tier each row by the
+evidence backing THAT assay only, so adding a claim can never lower another
+claim's tier — monotonicity is structural rather than emergent.
 
 ```
-no field resolves                                    -> T_NONE   (no row emitted)
-resolved fields name more than one assay             -> T_CONFLICT (one row per distinct assay)
-one assay, named by a strong AND a weak field        -> T_CORROBORATED
-one assay, named only by strong field(s)             -> T_STRONG
-one assay, named only by weak field(s)               -> T_WEAK
+no field resolves                              -> no row emitted
+this assay named by a strong AND a weak field  -> T_CORROBORATED
+this assay named only by strong field(s)       -> T_STRONG
+this assay named only by weak field(s)         -> T_WEAK
+any mapping with provenance == P_PROPOSED      -> capped at T_WEAK, whatever the field
 ```
+
+`contested = True` on every row of a sample whose LEARNED or CURATOR claims name
+more than one assay. **Proposed mappings never set `contested`** — they may
+corroborate a claim, never contest one. A proposal stands alone only where the
+sample has no other claim.
+
+`T_CONFLICT` is retired as a tier. Keep the constant in `_schema` so nothing
+importing it breaks, and add a test asserting `sample_claims` never emits it.
+
+Measured outcome of this design, against the alternatives:
+
+| design | baseline flags | proposals add | proposals suppress |
+|---|---|---|---|
+| as originally specified | 879 | 13 | 102 |
+| strong-beats-weak instead | 1,535 | 23 | 63 |
+| **per-claim + contested + proposal cap** | **1,570** | **23** | **0** |
+
+Suppression is zero by construction, and the audit floor becomes a policy dial
+rather than a tier that deletes evidence.
+
+**Do not widen `DEFAULT_TIERS` to compensate for the higher baseline.** Those
+extra rows are contested claims carrying the same ~30% mapping-error rate; Task 7
+excludes contested rows by default and that is what keeps the flag list
+reviewable.
+
+Caveat on the figures above: the vocabulary was learned from the same labelled
+edges used as truth, so they are in-sample. They settle the comparison between
+designs; treat the absolute error rates as optimistic.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -983,15 +1042,51 @@ def test_weak_field_alone_is_weak():
     assert row.source_field == "Protocol"
 
 
-def test_fields_naming_different_assays_are_a_conflict_and_both_survive():
-    # A conflict is data, not an error. Both candidates must reach stage D,
-    # because discarding one here would decide the question this tier exists
-    # to defer.
+def test_fields_naming_different_assays_are_contested_and_both_survive():
+    # Disagreement is data, not an error. Both candidates survive, each tiered
+    # on ITS OWN evidence, and the disagreement is recorded in a column instead
+    # of collapsing both rows into one unaudited tier.
     out = _fixture_claims()
     rows = out[out.uuid == "TIS-1"]
     assert len(rows) == 2
-    assert set(rows.tier) == {S.T_CONFLICT}
     assert set(rows.internal_assay_id) == {11, 12}
+    assert rows.contested.all()
+    # each row keeps the tier its own evidence earns
+    assert set(rows.tier) == {S.T_STRONG}
+
+
+def test_a_contested_sample_keeps_a_tier_the_audit_can_read():
+    # The defect this design replaced: any disagreement collapsed the sample to
+    # T_CONFLICT, which sits below the audit floor, so ADDING a claim REMOVED an
+    # existing flag. Measured at 102 suppressed against 13 added. A tier must
+    # never be lowered by the arrival of a second claim.
+    out = _fixture_claims()
+    assert S.T_CONFLICT not in set(out.tier)
+
+
+def test_a_proposed_mapping_is_capped_at_weak_even_on_a_strong_field():
+    # A proposal has support=0 and no empirical anchor. Graded by field alone it
+    # would inherit the strong tier's measured 98.4%, which it has not earned.
+    vocab = _vocab()
+    vocab.loc[len(vocab)] = ("Type", "mystery", 11, "Comet Chip", 0, 0, 0.0,
+                             S.P_PROPOSED)
+    meta = {700: {"Type": "mystery"}}
+    out = C.sample_claims(meta, {700: "X-1"}, vocab)
+    assert out.iloc[0].tier == S.T_WEAK
+    assert out.iloc[0].provenance == S.P_PROPOSED
+
+
+def test_a_proposal_never_contests_a_learned_claim():
+    # A proposal may corroborate, never contest. Otherwise a support=0 model
+    # guess can push a curator's own registration out of the audit.
+    vocab = _vocab()
+    vocab.loc[len(vocab)] = ("Software", "imagej", 12, "Tissue Collection", 0, 0,
+                             0.0, S.P_PROPOSED)
+    meta = {701: {"Type": "cometchip", "Software": "imagej"}}
+    out = C.sample_claims(meta, {701: "X-2"}, vocab)
+    learned = out[out.internal_assay_id == 11].iloc[0]
+    assert learned.tier == S.T_STRONG
+    assert not out.contested.any()
 
 
 def test_a_sample_whose_values_resolve_to_nothing_emits_no_row():
@@ -1001,11 +1096,13 @@ def test_a_sample_whose_values_resolve_to_nothing_emits_no_row():
     assert out[out.uuid == "DNA-1"].empty
 
 
-def test_claim_index_is_keyed_on_field_and_value_together():
+def test_claim_index_is_keyed_on_field_and_value_together_and_carries_provenance():
     # The same string can mean different assays under different fields, so the
     # field is part of the key. A value-only index would collide them.
+    # Provenance rides along because the tier cap and the contest rule both
+    # need it, and claim_index is the only place claims.py sees the vocabulary.
     idx = C.claim_index(_vocab())
-    assert idx[("Type", "cometchip")] == (11, "Comet Chip")
+    assert idx[("Type", "cometchip")] == (11, "Comet Chip", S.P_LEARNED)
     assert ("cometchip",) not in idx
 ```
 
@@ -1045,19 +1142,23 @@ import pandas as pd
 from . import _schema as S
 
 
-def claim_index(vocab: pd.DataFrame) -> dict[tuple[str, str], tuple[int, str]]:
-    """(field, normalised value) -> (internal_assay_id, title).
+def claim_index(vocab: pd.DataFrame) -> dict[tuple[str, str], tuple[int, str, str]]:
+    """(field, normalised value) -> (internal_assay_id, title, provenance).
 
     Keyed on the field as well as the value: the same string can name different
     assays under different fields, and a value-only index would collide them.
+
+    Provenance rides along because this is the only place claims.py sees the
+    vocabulary, and both the proposal tier cap and the contest rule need it.
     """
-    out: dict[tuple[str, str], tuple[int, str]] = {}
+    out: dict[tuple[str, str], tuple[int, str, str]] = {}
     for r in vocab.itertuples():
         if pd.isna(r.internal_assay_id):
             continue
         out[(str(r.source_field), str(r.raw_value))] = (
             int(r.internal_assay_id),
             None if pd.isna(r.internal_assay_title) else str(r.internal_assay_title),
+            str(r.provenance),
         )
     return out
 
@@ -1067,14 +1168,26 @@ def sample_claims(
     uuids: dict[int, str],
     vocab: pd.DataFrame,
 ) -> pd.DataFrame:
-    """One row per (sample, claimed assay). Samples claiming nothing emit none."""
+    """One row per (sample, claimed assay). Samples claiming nothing emit none.
+
+    Each row is tiered on the evidence backing ITS OWN assay, so the arrival of
+    a second claim can never lower the first one's tier. That property is what
+    keeps the Mode 3 audit monotone: under the previous per-sample design, any
+    disagreement collapsed the whole sample to T_CONFLICT, which sits below the
+    audit floor, and adding evidence measurably REMOVED 102 existing flags while
+    adding 13.
+
+    Disagreement is recorded in `contested` instead. Only learned and curator
+    mappings can contest; a proposal may corroborate a claim but never unseat
+    one, because it carries support = 0 and no empirical anchor.
+    """
     idx = claim_index(vocab)
     rows = []
 
     for sample_id, d in meta.items():
-        # (assay_id, title) -> the fields that named it, strong fields first
-        # because CLAIM_FIELDS is ordered that way.
-        found: dict[tuple[int, str], list[tuple[str, str]]] = {}
+        # (assay_id, title) -> the (field, raw, provenance) triples that named
+        # it, strong fields first because CLAIM_FIELDS is ordered that way.
+        found: dict[tuple[int, str], list[tuple[str, str, str]]] = {}
         for field in S.CLAIM_FIELDS:
             raw = d.get(field)
             value = S.normalise_value(raw)
@@ -1083,39 +1196,47 @@ def sample_claims(
             hit = idx.get((field, value))
             if hit is None:
                 continue
-            found.setdefault(hit, []).append((field, str(raw)))
+            iaid, title, prov = hit
+            found.setdefault((iaid, title), []).append((field, str(raw), prov))
 
         if not found:
             continue
 
-        if len(found) > 1:
-            # Both candidates survive: discarding one here would decide the
-            # question the conflict tier exists to defer to stage D.
-            for (iaid, title), sources in found.items():
-                field, raw = sources[0]
-                rows.append({
-                    "sample_id": sample_id, "uuid": uuids.get(sample_id),
-                    "internal_assay_id": iaid, "internal_assay_title": title,
-                    "tier": S.T_CONFLICT, "source_field": field, "raw_value": raw,
-                })
-            continue
+        # Contestedness is decided by the EVIDENCE-BACKED claims only. A
+        # proposal that happens to name a different assay does not make the
+        # sample contested, or a support=0 guess could push a curator's own
+        # registration below the audit floor.
+        backed = {
+            key for key, sources in found.items()
+            if any(p != S.P_PROPOSED for _, _, p in sources)
+        }
+        contested = len(backed) > 1
 
-        (iaid, title), sources = next(iter(found.items()))
-        fields = [f for f, _ in sources]
-        has_strong = any(f in S.STRONG_FIELDS for f in fields)
-        has_weak = any(f in S.WEAK_FIELDS for f in fields)
-        if has_strong and has_weak:
-            tier = S.T_CORROBORATED
-        elif has_strong:
-            tier = S.T_STRONG
-        else:
-            tier = S.T_WEAK
-        field, raw = sources[0]
-        rows.append({
-            "sample_id": sample_id, "uuid": uuids.get(sample_id),
-            "internal_assay_id": iaid, "internal_assay_title": title,
-            "tier": tier, "source_field": field, "raw_value": raw,
-        })
+        for (iaid, title), sources in found.items():
+            fields = [f for f, _, _ in sources]
+            provs = {p for _, _, p in sources}
+            has_strong = any(f in S.STRONG_FIELDS for f in fields)
+            has_weak = any(f in S.WEAK_FIELDS for f in fields)
+            if has_strong and has_weak:
+                tier = S.T_CORROBORATED
+            elif has_strong:
+                tier = S.T_STRONG
+            else:
+                tier = S.T_WEAK
+            # A proposal-only claim is capped at weak whatever field carried it:
+            # graded by field alone it would inherit the strong tier's measured
+            # 98.4%, which a model's guess has not earned.
+            provenance = (S.P_PROPOSED if provs == {S.P_PROPOSED}
+                          else sorted(provs - {S.P_PROPOSED})[0])
+            if provenance == S.P_PROPOSED:
+                tier = S.T_WEAK
+            field, raw, _ = sources[0]
+            rows.append({
+                "sample_id": sample_id, "uuid": uuids.get(sample_id),
+                "internal_assay_id": iaid, "internal_assay_title": title,
+                "tier": tier, "source_field": field, "raw_value": raw,
+                "contested": contested, "provenance": provenance,
+            })
 
     return pd.DataFrame(rows, columns=S.CLAIM_COLUMNS)
 ```
@@ -1123,7 +1244,7 @@ def sample_claims(
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run --with pytest --with pandas --with pyarrow --with openpyxl pytest tests/test_assay_hygiene_claims.py -v`
-Expected: PASS, 7 tests
+Expected: PASS, 10 tests
 
 - [ ] **Step 5: Run against the real extract**
 
@@ -1157,8 +1278,18 @@ git commit -m "$(printf 'feat(assay-hygiene): stage B2 per-sample assay claims w
 ### Task 6: Stage B, the precedent miner
 
 **Files:**
-- Create: `scripts/assay_hygiene/precedent.py`
+- Modify: `scripts/assay_hygiene/precedent.py` — APPEND to it, do not create it
 - Test: `tests/test_assay_hygiene_precedent.py`
+
+**`precedent.py` already exists.** Task 4 needed `assay_index` to build its
+evidence table and creating a second copy would have put two definitions of
+"registered" in one increment — the defect that produced 13 spurious Mode 3
+flags before it was caught. So Task 4 created the file carrying its docstring
+and `assay_index` only, verbatim from this task's own code block. Append
+`membership_index`, `mine_precedent` and `main`; do not rewrite or reorder what
+is there, and do not re-add `assay_index`. Its existing test coverage is in
+`tests/test_assay_hygiene_vocabulary_evidence.py`; add yours alongside in the
+precedent test file.
 
 **Interfaces:**
 - Consumes: `_schema.RULE_KEY`, `PRECEDENT_COLUMNS`
@@ -1463,7 +1594,7 @@ git commit -m "$(printf 'feat(assay-hygiene): stage B precedent miner keyed on i
 
 **Interfaces:**
 - Consumes: `_schema.AUDIT_COLUMNS`, `V_MODE3_FLAG`, tier constants; `precedent.membership_index`, `precedent.assay_index`
-- Produces: `registered_internal(membership: pd.DataFrame, assays: pd.DataFrame) -> dict[int, set[int]]`; `audit_contradictions(claims, membership, assays, nodes, tiers: tuple[str, ...] = DEFAULT_TIERS) -> pd.DataFrame` returning `AUDIT_COLUMNS`, where `DEFAULT_TIERS = (T_CORROBORATED, T_STRONG)`
+- Produces: `registered_internal(membership: pd.DataFrame, assays: pd.DataFrame) -> dict[int, set[int]]`; `audit_contradictions(claims, membership, assays, nodes, tiers: tuple[str, ...] = DEFAULT_TIERS, include_contested: bool = False) -> pd.DataFrame` returning `AUDIT_COLUMNS`, where `DEFAULT_TIERS = (T_CORROBORATED, T_STRONG)`
 
 **Mode 3 writes nothing.** It compares what a sample claims against what it is
 registered in and reports disagreement. A wrong flag costs attention, not data,
@@ -1507,14 +1638,14 @@ def test_registered_internal_maps_through_the_junction():
 
 
 def test_a_claim_matching_the_registration_is_not_flagged():
-    claims = _claims([(100, "D.IMG-1", 11, "Comet Chip", S.T_STRONG, "Type", "CometChip")])
+    claims = _claims([(100, "D.IMG-1", 11, "Comet Chip", S.T_STRONG, "Type", "CometChip", False, S.P_LEARNED)])
     membership = pd.DataFrame([(100, 1)], columns=S.MEMBERSHIP_COLUMNS)
     nodes = _nodes([("D.IMG-1", 100, "D.IMG")])
     assert A.audit_contradictions(claims, membership, _assays(), nodes).empty
 
 
 def test_a_claim_contradicting_the_registration_is_flagged():
-    claims = _claims([(100, "D.IMG-1", 11, "Comet Chip", S.T_STRONG, "Type", "CometChip")])
+    claims = _claims([(100, "D.IMG-1", 11, "Comet Chip", S.T_STRONG, "Type", "CometChip", False, S.P_LEARNED)])
     membership = pd.DataFrame([(100, 2)], columns=S.MEMBERSHIP_COLUMNS)
     nodes = _nodes([("D.IMG-1", 100, "D.IMG")])
     out = A.audit_contradictions(claims, membership, _assays(), nodes)
@@ -1529,27 +1660,62 @@ def test_a_claim_contradicting_the_registration_is_flagged():
 def test_an_unregistered_sample_is_not_a_contradiction():
     # A sample in no assay is Mode 1's problem, not Mode 3's. Mode 3 needs
     # something to contradict.
-    claims = _claims([(100, "D.IMG-1", 11, "Comet Chip", S.T_STRONG, "Type", "CometChip")])
+    claims = _claims([(100, "D.IMG-1", 11, "Comet Chip", S.T_STRONG, "Type", "CometChip", False, S.P_LEARNED)])
     membership = pd.DataFrame([], columns=S.MEMBERSHIP_COLUMNS)
     nodes = _nodes([("D.IMG-1", 100, "D.IMG")])
     assert A.audit_contradictions(claims, membership, _assays(), nodes).empty
 
 
-def test_weak_and_conflicted_claims_do_not_raise_a_flag_by_default():
+def test_a_weak_claim_does_not_raise_a_flag_by_default():
     # Weak claims are 90.4% accurate, so flagging on them would put a ~10%
-    # false-positive rate in front of a curator. Conflicted claims have not
-    # decided what they assert, so they cannot contradict anything yet.
+    # false-positive rate in front of a curator.
     membership = pd.DataFrame([(100, 2)], columns=S.MEMBERSHIP_COLUMNS)
     nodes = _nodes([("D.IMG-1", 100, "D.IMG")])
-    for tier in (S.T_WEAK, S.T_CONFLICT):
-        claims = _claims([(100, "D.IMG-1", 11, "Comet Chip", tier, "Protocol", "x")])
-        assert A.audit_contradictions(claims, membership, _assays(), nodes).empty
+    claims = _claims([(100, "D.IMG-1", 11, "Comet Chip", S.T_WEAK, "Protocol", "x", False, S.P_LEARNED)])
+    assert A.audit_contradictions(claims, membership, _assays(), nodes).empty
+
+
+def test_a_contested_claim_does_not_raise_a_flag_by_default():
+    # A contested sample's evidence disagrees with itself, so it has not decided
+    # what it asserts. Excluded by a SEPARATE parameter rather than by tier: on
+    # the disagreement subset the winning claim's mapping is still wrong about
+    # 30% of the time, three times the rate the weak floor already refuses.
+    membership = pd.DataFrame([(100, 2)], columns=S.MEMBERSHIP_COLUMNS)
+    nodes = _nodes([("D.IMG-1", 100, "D.IMG")])
+    claims = _claims([(100, "D.IMG-1", 11, "Comet Chip", S.T_STRONG, "Type", "x", True, S.P_LEARNED)])
+    assert A.audit_contradictions(claims, membership, _assays(), nodes).empty
+
+
+def test_contested_claims_can_be_admitted_deliberately():
+    membership = pd.DataFrame([(100, 2)], columns=S.MEMBERSHIP_COLUMNS)
+    nodes = _nodes([("D.IMG-1", 100, "D.IMG")])
+    claims = _claims([(100, "D.IMG-1", 11, "Comet Chip", S.T_STRONG, "Type", "x", True, S.P_LEARNED)])
+    out = A.audit_contradictions(claims, membership, _assays(), nodes,
+                                 include_contested=True)
+    assert len(out) == 1
+
+
+def test_adding_a_claim_never_removes_an_existing_flag():
+    # The monotonicity property the per-claim design exists to guarantee. Under
+    # the previous per-sample tiering, a second claim collapsed the sample to
+    # T_CONFLICT and its flag vanished: measured at 102 suppressed against 13
+    # added over the real extract. Adding a row must only ever add flags.
+    membership = pd.DataFrame([(100, 2)], columns=S.MEMBERSHIP_COLUMNS)
+    nodes = _nodes([("D.IMG-1", 100, "D.IMG")])
+    one = _claims([(100, "D.IMG-1", 11, "Comet Chip", S.T_STRONG, "Type", "x", False, S.P_LEARNED)])
+    before = A.audit_contradictions(one, membership, _assays(), nodes)
+    two = _claims([
+        (100, "D.IMG-1", 11, "Comet Chip", S.T_STRONG, "Type", "x", False, S.P_LEARNED),
+        (100, "D.IMG-1", 13, "Other", S.T_WEAK, "Protocol", "y", False, S.P_PROPOSED),
+    ])
+    after = A.audit_contradictions(two, membership, _assays(), nodes)
+    assert len(after) >= len(before)
 
 
 def test_the_tier_floor_can_be_widened_deliberately():
     membership = pd.DataFrame([(100, 2)], columns=S.MEMBERSHIP_COLUMNS)
     nodes = _nodes([("D.IMG-1", 100, "D.IMG")])
-    claims = _claims([(100, "D.IMG-1", 11, "Comet Chip", S.T_WEAK, "Protocol", "x")])
+    claims = _claims([(100, "D.IMG-1", 11, "Comet Chip", S.T_WEAK, "Protocol", "x", False, S.P_LEARNED)])
     out = A.audit_contradictions(claims, membership, _assays(), nodes,
                                  tiers=(S.T_CORROBORATED, S.T_STRONG, S.T_WEAK))
     assert len(out) == 1
@@ -1619,11 +1785,21 @@ def audit_contradictions(
     assays: pd.DataFrame,
     nodes: pd.DataFrame,
     tiers: tuple[str, ...] = DEFAULT_TIERS,
+    include_contested: bool = False,
 ) -> pd.DataFrame:
     """Flag samples whose claim names an assay they are not registered in.
 
     A sample registered in NOTHING is not flagged: that is Mode 1's population,
     and Mode 3 needs something to contradict.
+
+    Contested rows are excluded by a SEPARATE parameter rather than by tier.
+    Folding contestedness into the tier is what made the previous design
+    non-monotone -- a second claim lowered the first one's tier and its flag
+    disappeared. Here a contested row keeps whatever tier its own evidence
+    earned and is filtered at the audit, so admitting them later is a parameter
+    change rather than a re-derivation. They are excluded by default because on
+    the disagreement subset the winning claim's mapping is wrong about 30% of
+    the time, three times the rate the weak floor already refuses.
     """
     registered = registered_internal(membership, assays)
     types = {
@@ -1634,6 +1810,8 @@ def audit_contradictions(
     rows = []
     for c in claims.itertuples():
         if c.tier not in tiers:
+            continue
+        if bool(c.contested) and not include_contested:
             continue
         have = registered.get(int(c.sample_id))
         if not have:
@@ -1658,7 +1836,7 @@ def audit_contradictions(
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run --with pytest --with pandas --with pyarrow --with openpyxl pytest tests/test_assay_hygiene_audit.py -v`
-Expected: PASS, 6 tests
+Expected: PASS, 9 tests
 
 - [ ] **Step 5: Commit**
 
@@ -1701,7 +1879,7 @@ def test_report_states_every_headline_count():
         columns=S.PRECEDENT_COLUMNS,
     )
     claims = pd.DataFrame(
-        [(100, "D.IMG-1", 11, "Comet Chip", S.T_STRONG, "Type", "CometChip")],
+        [(100, "D.IMG-1", 11, "Comet Chip", S.T_STRONG, "Type", "CometChip", False, S.P_LEARNED)],
         columns=S.CLAIM_COLUMNS,
     )
     audit = pd.DataFrame(
@@ -1888,8 +2066,9 @@ agreement with a human and cannot be measured any other way.
 - [ ] **Step 6: Run the full suite**
 
 Run: `uv run --with pytest --with pandas --with pyarrow --with openpyxl pytest tests/ -q`
-Expected: **your measured baseline + 41 passed**, skips unchanged — 7 in Task 1,
-11 across Tasks 2 and 3, 7 in Task 5, 8 in Task 6, 6 in Task 7, and 2 here.
+Expected: **your measured baseline + 47 passed**, skips unchanged — 7 in Task 1,
+11 across Tasks 2 and 3, 10 in Task 5, 8 in Task 6, 9 in Task 7, and 2 here.
+Task 4 adds its own; count from the baseline you measured, not from this list.
 
 - [ ] **Step 7: Commit**
 
