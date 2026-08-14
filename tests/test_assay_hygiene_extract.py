@@ -206,15 +206,18 @@ def test_no_extract_can_write(name, query, columns):
 def test_edges_cypher_sources_every_column_from_the_server_property():
     """Pin which Neo4j property each edge column is read from.
 
-    NAMESPACE. `edge_assay_id` does NOT hold an `assays`.id. A DERIVED_FROM
-    relationship carries BOTH `r.assay_id` (a seek_production `assays`.id: 458
-    rows, 291 distinct titles) and `r.internal_assay_id` (a dmac
-    `internal_assays`.id: 137 rows), and neo4j_sync.bulk_merge_relationships
-    writes both. This extract deliberately takes the INTERNAL one, because
-    internal_assay_id is the rule key (_schema.RULE_KEY). The _schema column
-    NAMES are frozen by task 1 and say `edge_assay_id`, which does not say
-    "internal" -- so the only defence against a downstream join to
-    `assays.assay_id` is this pin plus the comment at the query.
+    NAMESPACE. A DERIVED_FROM relationship carries BOTH `r.assay_id` (a
+    seek_production `assays`.id: 458 rows, 291 distinct titles) and
+    `r.internal_assay_id` (a dmac `internal_assays`.id: 137 rows), and
+    neo4j_sync.bulk_merge_relationships writes both. They are different id
+    spaces that overlap numerically and share no meaning. This extract
+    deliberately takes the INTERNAL one, because internal_assay_id is the rule
+    key (_schema.RULE_KEY).
+
+    The column names say `internal` so the frame cannot misrepresent itself to
+    a reader. That is a second line of defence, not the first: a name is a
+    claim and this pin is the check on it, so the rename does not make the
+    assertion redundant.
     """
     assert _sources(extract.EDGES_CYPHER) == {
         "child_id": "c.id",
@@ -223,19 +226,35 @@ def test_edges_cypher_sources_every_column_from_the_server_property():
         "parent_uuid": "p.uuid",
         "child_type": "c.type",
         "parent_type": "p.type",
-        "edge_assay_id": "r.internal_assay_id",
-        "edge_assay_title": "r.internal_assay_title",
+        "edge_internal_assay_id": "r.internal_assay_id",
+        "edge_internal_assay_title": "r.internal_assay_title",
         "edge_protocol_id": "r.protocol_id",
     }
 
 
-def test_edge_assay_id_is_the_internal_namespace_not_the_seek_one():
+def test_edge_internal_assay_id_is_the_internal_namespace_not_the_seek_one():
     """The same claim as above, stated as the mistake it prevents."""
     srcs = _sources(extract.EDGES_CYPHER)
-    assert srcs["edge_assay_id"] != "r.assay_id"
-    assert srcs["edge_assay_title"] != "r.assay_title"
+    assert srcs["edge_internal_assay_id"] != "r.assay_id"
+    assert srcs["edge_internal_assay_title"] != "r.assay_title"
     # and the column it reconciles against downstream lives in the same space
     assert "internal_assay_id" in S.ASSAY_COLUMNS
+
+
+def test_no_edge_column_is_spelled_assay_id_without_saying_internal():
+    """The rename is the point, so a regression has to fail rather than read oddly.
+
+    `MEMBERSHIP_COLUMNS.assay_id` is a seek `assay_assets.assay_id` and
+    `EDGE_COLUMNS`' assay column is a dmac internal id. Membership is the frame
+    stage B joins against, so reintroducing a bare `assay_id` on the edges frame
+    puts two different id spaces under one name in adjacent frames, where
+    picking the wrong one is a one-token edit that yields a populated, wrong
+    column instead of an error.
+    """
+    for col in S.EDGE_COLUMNS:
+        if "assay" in col:
+            assert "internal" in col, f"{col} names an id space it does not hold"
+    assert "assay_id" in S.MEMBERSHIP_COLUMNS  # the other space, deliberately bare
 
 
 def test_nodes_cypher_aliases_the_declared_node_index():

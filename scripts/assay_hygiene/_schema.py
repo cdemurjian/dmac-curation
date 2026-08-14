@@ -25,10 +25,17 @@ UID_RE_PROD = re.compile(r"^([AD]\.)?[A-Z]{3,}-\d{6}[A-Z]{2,5}-\d+(-PUB\d*)?$")
 UID_RE_FIXED = re.compile(r"\A([A-Z]\.)?[A-Z]{2,}-\d{6}[A-Z]{2,5}-\d+(-PUB\d*)?\Z")
 
 # --- extract (stage A) -------------------------------------------------------
+# `edge_internal_assay_id` holds a dmac `internal_assays`.id, NOT a
+# seek_production `assays`.id. The two overlap numerically and share no meaning,
+# and MEMBERSHIP_COLUMNS.assay_id below is the OTHER one. Membership is the
+# frame stage B joins against, so these names carry `internal` explicitly:
+# under a bare `assay_id` the two spaces sit in adjacent frames under one name,
+# where choosing wrong is a one-token edit that yields a populated, wrong column
+# rather than an error.
 EDGE_COLUMNS = [
     "child_id", "parent_id", "child_uuid", "parent_uuid",
     "child_type", "parent_type",
-    "edge_assay_id", "edge_assay_title", "edge_protocol_id",
+    "edge_internal_assay_id", "edge_internal_assay_title", "edge_protocol_id",
 ]
 MEMBERSHIP_COLUMNS = ["sample_id", "assay_id"]
 ASSAY_COLUMNS = [

@@ -44,7 +44,7 @@ from . import _schema as S
 # `uuid` (lowercase) is the node key and carries the sample UID; there is no
 # `UID` property on a Sample node.
 #
-# NAMESPACE WARNING, read before joining `edge_assay_id` to anything.
+# NAMESPACE WARNING, read before joining `edge_internal_assay_id` to anything.
 # A DERIVED_FROM relationship carries BOTH `r.assay_id` -- a seek_production
 # `assays`.id, 458 rows / 291 distinct titles -- and `r.internal_assay_id` -- a
 # dmac `internal_assays`.id, 137 rows, reached from the first through the
@@ -52,19 +52,23 @@ from . import _schema as S
 # numerically and share no meaning.
 #
 # This projection deliberately takes the INTERNAL one, because internal_assay_id
-# is the rule key (_schema.RULE_KEY). The column contract it lands in was frozen
-# by task 1 and reads `edge_assay_id` / `edge_assay_title`, which do NOT say
-# "internal". So: `edge_assay_id` reconciles against
-# ASSAY_COLUMNS.internal_assay_id and against nothing else. Joining it to
-# `assays.assay_id` downstream would silently cross the two spaces and produce
-# plausible, wrong answers.
+# is the rule key (_schema.RULE_KEY). So `edge_internal_assay_id` reconciles
+# against ASSAY_COLUMNS.internal_assay_id and against nothing else. Joining it
+# to `assays.assay_id` -- or to MEMBERSHIP_COLUMNS.assay_id, which is that other
+# space -- would silently cross the two and produce plausible, wrong answers.
+#
+# The column names carry `internal` so the frame states its own id space. They
+# did not always: the contract was frozen as `edge_assay_id` / `edge_assay_title`
+# while stage 0 was built, because stage 0 never reads these columns and three
+# tasks depended on the contract holding still. Stage B is the first reader, so
+# the rename lands before it, not after.
 EDGES_CYPHER = """
 MATCH (c:Sample)-[r:DERIVED_FROM]->(p:Sample)
 RETURN c.id AS child_id, p.id AS parent_id,
        c.uuid AS child_uuid, p.uuid AS parent_uuid,
        c.type AS child_type, p.type AS parent_type,
-       r.internal_assay_id AS edge_assay_id,
-       r.internal_assay_title AS edge_assay_title,
+       r.internal_assay_id AS edge_internal_assay_id,
+       r.internal_assay_title AS edge_internal_assay_title,
        r.protocol_id AS edge_protocol_id
 """
 
