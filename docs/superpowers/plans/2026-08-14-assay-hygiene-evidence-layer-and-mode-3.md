@@ -68,7 +68,7 @@ def test_claim_and_vocab_contracts_are_declared():
                 "internal_assay_title", "tier", "source_field", "raw_value"):
         assert col in S.CLAIM_COLUMNS
     for col in ("source_field", "raw_value", "internal_assay_id",
-                "internal_assay_title", "support", "purity", "provenance"):
+                "internal_assay_title", "support", "n_samples", "purity", "provenance"):
         assert col in S.VOCAB_COLUMNS
 
 
@@ -188,7 +188,7 @@ P_CURATOR = "curator"
 
 VOCAB_COLUMNS = [
     "source_field", "raw_value", "internal_assay_id", "internal_assay_title",
-    "support", "purity", "provenance",
+    "support", "n_samples", "purity", "provenance",
 ]
 
 # --- audit (mode 3) ----------------------------------------------------------
@@ -279,6 +279,23 @@ git commit -m "$(printf 'feat(assay-hygiene): declare claim, vocabulary and audi
 is observed in 1,364 curator-labelled edges. Deriving it from data rather than
 from a model keeps this measurement independent of the judgment step it exists
 to justify, and gives every common term a support count a human can check.
+
+**`support` counts EDGES; `n_samples` counts distinct child samples.** A sample
+fans out to a mean of 2.79 labelled edges and a maximum of 1,218, so edge-weighted
+support is inflated by fan-out. Measured on the real extract: of 736 learned
+terms, 83 clear `min_support=3` on fewer than three distinct samples and **50 rest
+on exactly one** — `Software: matlab` shows a support of 132 drawn from a single
+sample, and the worst case is 304 from one. `min_support` does not do what its
+name suggests.
+
+The semantics are deliberately left alone: every figure in the spec, and this
+task's own step 5 gate, is defined against edge-weighted support, and changing it
+would invalidate the design's measured basis. `n_samples` rides alongside so the
+weakness is visible instead of silent. It matters most in `vocabulary.csv`, which
+the spec calls the most durable artifact this project produces and which a curator
+corrects by hand — nobody can audit a mapping whose support they cannot decompose.
+
+Both columns are in `VOCAB_COLUMNS`, `n_samples` immediately after `support`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -607,9 +624,9 @@ def _assays():
 
 
 def test_curator_rows_beat_learned_and_proposed():
-    learned = _vocab([("Type", "cometchip", 11, None, 900, 0.99, S.P_LEARNED)])
-    proposed = _vocab([("Type", "cometchip", 12, None, 0, 0.0, S.P_PROPOSED)])
-    curator = _vocab([("Type", "cometchip", 12, None, 0, 0.0, S.P_CURATOR)])
+    learned = _vocab([("Type", "cometchip", 11, None, 900, 850, 0.99, S.P_LEARNED)])
+    proposed = _vocab([("Type", "cometchip", 12, None, 0, 0, 0.0, S.P_PROPOSED)])
+    curator = _vocab([("Type", "cometchip", 12, None, 0, 0, 0.0, S.P_CURATOR)])
     out = V.merge_vocabulary(learned, proposed, curator, _assays())
     row = out[out.raw_value == "cometchip"].iloc[0]
     assert row.internal_assay_id == 12
@@ -618,15 +635,15 @@ def test_curator_rows_beat_learned_and_proposed():
 
 
 def test_learned_beats_proposed_when_no_curator_row_exists():
-    learned = _vocab([("Type", "cometchip", 11, None, 900, 0.99, S.P_LEARNED)])
-    proposed = _vocab([("Type", "cometchip", 12, None, 0, 0.0, S.P_PROPOSED)])
+    learned = _vocab([("Type", "cometchip", 11, None, 900, 850, 0.99, S.P_LEARNED)])
+    proposed = _vocab([("Type", "cometchip", 12, None, 0, 0, 0.0, S.P_PROPOSED)])
     out = V.merge_vocabulary(learned, proposed, _vocab([]), _assays())
     assert out.iloc[0].internal_assay_id == 11
     assert out.iloc[0].provenance == S.P_LEARNED
 
 
 def test_merge_fills_the_display_title_from_the_assays_frame():
-    learned = _vocab([("Type", "cometchip", 11, None, 900, 0.99, S.P_LEARNED)])
+    learned = _vocab([("Type", "cometchip", 11, None, 900, 850, 0.99, S.P_LEARNED)])
     out = V.merge_vocabulary(learned, _vocab([]), _vocab([]), _assays())
     assert out.iloc[0].internal_assay_title == "Comet Chip"
 
@@ -635,7 +652,7 @@ def test_unresolved_lists_frequent_terms_the_vocabulary_cannot_map():
     meta = {1: {"Type": "cometchip"}, 2: {"Type": "mystery"},
             3: {"Type": "mystery"}, 4: {"Type": "mystery"}, 5: {"Type": "once"}}
     uuids = {1: "A-1", 2: "A-2", 3: "A-3", 4: "A-4", 5: "A-5"}
-    vocab = _vocab([("Type", "cometchip", 11, "Comet Chip", 900, 0.99, S.P_LEARNED)])
+    vocab = _vocab([("Type", "cometchip", 11, "Comet Chip", 900, 850, 0.99, S.P_LEARNED)])
     out = V.unresolved_terms(meta, vocab, uuids, min_occurrences=3)
     assert list(out.raw_value) == ["mystery"]     # 'once' is below the floor
     assert out.iloc[0].n_samples == 3
@@ -643,7 +660,7 @@ def test_unresolved_lists_frequent_terms_the_vocabulary_cannot_map():
 
 
 def test_vocabulary_round_trips_through_csv(tmp_path):
-    df = _vocab([("Type", "cometchip", 11, "Comet Chip", 900, 0.99, S.P_LEARNED)])
+    df = _vocab([("Type", "cometchip", 11, "Comet Chip", 900, 850, 0.99, S.P_LEARNED)])
     p = tmp_path / "vocabulary.csv"
     V.save_vocabulary(df, p)
     back = V.load_vocabulary(p)
@@ -860,11 +877,11 @@ alone.
 
 Write `assay-hygiene/vocabulary-proposed.csv` with exactly these columns:
 
-    source_field,raw_value,internal_assay_id,internal_assay_title,support,purity,provenance
+    source_field,raw_value,internal_assay_id,internal_assay_title,support,n_samples,purity,provenance
 
 - `source_field` and `raw_value` copied verbatim from the unresolved file
 - `internal_assay_id` and `internal_assay_title` from `assays.parquet`
-- `support` = 0 and `purity` = 0.0, because a proposal has no empirical backing.
+- `support` = 0, `n_samples` = 0 and `purity` = 0.0, because a proposal has no empirical backing.
   Do not fabricate these — they are what distinguishes your rows from learned ones.
 - `provenance` = `proposed`
 
@@ -926,9 +943,9 @@ from assay_hygiene import vocabulary as V
 def _vocab():
     """Maps the fixture's raw values: comet terms -> 11, tissue terms -> 12."""
     return pd.DataFrame(
-        [("Type", "cometchip", 11, "Comet Chip", 900, 0.99, S.P_LEARNED),
-         ("Protocol", "comet.docx", 11, "Comet Chip", 400, 0.95, S.P_LEARNED),
-         ("Instrument", "tissue scope", 12, "Tissue Collection", 50, 1.0, S.P_LEARNED)],
+        [("Type", "cometchip", 11, "Comet Chip", 900, 850, 0.99, S.P_LEARNED),
+         ("Protocol", "comet.docx", 11, "Comet Chip", 400, 380, 0.95, S.P_LEARNED),
+         ("Instrument", "tissue scope", 12, "Tissue Collection", 50, 50, 1.0, S.P_LEARNED)],
         columns=S.VOCAB_COLUMNS,
     )
 
@@ -1666,7 +1683,7 @@ def test_report_states_every_headline_count():
         columns=S.AUDIT_COLUMNS,
     )
     vocab = pd.DataFrame(
-        [("Type", "cometchip", 11, "Comet Chip", 900, 0.99, S.P_LEARNED)],
+        [("Type", "cometchip", 11, "Comet Chip", 900, 850, 0.99, S.P_LEARNED)],
         columns=S.VOCAB_COLUMNS,
     )
     unresolved = pd.DataFrame(
@@ -1743,12 +1760,13 @@ def build_report(precedent, claims, audit, vocab, unresolved) -> str:
         lines.append("Highest-support mappings:")
         lines.append("")
         top = vocab.sort_values("support", ascending=False).head(10)
-        lines.append("| field | value | assay | support | purity |")
-        lines.append("|---|---|---|---|---|")
+        lines.append("| field | value | assay | support | samples | purity |")
+        lines.append("|---|---|---|---|---|---|")
         for r in top.itertuples():
             lines.append(
                 f"| {r.source_field} | `{r.raw_value}` | "
-                f"{r.internal_assay_title} | {int(r.support):,} | {r.purity:.2f} |"
+                f"{r.internal_assay_title} | {int(r.support):,} | "
+                f"{int(r.n_samples):,} | {r.purity:.2f} |"
             )
         lines.append("")
 
