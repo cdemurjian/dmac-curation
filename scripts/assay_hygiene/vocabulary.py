@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import collections
 import json
+from pathlib import Path
 
 import pandas as pd
 
@@ -171,3 +172,154 @@ def score_vocabulary(
             "accuracy": hit / covered if covered else 0.0,
         })
     return pd.DataFrame(rows, columns=["source_field", "terms", "coverage", "accuracy"])
+
+
+# Precedence, lowest to highest. A curator's decision outranks the data, and
+# the data outranks a model's proposal. Encoded as a sort key rather than as
+# branching so adding a fourth source later is one line.
+_PRECEDENCE = {S.P_PROPOSED: 0, S.P_LEARNED: 1, S.P_CURATOR: 2}
+
+
+def merge_vocabulary(
+    learned: pd.DataFrame,
+    proposed: pd.DataFrame,
+    curator: pd.DataFrame,
+    assays: pd.DataFrame,
+) -> pd.DataFrame:
+    """One row per (field, value), highest-precedence source winning.
+
+    `proposed` and `curator` accept None, so this works before Task 4 has ever
+    run and produced either file.
+
+    Display titles are filled from the assays frame rather than trusted from
+    the input, so a stale title in a hand-edited file cannot travel onward. The
+    evidence columns (`support`, `n_samples`, `purity`) travel untouched from
+    whichever row wins: a merge is a choice between rows, never a recount.
+
+    A BLANK title is a real finding, not a lookup bug, and is left blank on
+    purpose. Measured 2026-08-14 on the extract, 14 of 736 rows come back
+    untitled, all pointing at one of 6 ids (466, 469, 470, 471, 472, 481) that
+    are absent from `assays.internal_assay_id` because those assays have no
+    row in `dmac.assays_internal_assays`. neo4j_sync.py:1011-1021 falls back to
+    writing the seek `(assay_id, title)` pair into the edge's internal-assay
+    fields for exactly those 17 junction-less assays, so `edge_internal_assay_id`
+    -- and therefore the learned `internal_assay_id` -- carries a seek assays.id
+    on those rows, in a different id space from every other row.
+
+    Titling them off `assays.assay_id` would fill the blanks with the right
+    strings and be the wrong call twice over. It would hide the missing junction
+    row, which is a hygiene defect of precisely the kind this package exists to
+    surface; and it would bake an id-space mix into the merge that is only
+    accidentally safe -- the junction-less ids happen to be 466-482 while the
+    genuine internal ids run 1-188, but seek assay_ids start at 8, so one new
+    junction-less assay with a low id makes the two spaces overlap and the
+    lookup silently returns another assay's title. The fix belongs upstream, in
+    the junction table.
+
+    The sort is explicitly STABLE, which is what makes "the last row for a key
+    wins" a real rule rather than an accident. Precedence separates the three
+    sources but says nothing about two rows from the SAME source, and one
+    source -- the hand-edited curator file -- is exactly where a repeated key
+    should be expected: the natural way to correct a csv is to append the new
+    row, not to hunt down the old one. pandas' default kind is quicksort and is
+    not stable; measured on pandas 3.0.5, 5,000 rows ranked over {0,1,2} had it
+    hand drop_duplicates(keep="last") the FIRST row where a stable sort handed
+    it the last. So the default does not leave the winner unspecified, it
+    usually discards the curator's newest decision, and silently -- the losing
+    row leaves no trace in the output to notice.
+    """
+    titles = {
+        int(i): str(t)
+        for i, t in zip(assays.internal_assay_id, assays.internal_assay_title)
+        if pd.notna(i)
+    }
+    frames = [f for f in (learned, proposed, curator) if f is not None and len(f)]
+    if not frames:
+        return pd.DataFrame(columns=S.VOCAB_COLUMNS)
+    allrows = pd.concat(frames, ignore_index=True)
+    # an unrecognised provenance ranks below all three known sources rather
+    # than raising: a junk value in a hand-edited file must not be able to
+    # outrank a curator, and must not stop the run either.
+    allrows["_rank"] = allrows.provenance.map(_PRECEDENCE).fillna(-1)
+    allrows = allrows.sort_values("_rank", kind="stable").drop_duplicates(
+        subset=["source_field", "raw_value"], keep="last"
+    )
+    allrows["internal_assay_title"] = [
+        titles.get(int(i)) if pd.notna(i) else None
+        for i in allrows.internal_assay_id
+    ]
+    return allrows.drop(columns="_rank").reset_index(drop=True)[S.VOCAB_COLUMNS]
+
+
+def unresolved_terms(
+    meta: dict[int, dict],
+    vocab: pd.DataFrame,
+    uuids: dict[int, str],
+    min_occurrences: int = 3,
+) -> pd.DataFrame:
+    """Frequent metadata values the vocabulary cannot map. The judgment queue.
+
+    Bounded by `min_occurrences` on purpose: a value seen once is far more
+    likely to be a typo than a vocabulary gap, and asking a human to rule on
+    every singleton buries the terms that matter.
+
+    BOTH sides of the lookup are normalised. learn_vocabulary already emits
+    normalised values so a learned-only vocabulary compares equal either way,
+    but the other two provenances do not: `proposed` comes from a model and
+    `curator` from a hand-edited csv, and a curator typing `CometChip` the way
+    it appears in the metadata would otherwise leave every `cometchip` sample
+    in this queue -- asking a human to rule again on a question they have
+    already answered, in the one artifact whose entire purpose is to be short.
+    normalise_value is idempotent, so this costs the learned rows nothing.
+    """
+    known = {
+        (r.source_field, S.normalise_value(r.raw_value))
+        for r in vocab.itertuples()
+    }
+    seen: dict[tuple[str, str], list[int]] = {}
+    for sid, d in meta.items():
+        for field in S.CLAIM_FIELDS:
+            value = S.normalise_value(d.get(field))
+            if value and (field, value) not in known:
+                seen.setdefault((field, value), []).append(sid)
+    rows = [
+        {
+            "source_field": field,
+            "raw_value": value,
+            "n_samples": len(ids),
+            "example_uuids": "; ".join(
+                str(uuids.get(i, i)) for i in sorted(ids)[:5]
+            ),
+        }
+        for (field, value), ids in seen.items() if len(ids) >= min_occurrences
+    ]
+    out = pd.DataFrame(rows, columns=["source_field", "raw_value",
+                                      "n_samples", "example_uuids"])
+    return out.sort_values("n_samples", ascending=False, ignore_index=True)
+
+
+def save_vocabulary(df: pd.DataFrame, path) -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(p, index=False)
+
+
+def load_vocabulary(path) -> pd.DataFrame:
+    """Read a vocabulary csv, tolerating a curator having edited it by hand.
+
+    A missing file reads as an empty vocabulary rather than raising, because
+    `proposed` and `curator` legitimately do not exist until someone has
+    produced them.
+
+    `keep_default_na=False` matters: a raw_value of `nan` or `null` is a real
+    string a curator may have typed, and pandas would otherwise read it back as
+    a missing value and silently change what the row maps.
+    """
+    p = Path(path)
+    if not p.exists():
+        return pd.DataFrame(columns=S.VOCAB_COLUMNS)
+    df = pd.read_csv(p, keep_default_na=False, na_values=[""])
+    for col in S.VOCAB_COLUMNS:
+        if col not in df.columns:
+            df[col] = None
+    return df[S.VOCAB_COLUMNS]

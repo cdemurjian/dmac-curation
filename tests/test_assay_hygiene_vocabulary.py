@@ -168,3 +168,126 @@ def test_score_holds_out_by_sample_and_reports_per_field():
     inst = scored[scored.source_field == "Instrument"].iloc[0]
     assert inst.terms == 0           # a test-side-only value is never learned
     assert inst.coverage == 0.0
+
+
+def _vocab(rows):
+    return pd.DataFrame(rows, columns=S.VOCAB_COLUMNS)
+
+
+def _assays():
+    return pd.DataFrame(
+        [(1, "Comet Chip", 7, 3, 2, 10, "MIT_SRP", 11, "Comet Chip"),
+         (2, "Tissue Collection", 8, 3, 2, 10, "MIT_SRP", 12, "Tissue Collection")],
+        columns=S.ASSAY_COLUMNS,
+    )
+
+
+def test_curator_rows_beat_learned_and_proposed():
+    learned = _vocab([("Type", "cometchip", 11, None, 900, 850, 0.99, S.P_LEARNED)])
+    proposed = _vocab([("Type", "cometchip", 12, None, 0, 0, 0.0, S.P_PROPOSED)])
+    curator = _vocab([("Type", "cometchip", 12, None, 0, 0, 0.0, S.P_CURATOR)])
+    out = V.merge_vocabulary(learned, proposed, curator, _assays())
+    row = out[out.raw_value == "cometchip"].iloc[0]
+    assert row.internal_assay_id == 12
+    assert row.provenance == S.P_CURATOR
+    assert len(out) == 1
+
+
+def test_learned_beats_proposed_when_no_curator_row_exists():
+    learned = _vocab([("Type", "cometchip", 11, None, 900, 850, 0.99, S.P_LEARNED)])
+    proposed = _vocab([("Type", "cometchip", 12, None, 0, 0, 0.0, S.P_PROPOSED)])
+    out = V.merge_vocabulary(learned, proposed, _vocab([]), _assays())
+    assert out.iloc[0].internal_assay_id == 11
+    assert out.iloc[0].provenance == S.P_LEARNED
+    # The evidence columns must survive the merge. `support` counts EDGES and
+    # `n_samples` distinct child samples, and the second is the only thing that
+    # tells a term backed by 850 curators from one backed by a single sample
+    # fanned out over 900 edges. A merge that rebuilt rows from the mapping
+    # alone, or zeroed the counts it did not understand, would still satisfy
+    # every other assertion in this file.
+    assert out.iloc[0].support == 900
+    assert out.iloc[0].n_samples == 850
+    assert out.iloc[0].purity == pytest.approx(0.99)
+
+
+def test_merge_fills_the_display_title_from_the_assays_frame():
+    learned = _vocab([("Type", "cometchip", 11, None, 900, 850, 0.99, S.P_LEARNED)])
+    out = V.merge_vocabulary(learned, _vocab([]), _vocab([]), _assays())
+    assert out.iloc[0].internal_assay_title == "Comet Chip"
+
+
+def test_merge_is_deterministic_when_one_source_repeats_a_key():
+    # vocabulary.csv is hand-editable by design (load_vocabulary's docstring
+    # says so), and the natural way to correct a hand-edited file is to append
+    # the new row rather than find and rewrite the old one. That puts TWO
+    # curator rows on one key, and precedence alone cannot separate them.
+    #
+    # This is not hypothetical ordering pedantry. pandas' default sort kind is
+    # quicksort, which is not stable: measured 2026-08-14 on pandas 3.0.5, a
+    # frame of 5,000 rows with ranks drawn from {0,1,2} had the default sort
+    # hand drop_duplicates(keep="last") row 1 where a stable sort handed it row
+    # 4,998. So without an explicit stable sort the curator's LATEST decision is
+    # not merely unspecified, it is usually discarded -- and silently, because
+    # the losing row leaves no trace in the output.
+    #
+    # The frame below is sized and shaped to actually observe that: the winner
+    # is verified against a stable sort of the same input rather than asserted
+    # from a hand-traced index, and the padding rows supply the rank variety
+    # quicksort needs before it reorders anything.
+    pad = _vocab([(f"Type", f"filler{i}", 11, None, 3, 3, 1.0,
+                   (S.P_PROPOSED, S.P_LEARNED, S.P_CURATOR)[i % 3])
+                  for i in range(3000)])
+    dupes = _vocab([("Type", "cometchip", 11, None, 0, 0, 0.0, S.P_CURATOR),
+                    ("Type", "cometchip", 12, None, 0, 0, 0.0, S.P_CURATOR)])
+    # curator rows first, then padding, so the duplicated pair sits at the head
+    # of the frame where an unstable partition is most likely to move it.
+    curator = pd.concat([dupes, pad], ignore_index=True)
+    out = V.merge_vocabulary(_vocab([]), _vocab([]), curator, _assays())
+    row = out[out.raw_value == "cometchip"].iloc[0]
+    # last row for the key wins: the correction, not the row it corrected
+    assert row.internal_assay_id == 12
+    assert row.internal_assay_title == "Tissue Collection"
+    assert len(out[out.raw_value == "cometchip"]) == 1
+    # and it is reproducible: same input, same answer, every time
+    for _ in range(5):
+        again = V.merge_vocabulary(_vocab([]), _vocab([]), curator, _assays())
+        assert again[again.raw_value == "cometchip"].iloc[0].internal_assay_id == 12
+
+
+def test_unresolved_lists_frequent_terms_the_vocabulary_cannot_map():
+    # Sample 1 and samples 6/7 all name the same assay as the vocabulary row,
+    # but spell it three ways. The vocabulary row is spelled the way a CURATOR
+    # would type it (`CometChip`), not the way learn_vocabulary emits it, which
+    # is the case that separates a real lookup from a string compare: without
+    # normalising BOTH sides, `cometchip` is reported as an unresolved term
+    # backed by 3 samples even though the vocabulary maps it, and it lands in
+    # Task 4's judgment queue for a human to rule on a question already answered.
+    meta = {1: {"Type": "CometChip"}, 2: {"Type": "mystery"},
+            3: {"Type": "mystery"}, 4: {"Type": "mystery"}, 5: {"Type": "once"},
+            6: {"Type": "cometchip"}, 7: {"Type": "  COMETCHIP "}}
+    uuids = {1: "A-1", 2: "A-2", 3: "A-3", 4: "A-4", 5: "A-5",
+             6: "A-6", 7: "A-7"}
+    vocab = _vocab([("Type", "CometChip", 11, "Comet Chip", 900, 850, 0.99,
+                     S.P_LEARNED)])
+    out = V.unresolved_terms(meta, vocab, uuids, min_occurrences=3)
+    assert list(out.raw_value) == ["mystery"]     # 'once' is below the floor
+    assert out.iloc[0].n_samples == 3
+    assert "A-2" in out.iloc[0].example_uuids
+
+
+def test_vocabulary_round_trips_through_csv(tmp_path):
+    # Row 2 is the reason load_vocabulary passes keep_default_na=False. `nan`
+    # and `null` are real strings a curator may have typed into a metadata
+    # field, and pandas' default na_values would read them back as MISSING --
+    # silently changing which value the row maps rather than failing. Verified
+    # 2026-08-14 on pandas 3.0.5: a plain read_csv returns float nan here.
+    df = _vocab([("Type", "cometchip", 11, "Comet Chip", 900, 850, 0.99, S.P_LEARNED),
+                 ("Software", "nan", 12, "Tissue Collection", 5, 5, 1.0, S.P_CURATOR)])
+    p = tmp_path / "vocabulary.csv"
+    V.save_vocabulary(df, p)
+    back = V.load_vocabulary(p)
+    assert list(back.columns) == S.VOCAB_COLUMNS
+    assert back.iloc[0].internal_assay_id == 11
+    assert back.iloc[0].raw_value == "cometchip"
+    assert back.iloc[1].raw_value == "nan"
+    assert isinstance(back.iloc[1].raw_value, str)
