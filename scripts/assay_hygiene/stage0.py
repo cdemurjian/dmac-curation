@@ -98,10 +98,84 @@ def plan_edges(
     return plan, residues
 
 
-# Matches the server's protocol extraction: the Protocol metadata value is a
-# SOP URL and the trailing integer is the sops.id. Identical to _SOP_URL_RE
-# (neo4j_sync.py:42) -- keep the two in step.
+# --- protocol resolution -----------------------------------------------------
+#
+# The house rule, and it is NOT the server's regex alone.
+#
+# `_build_derived_from_payloads` prefers an upload sheet's explicit `sop_id`
+# column over its `_SOP_URL_RE` fallback (neo4j_sync.py:908). Every existing
+# labelled edge came in that way, and that column was computed by
+# `internal-assays-migration/phase4_sample_export.py::resolve_sop_id`, which
+# tries three formats in order against a {sops.title: sops.id} lookup. Measured
+# 2026-08-14: applied verbatim to production it reproduces the stored
+# protocol_id on 200,000 of 200,000 sampled existing edges with zero
+# disagreements, and resolves 85,104 of stage 0's 90,534 planned edges -- 85,093
+# of them by format 3 and exactly ONE by the URL regex this stage was originally
+# specified against.
+#
+# So porting the rule is reconstruction, not divergence: a backfill has no
+# sheet, and reproducing what the sheet would have supplied is what keeps a
+# stage 0 edge indistinguishable from a pipeline-produced one. Resolving 1 edge
+# in 90,534 would have made the other 90,533 anomalous instead.
+
+# 1. a SOP URL whose trailing integer IS the sops.id. Identical to _SOP_URL_RE
+#    (neo4j_sync.py:42) -- keep the two in step.
 SOP_URL_RE = re.compile(r"/sops/(\d+)")
+# 2. a URL carrying the SOP's UID filename, which is its sops.title.
+SOP_UID_RE = re.compile(r"uid=([^/]+)")
+
+# Which of the three formats resolved an edge, or why none did. Exactly
+# analogous to assay_source and, like it, a partition: every planned edge
+# carries one of these, so the report's breakdown totals to the edge count.
+P_SRC_URL = "sop_url"
+P_SRC_UID = "uid_url"
+P_SRC_TITLE = "title"
+P_SRC_UNRESOLVED = "unresolved"
+P_SRC_ABSENT = "none"
+
+
+def _resolve_protocol(protocol_val, title_to_id: dict) -> tuple:
+    """(protocol_id, protocol_source) for one child's Protocol metadata value.
+
+    Ported from resolve_sop_id. Two things it deliberately keeps:
+
+    - **the order, and the early return.** A `uid=` match returns whatever the
+      lookup gives, hit or miss; it never retries the whole string as a title.
+      Observable whenever a URL's uid half is unknown while the URL itself
+      happens to be a sops.title.
+    - **str() rather than an isinstance guard.** json_metadata is
+      operator-entered, and a Protocol arrives as a number or a list often
+      enough that a backfill over 400k rows cannot raise on one.
+
+    The one refinement: a whitespace-only value is reported as ABSENT rather
+    than UNRESOLVED. Both resolve to no id -- this decides only which bucket the
+    report puts it in, and "a protocol value a curator can go and look at" is
+    the wrong description of "  ".
+    """
+    if not protocol_val:
+        return None, P_SRC_ABSENT
+    text = str(protocol_val).strip()
+    if not text:
+        return None, P_SRC_ABSENT
+    m = SOP_URL_RE.search(text)
+    if m:
+        # Taken on trust, and NOT checked against the sops extract: the server
+        # does the same and simply leaves the title null when the SOP is unknown
+        # (neo4j_sync.py:1055-1062), so validating here would make a stage 0 edge
+        # distinguishable from a pipeline one. The report states how many ids
+        # were written on that trust alone.
+        return int(m.group(1)), P_SRC_URL
+    m = SOP_UID_RE.search(text)
+    if m:
+        # rstrip("/") is the migration's own, and is already unreachable --
+        # [^/]+ cannot capture a slash. Kept so the two functions read alike.
+        uid = m.group(1).rstrip("/")
+        if uid in title_to_id:
+            return title_to_id[uid], P_SRC_UID
+        return None, P_SRC_UNRESOLVED
+    if text in title_to_id:
+        return title_to_id[text], P_SRC_TITLE
+    return None, P_SRC_UNRESOLVED
 
 
 def resolve_properties(
@@ -127,7 +201,11 @@ def resolve_properties(
     The one server input with no counterpart here is the upload sheet itself:
     the server lets a submitted row override the sop_id and the assay title
     (neo4j_sync.py:903-928). Stage 0 backfills edges for samples uploaded long
-    ago, so there is no sheet to override with and the database always wins.
+    ago, so there is no sheet. For the assay title that means the database wins.
+    For the sop_id it means the opposite of leaving it to the regex fallback:
+    the sheet's column is where 79.7% of the graph's protocol_ids came from, so
+    ``_resolve_protocol`` reconstructs it. ``protocol_source`` records which
+    format did, and the report breaks the plan down by it.
     """
     meta_by_id: dict[int, dict] = {}
     # Selected by name before iterating, as in plan_edges: itertuples unpacks
@@ -145,7 +223,30 @@ def resolve_properties(
         # over 400k rows cannot die on one malformed blob, so treat it as empty.
         meta_by_id[sid] = parsed if isinstance(parsed, dict) else {}
 
-    sop_title = dict(zip(sops["sop_id"], sops["title"]))
+    # Both directions of the sops frame, built in one pass over the DECLARED
+    # columns -- selected by name first, as everywhere else here, because a
+    # producer emitting title | sop_id would otherwise key the lookup the wrong
+    # way round and every title-form Protocol (94% of the population) would come
+    # back unresolved with nothing failing.
+    #
+    #   sop_title   {sops.id: sops.title}, for the title the edge carries
+    #   title_to_id {sops.title: sops.id}, the migration's own lookup
+    #
+    # Two sops sharing a title keep the SMALLEST id, mirroring the assay
+    # tiebreak below. Production has 553 titles over 553 sops so this is
+    # invisible there; SOPS_SQL carries no ORDER BY, so under a future duplicate
+    # a dict built by plain assignment would resolve differently between two
+    # extracts of the same database. A null title is skipped: nothing can equal
+    # it, and it would put a float in the id comparison.
+    sop_title: dict = {}
+    title_to_id: dict = {}
+    for sop_id, title in sops[S.SOP_COLUMNS].itertuples(index=False):
+        sop_title[sop_id] = title
+        if pd.isna(sop_id) or pd.isna(title):
+            continue
+        prev = title_to_id.get(title)
+        if prev is None or int(sop_id) < prev:
+            title_to_id[title] = int(sop_id)
 
     assays_by_sample: dict[int, set[int]] = {}
     for sid, aid in membership[S.MEMBERSHIP_COLUMNS].itertuples(index=False):
@@ -190,8 +291,7 @@ def resolve_properties(
     for r in plan.itertuples(index=False):
         meta = meta_by_id.get(r.child_id, {})
         protocol_val = meta.get("Protocol") or meta.get("protocol") or ""
-        m = SOP_URL_RE.search(str(protocol_val))
-        protocol_id = int(m.group(1)) if m else None
+        protocol_id, protocol_source = _resolve_protocol(protocol_val, title_to_id)
         # `if protocol_id` and not `is not None`, mirroring neo4j_sync.py:1060.
         protocol_title = sop_title.get(protocol_id) if protocol_id else None
 
@@ -218,6 +318,7 @@ def resolve_properties(
             protocol_id, protocol_title, assay_id,
             internal_id, internal_title,
             r.child_type, r.parent_type, r.field, len(shared), source,
+            protocol_source,
         ))
 
     return pd.DataFrame(out, columns=S.STAGE0_PLAN_COLUMNS)
@@ -284,8 +385,21 @@ TIEBREAK_LIST_CAP = 50
 _P_NO_ROW = "the child has no row in the samples extract"
 _P_EMPTY = "the child's json_metadata is empty"
 _P_UNREADABLE = "the child's json_metadata did not parse as a JSON object"
-_P_NO_URL = "the child's metadata names no `/sops/<id>` URL"
-_PROTOCOL_CAUSES = [_P_NO_ROW, _P_EMPTY, _P_UNREADABLE, _P_NO_URL]
+_P_NO_PROTOCOL = "the child's metadata names no protocol any of the three formats resolves"
+_PROTOCOL_CAUSES = [_P_NO_ROW, _P_EMPTY, _P_UNREADABLE, _P_NO_PROTOCOL]
+
+# What each protocol_source means, in the order _resolve_protocol tries them.
+# Rendered by iteration over the values the plan actually carries, with these
+# five always shown: a source added to _resolve_protocol and forgotten here is
+# printed under its raw key rather than vanishing, and a zero against a format
+# is itself the finding -- `sop_url` at 1 in 90,534 is why this rule exists.
+PROTOCOL_SOURCE_LABELS = {
+    P_SRC_URL: "a `/sops/<id>` URL; the id is taken verbatim, unchecked",
+    P_SRC_UID: "a URL carrying `uid=<sop title>`, matched against `sops.title`",
+    P_SRC_TITLE: "the value is itself a `sops.title`",
+    P_SRC_UNRESOLVED: "a `Protocol` value none of the three formats resolves",
+    P_SRC_ABSENT: "the child's metadata carries no `Protocol` value",
+}
 
 
 def _pct(n: int, total: int) -> str:
@@ -340,7 +454,7 @@ def _protocol_causes(resolved: pd.DataFrame, samples: pd.DataFrame) -> dict[str,
             continue
         # A document that parses to a list is as unusable as one that does not
         # parse: resolve_properties discards both, and the server would raise.
-        cause_by_sample[sid] = _P_NO_URL if isinstance(parsed, dict) else _P_UNREADABLE
+        cause_by_sample[sid] = _P_NO_PROTOCOL if isinstance(parsed, dict) else _P_UNREADABLE
 
     counts = dict.fromkeys(_PROTOCOL_CAUSES, 0)
     missing = resolved[resolved["protocol_id"].isna()]
@@ -548,6 +662,63 @@ def build_report(
         f" id{_pct(with_protocol, total)}.",
         "",
     ]
+
+    # WHICH rule resolved them, not just how many. The coverage figure alone
+    # invites the assumption that the `/sops/<id>` URL did the work; on
+    # production it resolves 1 edge in 90,534 and a plain `sops.title` match
+    # resolves 85,093. Every source is rendered and the table totals to the edge
+    # count, so this is a partition of the plan rather than a selection from it.
+    if total:
+        counts = resolved["protocol_source"].value_counts(dropna=False).to_dict()
+        # Known sources first, in resolution order, then anything else this
+        # report was not written for -- by descending count then key, so the
+        # same extract renders a byte-identical report to diff.
+        extra = sorted(
+            (k for k in counts if k not in PROTOCOL_SOURCE_LABELS),
+            key=lambda k: (-counts[k], str(k)),
+        )
+        lines += [
+            "Which rule resolved each edge. The three resolving formats are tried",
+            "in the order below and the first that matches wins. `unresolved` and",
+            "`none` resolve nothing; they are why the coverage figure above is not",
+            "the whole plan. Every planned edge is in exactly one row.",
+            "",
+            "| Source | What it means | Edges |",
+            "|---|---|---|",
+        ]
+        for src in list(PROTOCOL_SOURCE_LABELS) + extra:
+            meaning = PROTOCOL_SOURCE_LABELS.get(
+                src, "(no description here -- see _resolve_protocol)")
+            lines.append(f"| `{_label(src)}` | {meaning} | {counts.get(src, 0):,} |")
+        lines += [
+            f"| **every planned edge** |  | **{total:,}** |",
+            "",
+        ]
+
+        # The format-1 decision, stated rather than assumed. A `/sops/<id>` id is
+        # the only one taken on trust: formats 2 and 3 read their id OUT of the
+        # sops extract, so those cannot dangle. Measured 0 of 90,534 on
+        # production; phrased as "resolved no title" because that is exactly what
+        # is observable here, and it is also what the graph will show.
+        n_url = counts.get(P_SRC_URL, 0)
+        if n_url:
+            uncorroborated = int(
+                ((resolved["protocol_source"] == P_SRC_URL)
+                 & resolved["protocol_title"].isna()).sum()
+            )
+            lines += [
+                f"**{uncorroborated:,}** of the **{n_url:,}** edges resolved by a",
+                "`/sops/<id>` URL resolved no `protocol_title`. Those are the ids",
+                "nothing in the sops extract corroborates: they are what the child's",
+                "metadata asserted, and stage 0 writes them unchecked. The server",
+                "does the same (neo4j_sync.py:1055-1062), and dropping one would both",
+                "make that edge distinguishable from a pipeline-produced one and turn",
+                "a traceable id into a null indistinguishable from \"declares none\".",
+                "Formats 2 and 3 read their id OUT of the sops extract, so only",
+                "format 1 can produce an id the extract has no row for.",
+                "",
+            ]
+
     if no_protocol == 0:
         lines += ["Every planned edge resolved one, so there is nothing to explain.", ""]
     elif samples is None:
@@ -556,9 +727,10 @@ def build_report(
             "separate, because the samples frame was not supplied: the child has no",
             "row in the samples extract, its json_metadata is empty, its",
             "json_metadata did not parse as a JSON object, or its metadata names no",
-            "`/sops/<id>` URL. resolve_properties reads an unreadable blob as empty",
-            "metadata, so a null protocol id is NOT a claim that the child declares",
-            "no protocol. Pass `samples` to build_report to have this split",
+            "protocol any of the three formats resolves. resolve_properties reads an",
+            "unreadable blob as empty metadata, so a null protocol id is NOT a claim",
+            "that the child declares no protocol -- and neither is the `none` row of",
+            "the table above. Pass `samples` to build_report to have this split",
             "recounted.",
             "",
         ]

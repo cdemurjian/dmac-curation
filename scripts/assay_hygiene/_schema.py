@@ -60,8 +60,14 @@ EDGE_ROW_COLUMNS = [
     "protocol_id", "protocol_title", "assay_id",
     "internal_assay_id", "internal_assay_title",
 ]
+# The reporting columns ride BEHIND the payload ones and nowhere else:
+# stage0_apply.to_payload slices EDGE_ROW_COLUMNS out of the front and
+# apply_edges asserts this whole list, in order. A column inserted anywhere but
+# the end shifts the payload slice onto a field DerivedFromRelRow forbids, which
+# the server rejects outright.
 STAGE0_PLAN_COLUMNS = EDGE_ROW_COLUMNS + [
     "child_type", "parent_type", "field", "n_shared", "assay_source",
+    "protocol_source",
 ]
 
 D_NOT_UID = "not_a_uid"

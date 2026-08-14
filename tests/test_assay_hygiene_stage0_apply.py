@@ -71,7 +71,7 @@ def _wide_plan(n: int) -> pd.DataFrame:
     rows = [
         (1000 + i, f"D.IMG-260101ABC-{i}", 2000 + i, f"TIS-260101ABC-{i}",
          5, "Comet Chip SOP", 1, 11, "Comet Chip",
-         "D.IMG", "TIS", "Parent", 1, "junction")
+         "D.IMG", "TIS", "Parent", 1, "junction", "title")
         for i in range(n)
     ]
     return pd.DataFrame(rows, columns=S.STAGE0_PLAN_COLUMNS)

@@ -162,6 +162,21 @@ def test_edge_row_columns_mirror_the_server_model():
     ]
 
 
+def test_protocol_source_is_appended_after_the_payload_columns():
+    """A reporting column added anywhere but the end breaks the payload slice.
+
+    stage0_apply.to_payload slices S.EDGE_ROW_COLUMNS by name, but apply_edges
+    asserts the whole frame equals STAGE0_PLAN_COLUMNS in order and the manifest
+    is read positionally alongside the report. DerivedFromRelRow is
+    extra="forbid", so a reporting column that reached the payload would be a
+    hard rejection at the server rather than a wrong value.
+    """
+    assert S.STAGE0_PLAN_COLUMNS[-1] == "protocol_source"
+    assert "protocol_source" not in S.EDGE_ROW_COLUMNS
+    assert S.STAGE0_PLAN_COLUMNS[:len(S.EDGE_ROW_COLUMNS)] == S.EDGE_ROW_COLUMNS
+    assert len(set(S.STAGE0_PLAN_COLUMNS)) == len(S.STAGE0_PLAN_COLUMNS)
+
+
 def test_drop_reasons_are_distinct():
     reasons = [S.D_NOT_UID, S.D_NO_NODE, S.D_SELF_LOOP, S.D_ALREADY_EXISTS]
     assert len(set(reasons)) == len(reasons)

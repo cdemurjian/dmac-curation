@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -453,6 +454,253 @@ def test_protocol_lookup_mirrors_every_server_miss():
     assert pd.isna(out.loc[5, "protocol_title"])   # ...but its title suppressed
 
 
+# --- protocol resolution: the house three-format rule ------------------------
+#
+# Ported from internal-assays-migration/phase4_sample_export.py::resolve_sop_id,
+# the function that computed the `sop_id` column of the upload sheets the prior
+# migration submitted. That column is what _build_derived_from_payloads prefers
+# over the server's `/sops/<id>` regex (neo4j_sync.py:908), and it is the reason
+# 79.7% of the graph's existing DERIVED_FROM edges carry a protocol_id while the
+# regex alone resolves 1 of stage 0's 90,534 planned edges. A backfill has no
+# sheet, so reconstructing what the sheet would have supplied is what makes a
+# stage 0 edge indistinguishable from a pipeline-produced one.
+#
+# Every case below builds its own frames. make_stage0_fixture()'s rows are
+# frozen -- and its one sample carries a format-1 Protocol, which is why the
+# cases above it did not have to change.
+
+# Sentinel for "this child has no row in the samples extract at all", which is
+# not the same input as an empty json_metadata and must not be spelled None.
+_NO_SAMPLES_ROW = object()
+
+# A sops extract in the shape of the real one: titles are UID filenames.
+_SOPS = [
+    (39, "P.URL-200101-V1_url-form-protocol.docx"),
+    (45, "P.FOR-200623-V1_Bacterial-inoculum-batch-preparation-protocol.docx"),
+    (46, "P.WHI-200519-V1_Whitelist-protocol.pdf"),
+]
+_TITLE_45 = _SOPS[1][1]
+_TITLE_46 = _SOPS[2][1]
+
+
+def _protocols(cases, sops=None):
+    """Resolve one edge per case, indexed by child_id.
+
+    `cases` maps child_id -> the child's raw json_metadata, or _NO_SAMPLES_ROW
+    for a child the samples extract does not describe. Membership and assays are
+    empty on purpose: every edge here is dark, so only the protocol columns
+    carry information and no assay behaviour can mask a protocol defect.
+    """
+    plan = pd.DataFrame(
+        [(f"C-260101ABC-{cid}", "TIS-260101ABC-1", cid, 900, "DNA", "TIS", "Parent")
+         for cid in cases],
+        columns=["child_uuid", "parent_uuid", "child_id", "parent_id",
+                 "child_type", "parent_type", "field"],
+    )
+    samples = pd.DataFrame(
+        [(cid, f"C-260101ABC-{cid}", jmeta, None, "10")
+         for cid, jmeta in cases.items() if jmeta is not _NO_SAMPLES_ROW],
+        columns=S.SAMPLE_COLUMNS,
+    )
+    return stage0.resolve_properties(
+        plan, samples,
+        pd.DataFrame([], columns=S.MEMBERSHIP_COLUMNS),
+        pd.DataFrame([], columns=S.ASSAY_COLUMNS),
+        pd.DataFrame(_SOPS, columns=S.SOP_COLUMNS) if sops is None else sops,
+    ).set_index("child_id")
+
+
+def test_format_1_a_sops_url_yields_its_trailing_integer_verbatim():
+    # The rule the server already implements, kept as the first format tried.
+    out = _protocols({1: '{"Protocol": "https://fairdata.mit.edu/sops/39"}'})
+    assert out.loc[1, "protocol_id"] == 39
+    assert out.loc[1, "protocol_title"] == _SOPS[0][1]
+    assert out.loc[1, "protocol_source"] == "sop_url"
+
+
+def test_format_2_a_uid_url_resolves_through_the_sops_title():
+    """`.../uid=<sop title>` with and without the trailing slash.
+
+    The trailing slash is the form the migration guarded with rstrip("/"). It is
+    already unreachable -- `uid=([^/]+)` cannot capture a slash -- but the two
+    spellings must resolve identically whichever way that is achieved, and this
+    is the only case that says so.
+    """
+    for value in (f"https://fairdata.mit.edu/sops/uid={_TITLE_46}",
+                  f"https://fairdata.mit.edu/sops/uid={_TITLE_46}/"):
+        out = _protocols({1: json.dumps({"Protocol": value})})
+        assert out.loc[1, "protocol_id"] == 46, value
+        assert out.loc[1, "protocol_title"] == _TITLE_46, value
+        assert out.loc[1, "protocol_source"] == "uid_url", value
+
+
+def test_format_3_a_plain_title_resolves_through_the_sops_title():
+    # 85,093 of the 90,534 planned production edges take this path, and the
+    # server's regex resolves none of them.
+    for value in (_TITLE_45, f"  {_TITLE_45}  "):   # the migration strips
+        out = _protocols({1: json.dumps({"Protocol": value})})
+        assert out.loc[1, "protocol_id"] == 45, value
+        assert out.loc[1, "protocol_title"] == _TITLE_45, value
+        assert out.loc[1, "protocol_source"] == "title", value
+
+
+def test_a_uid_url_naming_an_unknown_sop_never_falls_through_to_the_title_rule():
+    """Format 2 returns whatever the lookup gives, hit or miss -- it does not retry.
+
+    The migration is explicit about this (`return sop_lookup.get(uid)`), and the
+    difference is observable: this Protocol value's `uid=` half is unknown while
+    the WHOLE string is a sops title. A rule that fell through to format 3 would
+    resolve it to 99; the house rule leaves it unresolved.
+    """
+    value = "https://fairdata.mit.edu/sops/uid=never-uploaded.pdf"
+    sops = pd.DataFrame(_SOPS + [(99, value)], columns=S.SOP_COLUMNS)
+    out = _protocols({1: json.dumps({"Protocol": value})}, sops=sops)
+    assert pd.isna(out.loc[1, "protocol_id"])
+    assert pd.isna(out.loc[1, "protocol_title"])
+    assert out.loc[1, "protocol_source"] == "unresolved"
+
+
+def test_a_plain_title_the_lookup_does_not_know_is_unresolvable():
+    # 182 of the production population. Curation work, not a stage 0 defect.
+    out = _protocols({1: '{"Protocol": "P.NOP-000000-V1_never-uploaded.docx"}'})
+    assert pd.isna(out.loc[1, "protocol_id"])
+    assert pd.isna(out.loc[1, "protocol_title"])
+    assert out.loc[1, "protocol_source"] == "unresolved"
+
+
+def test_a_child_that_declares_no_protocol_is_absent_rather_than_unresolvable():
+    """The two null outcomes are different findings and must not pool.
+
+    "unresolved" is a value a curator can go and look at; "none" is a child that
+    never named a protocol. An unreadable json_metadata lands in "none" because
+    resolve_properties reads it as empty metadata -- the report's cause table is
+    what separates that from a genuine absence, and this pins that the source
+    column does not pretend to.
+    """
+    out = _protocols({
+        1: '{"Protocol": ""}',
+        2: '{"Protocol": null}',
+        3: '{"Name": "no Protocol key at all"}',
+        4: '{"Protocol": "   "}',        # whitespace only: a value in name only
+        5: _NO_SAMPLES_ROW,
+        6: "not json at all",
+        7: '["Protocol"]',               # parses, but not to an object
+    })
+    for cid in range(1, 8):
+        assert pd.isna(out.loc[cid, "protocol_id"]), cid
+        assert out.loc[cid, "protocol_source"] == "none", cid
+
+
+def test_a_non_string_protocol_is_coerced_rather_than_raising():
+    """`str(protocol)` is the migration's own first move, kept.
+
+    A backfill over 400k rows cannot die on one row whose Protocol is a number
+    or a list. Child 3 is the case that proves the coercion actually happens
+    rather than being short-circuited by an isinstance guard: a dict stringifies
+    to something a `/sops/<id>` search still finds.
+    """
+    out = _protocols({
+        1: '{"Protocol": 39}',
+        2: json.dumps({"Protocol": [_TITLE_45]}),
+        3: '{"Protocol": {"url": "https://fairdata.mit.edu/sops/39"}}',
+    })
+    assert pd.isna(out.loc[1, "protocol_id"])
+    assert out.loc[1, "protocol_source"] == "unresolved"
+    assert pd.isna(out.loc[2, "protocol_id"])
+    assert out.loc[2, "protocol_source"] == "unresolved"
+    assert out.loc[3, "protocol_id"] == 39
+    assert out.loc[3, "protocol_source"] == "sop_url"
+
+
+def test_a_url_id_the_sops_extract_does_not_describe_is_kept_not_dropped():
+    """The one format that can emit an id nothing corroborates. It is trusted.
+
+    Both the server (neo4j_sync.py:1055-1062) and the migration take the URL's
+    integer verbatim and simply leave the title null when the SOP is unknown, so
+    dropping it here would make a stage 0 edge distinguishable from a
+    pipeline-produced one -- the exact thing this stage is built not to do. It
+    would also destroy information: a null protocol_id is indistinguishable from
+    "declared none", whereas a dangling id still points at what the metadata
+    said. Measured 0 of 90,534 on production; the report states the count so a
+    future extract that produces one cannot arrive silently.
+    """
+    out = _protocols({1: '{"Protocol": "https://fairdata.mit.edu/sops/9999"}'})
+    assert out.loc[1, "protocol_id"] == 9999
+    assert pd.isna(out.loc[1, "protocol_title"])
+    assert out.loc[1, "protocol_source"] == "sop_url"
+
+
+def test_two_sops_sharing_a_title_resolve_to_the_smaller_id_in_either_order():
+    """Determinism, mirroring the assay tiebreak rather than last-row-wins.
+
+    Production has 553 titles over 553 sops, so this is invisible there -- and
+    the SOPS_SQL projection carries no ORDER BY, so under a future duplicate a
+    dict built by assignment would resolve differently between two extracts of
+    the same database. Asserted under both row orders, because last-row-wins
+    passes under one of them.
+    """
+    rows = [(70, "P.DUP-200101-V1_shared.docx"), (12, "P.DUP-200101-V1_shared.docx")]
+    for order in (rows, list(reversed(rows))):
+        out = _protocols(
+            {1: '{"Protocol": "P.DUP-200101-V1_shared.docx"}'},
+            sops=pd.DataFrame(order, columns=S.SOP_COLUMNS),
+        )
+        assert out.loc[1, "protocol_id"] == 12
+        assert out.loc[1, "protocol_source"] == "title"
+
+
+def test_a_sop_with_no_title_cannot_be_matched_and_does_not_poison_the_lookup():
+    # sops.title is nullable. A NaN key is a key nothing can equal, but it is
+    # also a key that makes the min-id comparison run against a float.
+    sops = pd.DataFrame(_SOPS + [(60, None)], columns=S.SOP_COLUMNS)
+    out = _protocols({1: json.dumps({"Protocol": _TITLE_45})}, sops=sops)
+    assert out.loc[1, "protocol_id"] == 45
+    assert out.loc[1, "protocol_source"] == "title"
+
+
+def test_the_sops_frame_is_read_by_name_and_not_by_position():
+    """`sops` is unpacked positionally, like `samples` and `membership`.
+
+    A producer emitting title | sop_id would build a {id: title} lookup keyed
+    the wrong way round and every title-form Protocol -- 94% of the population
+    -- would come back unresolved without anything failing.
+    """
+    swapped = pd.DataFrame(_SOPS, columns=S.SOP_COLUMNS)[["title", "sop_id"]]
+    assert list(swapped.columns) != S.SOP_COLUMNS
+    out = _protocols({1: json.dumps({"Protocol": _TITLE_45})}, sops=swapped)
+    assert out.loc[1, "protocol_id"] == 45
+    assert out.loc[1, "protocol_source"] == "title"
+
+    # ...and a frame genuinely missing a declared column must fail loudly
+    with pytest.raises(KeyError):
+        _protocols({1: "{}"},
+                   sops=pd.DataFrame(_SOPS, columns=S.SOP_COLUMNS)
+                   .drop(columns=["title"]))
+
+
+def test_every_planned_edge_carries_a_protocol_source():
+    """The column is a partition, not an annotation.
+
+    The report totals it against the edge count, so a row that fell through
+    every branch with source None would make the gate's arithmetic wrong rather
+    than visibly incomplete.
+    """
+    out = _protocols({
+        1: '{"Protocol": "https://fairdata.mit.edu/sops/39"}',
+        2: json.dumps({"Protocol": f"https://x/sops/uid={_TITLE_46}"}),
+        3: json.dumps({"Protocol": _TITLE_45}),
+        4: '{"Protocol": "P.NOP-000000-V1_never-uploaded.docx"}',
+        5: '{"Protocol": ""}',
+    })
+    assert out["protocol_source"].tolist() == [
+        "sop_url", "uid_url", "title", "unresolved", "none",
+    ]
+    # ...and the two halves agree, which is what lets the report say the last
+    # two rows of its table ARE the edges the coverage figure leaves out.
+    assert (out["protocol_id"].notna()
+            == out["protocol_source"].isin({"sop_url", "uid_url", "title"})).all()
+
+
 def test_resolve_is_not_fooled_by_frames_whose_columns_are_reordered():
     """Column ORDER of `samples` and `membership` must not change the answer.
 
@@ -549,7 +797,7 @@ def _edge(**kw):
         child_id=1, child_uuid="C-260101ABC-1",
         parent_id=2, parent_uuid="P-260101ABC-1",
         child_type="DNA", parent_type="TIS", field="Parent",
-        n_shared=0, assay_source="none",
+        n_shared=0, assay_source="none", protocol_source="none",
     )
     row.update(kw)
     return row
@@ -953,6 +1201,121 @@ def test_report_recounts_metadata_parse_failures_off_the_samples_frame():
     assert _row(report, "| the child's json_metadata is empty").endswith("| 1 |")
     assert _row(report, "| the child's json_metadata did not parse").endswith("| 2 |")
     assert _row(report, "| the child's metadata names no").endswith("| 1 |")
+
+
+def test_report_breaks_the_resolved_protocols_down_by_the_rule_that_resolved_them():
+    """The finding that motivated the whole rule: it is not the URL doing the work.
+
+    An operator reading "94% carry a protocol id" would reasonably assume the
+    `/sops/<id>` URL this stage was specified against. On production 85,093 of
+    85,104 come from a plain title match and exactly 1 from a URL, so the split
+    is the difference between a believable report and a misleading one.
+
+    Every source is rendered, including the two that resolve nothing, and the
+    table totals to the edge count -- so the breakdown is a partition of the
+    plan rather than a selection from it.
+    """
+    report = stage0.build_report(
+        _resolved_frame(
+            _edge(child_id=1, protocol_id=39, protocol_source="sop_url"),
+            _edge(child_id=2, protocol_id=46, protocol_source="uid_url"),
+            _edge(child_id=3, protocol_id=45, protocol_source="title"),
+            _edge(child_id=4, protocol_id=45, protocol_source="title"),
+            _edge(child_id=5, protocol_id=None, protocol_source="unresolved"),
+            _edge(child_id=6, protocol_id=None, protocol_source="none"),
+        ),
+        _residues(), _no_childof(),
+    )
+    assert "**4** of **6**" in _para(report, "carry a resolvable protocol id")
+    assert _row(report, "| `sop_url` |").endswith("| 1 |")
+    assert _row(report, "| `uid_url` |").endswith("| 1 |")
+    assert _row(report, "| `title` |").endswith("| 2 |")
+    assert _row(report, "| `unresolved` |").endswith("| 1 |")
+    assert _row(report, "| `none` |").endswith("| 1 |")
+    assert _row(report, "| **every planned edge**").endswith("| **6** |")
+
+
+def test_report_states_which_of_the_url_ids_nothing_in_the_extract_corroborates():
+    """The format-1 decision, made visible.
+
+    A `/sops/<id>` URL is the one format whose id is taken on trust: it is not
+    checked against the sops extract, because both the server and the migration
+    take it verbatim. So the report says how many were written on that trust
+    alone. Production measures 0; a future extract that measures more must not
+    be able to arrive quietly.
+    """
+    report = stage0.build_report(
+        _resolved_frame(
+            _edge(child_id=1, protocol_id=39, protocol_source="sop_url",
+                  protocol_title="P.URL-200101-V1_url-form-protocol.docx"),
+            _edge(child_id=2, protocol_id=9999, protocol_source="sop_url",
+                  protocol_title=None),
+            _edge(child_id=3, protocol_id=45, protocol_source="title",
+                  protocol_title="P.FOR-200623-V1_x.docx"),
+            # a null title that is NOT a URL id: it resolved nothing at all, and
+            # counting it here would report an uncorroborated write that the
+            # plan does not contain
+            _edge(child_id=4, protocol_id=None, protocol_source="unresolved",
+                  protocol_title=None),
+        ),
+        _residues(), _no_childof(),
+    )
+    para = _para(report, "resolved no `protocol_title`")
+    assert "**1** of the **2**" in para
+    # the title-matched edge cannot be in that count either: its id came FROM
+    # the sops extract, so nothing about it is uncorroborated
+    assert "**4**" not in para
+
+
+def test_report_corroborates_every_url_id_when_they_all_resolved_a_title():
+    # The good outcome still has to be stated, or a reader cannot tell it from
+    # a report that never checked.
+    report = stage0.build_report(
+        _resolved_frame(
+            _edge(child_id=1, protocol_id=39, protocol_source="sop_url",
+                  protocol_title="P.URL-200101-V1_url-form-protocol.docx"),
+        ),
+        _residues(), _no_childof(),
+    )
+    assert "**0** of the **1**" in _para(report, "resolved no `protocol_title`")
+
+
+def test_report_says_nothing_about_url_ids_when_no_edge_took_that_format():
+    # Production's expected shape is 1 URL edge in 90,534; a run with none must
+    # not print a sentence about a population that does not exist.
+    report = stage0.build_report(
+        _resolved_frame(_edge(child_id=1, protocol_id=45, protocol_source="title")),
+        _residues(), _no_childof(),
+    )
+    assert "resolved no `protocol_title`" not in report
+    assert _row(report, "| `sop_url` |").endswith("| 0 |")
+
+
+def test_report_renders_a_protocol_source_it_does_not_recognise():
+    """A source added to resolve_properties and forgotten here must still show.
+
+    Same rule the residue ledger already follows: enumerating the known values
+    turns a future format into a silent omission, and the total row would then
+    disagree with the edge count with nothing to explain the gap.
+    """
+    report = stage0.build_report(
+        _resolved_frame(
+            _edge(child_id=1, protocol_id=7, protocol_source="future_rule"),
+            _edge(child_id=2, protocol_id=45, protocol_source="title"),
+        ),
+        _residues(), _no_childof(),
+    )
+    assert _row(report, "| `future_rule` |").endswith("| 1 |")
+    assert _row(report, "| **every planned edge**").endswith("| **2** |")
+
+
+def test_the_empty_plan_prints_no_protocol_source_table():
+    # The idempotent re-run. A five-row table of zeros makes the gate longer
+    # without making it say more, exactly as with the unresolved-cause table.
+    report = stage0.build_report(
+        _resolved_frame(), _residues({S.D_ALREADY_EXISTS: 6}), _no_childof())
+    assert "0 edges to create" in report
+    assert "| `sop_url` |" not in report
 
 
 def test_full_protocol_coverage_prints_no_breakdown_to_read():
