@@ -199,6 +199,11 @@ def merge_vocabulary(
     normalisation belongs here, on the key itself, and not only in the
     consumers that happen to remember to normalise.
 
+    That normalisation can also DESTROY a key -- `normalise_value` returns None
+    for a non-str -- so this function RAISES on a raw_value that normalises to
+    None rather than deduping it away. See the assertion below for why an
+    in-memory frame needs that guard even though `load_vocabulary` pins dtypes.
+
     Display titles are rebuilt from the assays frame WHERE THAT FRAME HAS ONE,
     so a stale title in a hand-edited file cannot travel onward. Where it has
     none, the row keeps whatever title it already carried. Both halves matter:
@@ -263,7 +268,30 @@ def merge_vocabulary(
     allrows = pd.concat(frames, ignore_index=True)
     # normalise the key BEFORE deduping, so a curator spelling and a learned
     # spelling of one term are one term. See the docstring.
-    allrows["raw_value"] = [S.normalise_value(v) for v in allrows.raw_value]
+    before = list(allrows.raw_value)
+    allrows["raw_value"] = [S.normalise_value(v) for v in before]
+    # A key that normalises to None is a DELETION, not a no-op. Every such row
+    # lands on one None key and `drop_duplicates` below keeps exactly one, so
+    # n rows in become 1 row out with no error and nothing in the output to
+    # notice. `load_vocabulary` pins both key columns to str, which closes the
+    # door a csv comes through -- but nothing closes it for a frame a caller
+    # BUILDS. The `proposed` frame is the first such caller, and its natural
+    # first batch is the 12 bare-numeric Protocol terms in the live unresolved
+    # queue: a proposal file written from those, in memory, is the exact input
+    # that voided a curator file before the loader was pinned. Loud here beats
+    # silent there.
+    assert allrows.raw_value.notna().all(), (
+        f"raw_value normalises to None on {int(allrows.raw_value.isna().sum())}"
+        f" of {len(allrows)} rows, each of which would collapse onto one None"
+        " key and all but one be deleted: "
+        + "; ".join(
+            f"{f}/{v!r} ({p})"
+            for f, v, p, n in zip(allrows.source_field, before,
+                                  allrows.provenance, allrows.raw_value)
+            if pd.isna(n)
+        )
+        + ". A vocabulary key is text; give it as text."
+    )
     # an unrecognised provenance ranks below all three known sources rather
     # than raising: a junk value in a hand-edited file must not be able to
     # outrank a curator, and must not stop the run either.

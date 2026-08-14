@@ -424,3 +424,32 @@ def test_a_null_authoritative_title_does_not_overwrite_a_hand_typed_one():
                        0, 0, 0.0, S.P_CURATOR)])
     out = V.merge_vocabulary(_vocab([]), _vocab([]), curator, _assays())
     assert out.iloc[0].internal_assay_title == "Hand Typed By Curator"
+
+
+def test_a_raw_value_that_normalises_to_none_raises_instead_of_collapsing():
+    # The loader's dtype pin closes the door a csv comes through. It does not
+    # close the door a caller BUILDS a frame through, and the `proposed` frame
+    # is exactly that: written in memory by the vocabulary command, whose most
+    # natural first batch is the 12 bare-numeric Protocol terms in the live
+    # unresolved queue. normalise_value returns None for a non-str, so without
+    # this guard all three rows below land on one None key, drop_duplicates
+    # keeps one, and two proposals are deleted with nothing in the output to
+    # notice -- the same silent-delete family the loader pin fixed one layer up.
+    #
+    # Measured with the assertion removed: 4 rows in, 2 out.
+    learned = _vocab([("Type", "cometchip", 11, None, 900, 850, 0.99, S.P_LEARNED)])
+    proposed = _vocab([("Protocol", 18032418, 11, None, 0, 0, 0.0, S.P_PROPOSED),
+                       ("Protocol", 22010444, 11, None, 0, 0, 0.0, S.P_PROPOSED),
+                       ("Protocol", None, 11, None, 0, 0, 0.0, S.P_PROPOSED)])
+    with pytest.raises(AssertionError) as e:
+        V.merge_vocabulary(learned, proposed, _vocab([]), _assays())
+    # the message must name the offending rows, or the guard just moves the
+    # mystery from a missing row to an opaque traceback
+    msg = str(e.value)
+    assert "3 of 4 rows" in msg
+    assert "18032418" in msg and "22010444" in msg
+    assert S.P_PROPOSED in msg
+
+    # and it is the KEY that is guarded, not the frame: str keys still merge
+    fixed = _vocab([("Protocol", "18032418", 11, None, 0, 0, 0.0, S.P_PROPOSED)])
+    assert len(V.merge_vocabulary(learned, fixed, _vocab([]), _assays())) == 2
