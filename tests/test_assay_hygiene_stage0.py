@@ -697,6 +697,21 @@ def test_report_does_not_blame_the_antibody_fix_for_the_anchor_difference():
         assert difference in report, f"{difference} is never shown"
     assert "**9**" in _para(report, "`prod_regex_would_reject`:")
 
+    # Presence is not enough: a mutant that SWAPS the table's two data columns
+    # leaves all six tokens above present and every other assertion here green,
+    # while telling the operator production allows the two-letter type and the
+    # fix requires three -- the exact inverse of why the override exists. Pinned
+    # per row, and against the header, so the columns cannot silently trade
+    # places in either direction.
+    header = _row(report, "| Difference |")
+    assert header.index("UID_RE_PROD") < header.index("UID_RE_FIXED")
+    type_row = _row(report, "| sample-type code |")
+    assert type_row.index(r"[A-Z]{3,}") < type_row.index(r"[A-Z]{2,}"), \
+        "production is the stricter pattern; the fix is what allows `AB`"
+    prefix_row = _row(report, "| dotted prefix |")
+    assert prefix_row.index(r"([AD]\.)?") < prefix_row.index(r"([A-Z]\.)?"), \
+        "production is the stricter pattern; the fix is what allows any prefix"
+
     # Keyed on the claim, not on the evidence: pinning only that "trailing
     # newline" and "not_a_uid" share a paragraph lets the sentence that states
     # the DIRECTION be deleted with every assertion still green (mutation M4).
@@ -705,6 +720,69 @@ def test_report_does_not_blame_the_antibody_fix_for_the_anchor_difference():
     assert S.D_NOT_UID in anchors, "the anchor difference must be sent to not_a_uid"
     assert "antibody" not in anchors.lower()
     assert "AB" not in anchors
+
+
+def test_the_regex_section_reports_what_this_run_saw_not_a_past_extract():
+    """The report is regenerated against every extract; a dated claim is not.
+
+    It used to state that on the 2026-08-13 extract every reference in this count
+    was `AB`-prefixed: true of that data, and printed verbatim against every
+    extract after it. Derived from the plan in hand instead. `X.TIS-...` is
+    rejected by production for its PREFIX exactly as `AB-...` is rejected for its
+    LENGTH, so a run carrying both must name both rather than credit the whole
+    count to the antibody fix.
+    """
+    # non-vacuity, read off the patterns themselves rather than assumed
+    for token in ("AB-260101ABC-1", "X.TIS-260101ABC-1"):
+        assert S.UID_RE_FIXED.match(token) and not S.UID_RE_PROD.match(token)
+    assert S.UID_RE_PROD.match("TIS-260101ABC-2"), "the control is in neither count"
+
+    report = stage0.build_report(
+        _resolved_frame(
+            _edge(child_uuid="C-260101ABC-1", parent_uuid="AB-260101ABC-1"),
+            _edge(child_uuid="C-260101ABC-2", parent_uuid="AB-260101ABC-2"),
+            _edge(child_uuid="C-260101ABC-3", parent_uuid="X.TIS-260101ABC-1"),
+            _edge(child_uuid="C-260101ABC-4", parent_uuid="TIS-260101ABC-2"),
+        ),
+        _residues({"prod_regex_would_reject": 3}),
+        _no_childof(),
+    )
+    observed = _para(report, "sample-type codes seen on this run")
+    assert "`AB` (2)" in observed
+    assert "`TIS` (1)" in observed, "the dotted prefix feeds the same count"
+    assert "**3**" in observed
+    assert "2026-08-13" not in report, "no run may print another run's observation"
+
+    # A run with no such reference says so, rather than inheriting the claim.
+    clean = stage0.build_report(
+        _resolved_frame(_edge(parent_uuid="TIS-260101ABC-2")),
+        _residues({"prod_regex_would_reject": 3}), _no_childof())
+    assert "sample-type codes seen on this run" not in clean
+    assert "no planned edge carries" in _para(clean, "measured, not assumed")
+
+
+def test_the_override_paragraph_does_not_promise_every_counted_reference_is_created():
+    """"Stage 0 includes them" is true of the counter, not of every reference in it.
+
+    The counter increments at the validation point, ahead of the self-loop,
+    missing-node, already-exists and duplicate checks. That placement is correct
+    -- it measures what the live pattern would throw away, not what survives
+    everything else -- so the sentence is what has to move: on the real extract
+    8,120 of the 8,127 counted become edges and seven are counted and then
+    excluded for another reason. The operator reads this line as a statement
+    about the write.
+    """
+    report = stage0.build_report(
+        _resolved_frame(_edge()),
+        _residues({"prod_regex_would_reject": 9, S.D_SELF_LOOP: 1}),
+        _no_childof(),
+    )
+    para = _para(report, "`prod_regex_would_reject`:")
+    assert "**9**" in para
+    assert "excluded for another reason" in para, "the qualifying clause is the fix"
+    # and it says WHEN the count is taken, so a reader can see why it can exceed
+    # the edges created rather than having to take the qualification on trust
+    assert "before" in para and "duplicate" in para
 
 
 def test_the_tiebreak_count_covers_only_edges_that_actually_got_a_label():
@@ -761,7 +839,13 @@ def test_a_truncated_tiebreak_list_says_how_many_it_left_out():
     report = stage0.build_report(_resolved_frame(*rows), _residues(), _no_childof())
     assert f"C-260101ABC-{stage0.TIEBREAK_LIST_CAP - 1}" in report
     assert f"C-260101ABC-{stage0.TIEBREAK_LIST_CAP}" not in report
-    assert "3 more" in report
+    # Anchored on "and <n> more", not on the bare "3 more" this used to carry:
+    # with a cap of 50 and 53 rows, a mutant printing the RAW tiebreak count
+    # renders "and 53 more", which contains the substring "3 more" and passed.
+    # The overstatement it hides is the whole cap.
+    left_out = _row(report, "more, in `plan.parquet`")
+    assert f"and {len(rows) - stage0.TIEBREAK_LIST_CAP:,} more," in left_out
+    assert f"and {len(rows):,} more" not in left_out, "that is the total, not the remainder"
 
 
 def test_report_separates_a_dark_edge_from_an_unresolvable_shared_assay():

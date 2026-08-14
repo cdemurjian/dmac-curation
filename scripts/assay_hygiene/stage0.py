@@ -349,6 +349,37 @@ def _protocol_causes(resolved: pd.DataFrame, samples: pd.DataFrame) -> dict[str,
     return counts
 
 
+def _prod_rejected_codes(resolved: pd.DataFrame) -> list[tuple[str, int]]:
+    """Sample-type codes of the PLANNED edges the live server's UID_RE rejects.
+
+    Derived from the frame this run was handed, so the report describes the
+    extract in front of it instead of restating an observation about whichever
+    extract happened to be on the bench when the sentence was written. This
+    document is regenerated against every future extract.
+
+    Deliberately scoped to the planned edges: `prod_regex_would_reject` is
+    counted at validation, and a reference counted there and then excluded as a
+    self-loop, a missing node, an existing edge or a duplicate never reaches this
+    frame. So this cannot speak for those, and the sentence built from it must
+    not either.
+
+    Ordered by descending count then by code, so re-running the same extract
+    renders a byte-identical report to diff.
+    """
+    counts: dict[str, int] = {}
+    for token in resolved["parent_uuid"]:
+        text = str(token)
+        if not S.UID_RE_FIXED.match(text) or S.UID_RE_PROD.match(text):
+            continue
+        code = text.split("-", 1)[0]
+        # Drop the optional dotted prefix: the sample-type code is the part the
+        # `[A-Z]{3,}` half of the difference is about, and `A.TIS` is a TIS.
+        if len(code) > 2 and code[1] == ".":
+            code = code[2:]
+        counts[code] = counts.get(code, 0) + 1
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+
+
 def build_report(
     resolved: pd.DataFrame,
     residues: dict[str, int],
@@ -416,7 +447,10 @@ def build_report(
         "",
         f"`prod_regex_would_reject`: **{int(residues.get('prod_regex_would_reject', 0)):,}** "
         "references are valid UIDs that the live server's UID_RE rejects. Stage 0",
-        "includes them.",
+        "includes them: the counter is taken at validation, before the self-loop,",
+        "missing-node, already-exists and duplicate checks, so those of them not",
+        "excluded for another reason are created. It is a count of references, not",
+        "a promise about edges.",
         "",
         "The two patterns differ in three ways, and this counter separates none of",
         "them:",
@@ -431,10 +465,35 @@ def build_report(
         "length is the reason the fix exists: `AB`, the antibody type, is the only",
         "two-letter sample type in the database, so production discards every",
         "`AntibodyParent` reference before an edge is built. The prefix difference",
-        "feeds the same count for any dotted prefix other than `A.` or `D.`. On the",
-        "2026-08-13 extract every reference here was `AB`-prefixed, but that is an",
-        "observation about that data, not something this counter proves.",
+        "feeds the same count for any dotted prefix other than `A.` or `D.`.",
         "",
+    ]
+
+    # Measured off this run's own plan, never asserted about an earlier extract:
+    # the report is regenerated against every future one, and a sentence naming
+    # a date is a sentence that will be printed against data it never saw.
+    rejected = _prod_rejected_codes(resolved)
+    if rejected:
+        by_code = ", ".join(f"`{code}` ({n:,})" for code, n in rejected)
+        lines += [
+            "Which of the two is doing the work here is measured, not assumed. Of the",
+            "references in this count that became planned edges "
+            f"(**{sum(n for _, n in rejected):,}** of them), the",
+            f"sample-type codes seen on this run were: {by_code}.",
+            "The rest of the counter -- any reference excluded for another reason -- is",
+            "not in the plan and is not described by that sentence.",
+            "",
+        ]
+    else:
+        lines += [
+            "Which of the two is doing the work here is measured, not assumed. On",
+            "this run no planned edge carries a reference the live pattern would",
+            "have rejected, so anything in the counter above was excluded for",
+            "another reason before an edge was planned.",
+            "",
+        ]
+
+    lines += [
         "The anchor difference runs the other way and cannot add to this count:",
         "`$` matches before a trailing newline and `\\Z` does not, so a token",
         "carrying a trailing newline is accepted by the live server and rejected",
