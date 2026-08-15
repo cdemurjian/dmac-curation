@@ -56,7 +56,7 @@ when a claim looks wrong you need to know which half to distrust.
 - Test: `tests/test_assay_hygiene_schema.py` (existing file, add tests)
 
 **Interfaces:**
-- Produces: `CLAIM_COLUMNS`, `VOCAB_COLUMNS`, `AUDIT_COLUMNS`, `STRONG_FIELDS`, `WEAK_FIELDS`, `CLAIM_FIELDS`, tier constants `T_CORROBORATED` / `T_STRONG` / `T_WEAK` / `T_CONFLICT` / `T_NONE`, provenance constants `P_LEARNED` / `P_PROPOSED` / `P_CURATOR`, `normalise_value(v) -> str | None`, and an extended `make_fixture()` whose `samples` frame exercises every tier. (Task 5 later adds `contested` and `provenance` to `CLAIM_COLUMNS` and retires `T_CONFLICT` as an emitted tier; the constant stays.)
+- Produces: `CLAIM_COLUMNS`, `VOCAB_COLUMNS`, `AUDIT_COLUMNS`, `STRONG_FIELDS`, `WEAK_FIELDS`, `CLAIM_FIELDS`, tier constants `T_CORROBORATED` / `T_STRONG` / `T_WEAK` / `T_CONFLICT` / `T_NONE`, provenance constants `P_LEARNED` / `P_PROPOSED` / `P_CURATOR`, `normalise_value(v) -> str | None`, and an extended `make_fixture()` whose `samples` frame exercises every tier. (Task 5 later adds `contested` and `source_provenance` to `CLAIM_COLUMNS` and retires `T_CONFLICT` as an emitted tier; the constant stays.)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -907,14 +907,20 @@ git commit -m "$(printf 'feat(assay-hygiene): add the vocabulary judgment comman
 
 **Files:**
 - Create: `scripts/assay_hygiene/claims.py`
-- Modify: `scripts/assay_hygiene/_schema.py` — `CLAIM_COLUMNS` gains `contested` (bool) and `provenance` (str)
+- Modify: `scripts/assay_hygiene/_schema.py` — `CLAIM_COLUMNS` gains `contested` (bool) and `source_provenance` (str)
 - Modify: `tests/test_assay_hygiene_schema.py` — extend the `CLAIM_COLUMNS` contract test for the two new columns
 - Test: `tests/test_assay_hygiene_claims.py`
 
 **Interfaces:**
 - Consumes: `_schema.CLAIM_COLUMNS`, `STRONG_FIELDS`, `WEAK_FIELDS`, `CLAIM_FIELDS`, tier constants, `normalise_value`; `vocabulary.parse_metadata`
 - Produces: `claim_index(vocab: pd.DataFrame) -> dict[tuple[str, str], tuple[int, str, str]]` mapping `(field, value) -> (internal_assay_id, title, provenance)`; `sample_claims(meta: dict[int, dict], uuids: dict[int, str], vocab: pd.DataFrame) -> pd.DataFrame` returning `CLAIM_COLUMNS`
-- Also modifies `_schema.CLAIM_COLUMNS`, which gains `contested` (bool) and `provenance` (str).
+- Also modifies `_schema.CLAIM_COLUMNS`, which gains `contested` (bool) and `source_provenance` (str).
+
+**`source_provenance`, not `provenance`.** It describes the row named by
+`source_field` / `raw_value`, NOT the claim. `vocabulary.csv` has a `provenance`
+column meaning the mapping's origin, and two different meanings under one name
+in adjacent frames is the defect this increment opened by fixing — see the
+`edge_internal_assay_id` rename. The name carries the scope.
 
 ### Tiering is PER CLAIM, and contestedness is a column, not a tier
 
@@ -1099,7 +1105,7 @@ def test_a_proposed_mapping_is_capped_at_weak_even_on_a_strong_field():
     meta = {700: {"Type": "mystery"}}
     out = C.sample_claims(meta, {700: "X-1"}, vocab)
     assert out.iloc[0].tier == S.T_WEAK
-    assert out.iloc[0].provenance == S.P_PROPOSED
+    assert out.iloc[0].source_provenance == S.P_PROPOSED
 
 
 def test_a_proposal_cannot_corroborate_its_way_past_the_audit_floor():
@@ -1116,7 +1122,7 @@ def test_a_proposal_cannot_corroborate_its_way_past_the_audit_floor():
     row = out.iloc[0]
     assert row.internal_assay_id == 11
     assert row.tier == S.T_WEAK          # NOT corroborated
-    assert row.provenance == S.P_LEARNED  # the learned weak field still owns it
+    assert row.source_provenance == S.P_LEARNED  # the learned weak field still owns it
 
 
 def test_a_proposal_never_contests_a_learned_claim():
@@ -1282,14 +1288,14 @@ def sample_claims(
                 tier = S.T_STRONG
             else:
                 tier = S.T_WEAK
-            provenance = (S.P_PROPOSED if provs == {S.P_PROPOSED}
-                          else sorted(provs - {S.P_PROPOSED})[0])
+            source_provenance = (S.P_PROPOSED if provs == {S.P_PROPOSED}
+                                 else sources[0][2])
             field, raw, _ = sources[0]
             rows.append({
                 "sample_id": sample_id, "uuid": uuids.get(sample_id),
                 "internal_assay_id": iaid, "internal_assay_title": title,
                 "tier": tier, "source_field": field, "raw_value": raw,
-                "contested": contested, "provenance": provenance,
+                "contested": contested, "source_provenance": source_provenance,
             })
 
     return pd.DataFrame(rows, columns=S.CLAIM_COLUMNS)
