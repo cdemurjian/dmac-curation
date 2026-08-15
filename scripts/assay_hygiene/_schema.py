@@ -130,12 +130,38 @@ CLAIM_FIELDS = STRONG_FIELDS + WEAK_FIELDS
 T_CORROBORATED = "corroborated"
 T_STRONG = "strong"
 T_WEAK = "weak"
+# RETIRED as an emitted tier; kept so imports do not break. Tiering is per
+# CLAIM, not per sample, and disagreement between a sample's claims is recorded
+# in the `contested` COLUMN instead. Measured 2026-08-14: collapsing a
+# disagreeing sample to this tier made the Mode 3 audit non-monotone, because
+# T_CONFLICT sits below the audit floor -- simulating proposals for the
+# unresolved terms suppressed 102 existing flags while adding 13. Adding
+# evidence removed coverage. tests/test_assay_hygiene_claims.py asserts
+# sample_claims never emits it.
 T_CONFLICT = "conflict"
 T_NONE = "none"
 
+# `contested` and `provenance` ride BEHIND the original seven, which is a
+# deliberate ordering and not just an append. `contested` is a policy dial the
+# Mode 3 audit reads (Task 7 excludes contested rows by default: admitting them
+# raises the flag baseline from 879 to 1,570, and those extra rows carry a
+# measured ~30% mapping-error rate). `provenance` is what makes the proposal cap
+# auditable after the fact -- a claim tiered T_WEAK on a `proposed` mapping and
+# one tiered T_WEAK on a `learned` weak field are indistinguishable without it.
+#
+# `provenance` here is ROW-level, not claim-level: it describes the one
+# vocabulary row named by `source_field` and `raw_value`, and NOT the highest
+# precedence among everything backing the claim. So a claim backed by a learned
+# strong field AND a curator weak field reports `learned`, naming the strong row
+# the evidence columns actually point at; the curator's ruling is what made that
+# claim `corroborated`, and vocabulary.csv stays the record of who ruled what.
+# Ranking provenance across sources instead would print `curator` beside a
+# `source_field` whose mapping no curator ever touched -- the same incoherence
+# claims.py's representative-source rule exists to remove. Pinned by
+# test_provenance_names_the_row_the_evidence_columns_name.
 CLAIM_COLUMNS = [
     "sample_id", "uuid", "internal_assay_id", "internal_assay_title",
-    "tier", "source_field", "raw_value",
+    "tier", "source_field", "raw_value", "contested", "provenance",
 ]
 
 # --- vocabulary alignment ----------------------------------------------------

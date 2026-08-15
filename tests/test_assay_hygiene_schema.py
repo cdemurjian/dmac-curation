@@ -257,7 +257,8 @@ def test_stage0_nodes_frame_matches_the_declared_node_index_contract():
 
 def test_claim_and_vocab_contracts_are_declared():
     for col in ("sample_id", "uuid", "internal_assay_id",
-                "internal_assay_title", "tier", "source_field", "raw_value"):
+                "internal_assay_title", "tier", "source_field", "raw_value",
+                "contested", "provenance"):
         assert col in S.CLAIM_COLUMNS
     for col in ("source_field", "raw_value", "internal_assay_id",
                 "internal_assay_title", "support", "n_samples", "purity",
@@ -273,6 +274,20 @@ def test_claim_and_vocab_contracts_are_declared():
         "source_field", "raw_value", "internal_assay_id", "internal_assay_title",
         "support", "n_samples", "purity", "provenance",
     ]
+
+    # CLAIM_COLUMNS is pinned literally for the same reason, and one more.
+    # `contested` is a COLUMN and not a tier: disagreement between a sample's
+    # claims must not be able to lower any claim's tier, because the audit floor
+    # then deletes evidence (102 flags suppressed by 13 added, measured
+    # 2026-08-14). A `contested` that drifted back into `tier` would be a
+    # membership-only test's blind spot -- both spellings satisfy "the name
+    # exists somewhere" -- so assert the shape, in order.
+    assert S.CLAIM_COLUMNS == [
+        "sample_id", "uuid", "internal_assay_id", "internal_assay_title",
+        "tier", "source_field", "raw_value", "contested", "provenance",
+    ]
+    assert "contested" not in (S.T_CORROBORATED, S.T_STRONG, S.T_WEAK,
+                               S.T_CONFLICT, S.T_NONE)
 
 
 def test_tier_and_provenance_constants_are_distinct():
