@@ -144,8 +144,12 @@ T_NONE = "none"
 # `contested` and `source_provenance` ride BEHIND the original seven, which is a
 # deliberate ordering and not just an append. `contested` is a policy dial the
 # Mode 3 audit reads (Task 7 excludes contested rows by default: admitting them
-# raises the flag baseline from 879 to 1,570, and those extra rows carry a
-# measured ~30% mapping-error rate). `source_provenance` is what makes the
+# raises the flag baseline from 866 to 1,556 AT THE SHIPPED DEFAULTS, and those
+# extra rows carry a measured ~30% mapping-error rate). The scope belongs in
+# that sentence and this file is where it is declared: the same pair reads
+# 879 -> 1,570 with `include_unmappable` on, which is what the figure was before
+# Task 7 added that second exclusion, and an unscoped number here is the exact
+# hazard the rest of this module documents. `source_provenance` is what makes the
 # proposal cap auditable after the fact -- a claim tiered T_WEAK on a `proposed`
 # mapping and one tiered T_WEAK on a `learned` weak field are indistinguishable
 # without it.

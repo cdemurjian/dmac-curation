@@ -29,10 +29,12 @@ Re-measure rather than quoting those; they move with the extract.
 
   `PYTHONPATH=scripts` is not optional. Without it the package is not importable
   from this directory and the run dies with `ModuleNotFoundError: No module
-  named 'assay_hygiene'`. A failure naming `assay_hygiene.run_evidence`
-  specifically is a different thing: that module is the end-to-end driver and
-  arrives with Task 8, so until then regenerate with the stage B2 snippet in
-  the plan instead.
+  named 'assay_hygiene'`.
+
+  That command is the end-to-end driver: it rebuilds the vocabulary, the
+  unresolved queue, the precedent table, the claims, the Mode 3 flags and
+  `evidence-report.md` in one read-only pass. Run it again after you write your
+  proposals to see them merged.
 - `assay-hygiene/extract/` holds `assays.parquet` (137 internal assays),
   `membership.parquet`, `samples.parquet` and `nodes.parquet`.
 
@@ -124,8 +126,12 @@ honest short file is the deliverable, a padded long one is not.
    registered NHP samples are in `Patient Visit` regardless, and their metadata
    carries an NIH grant under `Funder` and a macaque under `Species` (149
    *M. fascicularis*, 49 *M. mulatta*). These are **animal-use (IACUC) protocol
-   numbers**, not bench protocols. They name no assay. Leave all 12 unresolved
-   and say why.
+   numbers**, not bench protocols. They name no assay.
+
+   Record that as a ruling rather than as a silence: write all 12 with an
+   **empty `internal_assay_id`**, per the "ruled: not an assay" note in the
+   Output section. Omitting them instead leaves no record that anyone ever
+   looked, and every future run puts the same 12 terms back in the queue.
 
    Do not over-read the batch as one lab's numbering: 174 of the 198 carriers
    are `Facility: Flynn Lab` and 24 are the NIH Vaccine Research Center, and
@@ -184,31 +190,37 @@ honest short file is the deliverable, a padded long one is not.
      collapse disagreeing samples below the audit floor, and adding proposals
      measurably removed 102 existing flags while adding 13; that is why this one
      exists. Nothing you write can delete a flag.
-   - **A proposal-only claim is capped at `weak` whatever field carried it**,
-     and the audit floor is `corroborated` / `strong`. So a term you propose
-     that no other evidence names cannot raise a flag either. `Type` being a
-     strong field does not buy your guess the strong tier.
+   - **A proposal is excluded from tiering entirely**, whatever field carried
+     it, and the audit floor is `corroborated` / `strong`. So a proposal cannot
+     raise ANY claim to the floor -- not a proposal-only one, and not one that
+     agrees with existing evidence. `Type` being a strong field does not buy
+     your guess the strong tier.
 
-   Measured on the 2026-08-14 extract, rebuilding the amended Tasks 5 and 7 and
-   adding proposals for all 180 terms that have a candidate: **0 flags added, 0
-   removed**, at both audit settings (879 excluding contested rows, 1,570
-   including them). Every proposal-selection variant in rule 6's range gives the
-   same 0 / 0.
+   Both properties rest on your `provenance` column being read correctly, and
+   until 2026-08-15 it was not: the two rules tested `!= proposed`, so writing
+   `Proposed`, `PROPOSED` or anything else unrecognised made your row count as
+   evidence -- crossing the audit floor and contesting real claims, which
+   *would* have deleted flags. They now test membership of `{learned, curator}`
+   and the loader rejects a provenance it does not recognise. Rule 9 still
+   applies: write `proposed`, exactly.
 
-   That cap is not free, and it is the only thing buying the zero. Lift it and
-   nothing else, leaving the contest rule and the audit floor exactly as they
-   are, and the same 180 proposals raise **23 flags** at the shipped setting
-   (879 -> 902). Grading a guess by the field that carried it is worth 23 false
-   positives.
+   Measured on the 2026-08-14 extract, adding proposals for all 180 terms that
+   have a candidate: **0 flags added, 0 removed**, at all four audit settings
+   (866 at the shipped defaults, 1,556 admitting contested rows, 879 admitting
+   unmappable registrations, 1,570 admitting both). The 180 proposals add 8,442
+   new `weak` claims and change **no existing claim's tier at all**, so the
+   0 / 0 is structural rather than a lucky selection: any subset of them gives
+   the same answer, because `weak` is below the floor and a proposal can never
+   enter the contest.
 
-   The one way a proposal reaches the audit *with* the cap in place: if it names
-   the **same** assay as an existing evidence-backed claim, it is no longer
-   proposal-only, so the cap lifts for that claim and it can rise from `weak` to
-   `corroborated` and cross the floor. **104** claims move that way here. The
-   audit drops 4 of them as contested, leaving 100 that genuinely reach it, all
-   100 on samples registered somewhere, and none of the 100 contradicting its
-   registration. So the measured effect is still zero. That is a measurement,
-   not a guarantee.
+   That cap is the only thing buying the zero. Lift it and nothing else, leaving
+   the contest rule and the audit floor exactly as they are, and the same 180
+   proposals raise **10 flags** at the shipped defaults (866 -> 876). The
+   often-quoted "+23" is the same experiment read at `include_unmappable=True`
+   (879 -> 902), which was the default before Task 7 added that exclusion; 13 of
+   those 23 are the unmappable rows the audit now refuses on identity grounds.
+   Either way, grading a guess by the field that carried it buys false
+   positives and nothing else.
 
    So the corollary is the whole of it: **a proposal derived from the membership
    of a term's own carriers cannot flag those carriers, because it was built to
@@ -240,7 +252,27 @@ Write `assay-hygiene/vocabulary-proposed.csv` with exactly these columns:
   curator-labelled edges** and a proposal has none, so writing a membership count
   into them would make the column mean two things in one file. Do not fabricate
   them; the zeros are what distinguishes your rows from learned ones.
-- `provenance` = `proposed`
+- `provenance` = `proposed`, spelled exactly that way. The loader normalises
+  case and surrounding whitespace and **rejects** anything it still does not
+  recognise, so a typo stops the run with a message naming the row rather than
+  quietly changing how far your row is trusted.
+
+### Ruling that a term is not an assay
+
+Leave `internal_assay_id` and `internal_assay_title` **empty** and write the row
+anyway. That is a real, supported state, and it is the only way to record the
+ruling:
+
+- the row survives the merge and stays in `vocabulary.csv`, so the decision is
+  durable and visible;
+- it produces no claim, so nothing can be flagged off it;
+- and the term leaves `vocabulary-unresolved.csv`, so nobody is asked to rule on
+  it again.
+
+Omitting the term instead does none of these: it comes back in every future
+queue, indistinguishable from a term nobody has looked at yet. Rule 3's 12 IACUC
+protocol numbers are the live case. Pinned by
+`test_a_null_id_row_is_a_working_ruled_not_an_assay_state`.
 
 `vocabulary-evidence.csv` is a working file for this command, not a contract.
 Nothing downstream reads it.
