@@ -962,21 +962,37 @@ sample has no other claim.
 `T_CONFLICT` is retired as a tier. Keep the constant in `_schema` so nothing
 importing it breaks, and add a test asserting `sample_claims` never emits it.
 
-Measured outcome of this design, against the alternatives:
+Measured outcome of this design, against the alternatives, all at the DEFAULT
+audit setting (`include_contested=False`):
 
 | design | baseline flags | proposals add | proposals suppress |
 |---|---|---|---|
 | as originally specified | 879 | 13 | 102 |
 | strong-beats-weak instead | 1,535 | 23 | 63 |
-| **per-claim + contested + proposal cap** | **1,570** | **23** | **0** |
+| per-claim + contested, no cap | 879 | 23 | 0 |
+| **per-claim + contested + proposal cap** | **879** | **0** | **0** |
 
-Suppression is zero by construction, and the audit floor becomes a policy dial
-rather than a tier that deletes evidence.
+**Proposals are Mode-3-inert under this design, and that is deliberate.** The cap
+puts every proposal-only claim at `T_WEAK`, below the audit floor, so a proposal
+can neither raise a flag nor remove one. A `support = 0` model guess should not
+be able to accuse a curator's own registration. The escalation path is explicit:
+a curator who agrees with a proposal promotes that row to
+`provenance = curator`, which outranks `learned` in `_PRECEDENCE` and
+legitimately earns a strong tier.
 
-**Do not widen `DEFAULT_TIERS` to compensate for the higher baseline.** Those
-extra rows are contested claims carrying the same ~30% mapping-error rate; Task 7
-excludes contested rows by default and that is what keeps the flag list
-reviewable.
+An earlier draft of this table said the shipped design adds 23 flags against a
+1,570 baseline. Both figures belong to different rows: 23 is per-claim tiering
+WITHOUT the cap, and 1,570 is the `include_contested=True` baseline. Specifying
+both the cap and per-claim tiering and then quoting the uncapped, wrong-audit
+numbers was my error, caught by rebuilding the amended tasks verbatim.
+
+Suppression is zero by construction rather than by a precedence rule, and the
+audit floor becomes a policy dial rather than a tier that deletes evidence.
+
+**Do not widen `DEFAULT_TIERS` to compensate.** Admitting contested rows raises
+the baseline from 879 to 1,570, and those extra rows carry the same ~30%
+mapping-error rate measured above; Task 7 excludes them by default and that is
+what keeps the flag list reviewable.
 
 Caveat on the figures above: the vocabulary was learned from the same labelled
 edges used as truth, so they are in-sample. They settle the comparison between
