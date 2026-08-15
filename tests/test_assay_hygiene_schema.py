@@ -258,7 +258,7 @@ def test_stage0_nodes_frame_matches_the_declared_node_index_contract():
 def test_claim_and_vocab_contracts_are_declared():
     for col in ("sample_id", "uuid", "internal_assay_id",
                 "internal_assay_title", "tier", "source_field", "raw_value",
-                "contested", "provenance"):
+                "contested", "source_provenance"):
         assert col in S.CLAIM_COLUMNS
     for col in ("source_field", "raw_value", "internal_assay_id",
                 "internal_assay_title", "support", "n_samples", "purity",
@@ -284,7 +284,7 @@ def test_claim_and_vocab_contracts_are_declared():
     # exists somewhere" -- so assert the shape, in order.
     assert S.CLAIM_COLUMNS == [
         "sample_id", "uuid", "internal_assay_id", "internal_assay_title",
-        "tier", "source_field", "raw_value", "contested", "provenance",
+        "tier", "source_field", "raw_value", "contested", "source_provenance",
     ]
     assert "contested" not in (S.T_CORROBORATED, S.T_STRONG, S.T_WEAK,
                                S.T_CONFLICT, S.T_NONE)

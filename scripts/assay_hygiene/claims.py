@@ -158,11 +158,13 @@ def sample_claims(
                 tier = S.T_STRONG
             else:
                 tier = S.T_WEAK
-            # The three evidence columns describe ONE vocabulary row, or they
-            # describe nothing. So the representative source is the first
-            # BACKED one -- first in CLAIM_FIELDS order, hence the strongest
-            # field that actually earned the tier -- and provenance is read off
-            # that same source rather than ranked separately. Reporting
+            # `source_field`, `raw_value` and `source_provenance` describe ONE
+            # vocabulary row, or they describe nothing -- which is what the
+            # `source_` prefix on that last name is promising. So the
+            # representative source is the first BACKED one -- first in
+            # CLAIM_FIELDS order, hence the strongest field that actually
+            # earned the tier -- and its provenance is read off that same
+            # source rather than ranked separately across the claim. Reporting
             # sources[0] instead would print a PROPOSED value beside a
             # `learned` provenance whenever the proposal lands on a stronger
             # field than the real evidence, which is the common shape: Task 7
@@ -170,12 +172,12 @@ def sample_claims(
             # flag, and they would go check a field whose mapping nothing
             # measured. A proposal-only claim has no backed source and falls
             # back to its own, which is the only one it has.
-            field, raw, provenance = (backing or sources)[0]
+            field, raw, source_provenance = (backing or sources)[0]
             rows.append({
                 "sample_id": sample_id, "uuid": uuids.get(sample_id),
                 "internal_assay_id": iaid, "internal_assay_title": titles[iaid],
                 "tier": tier, "source_field": field, "raw_value": raw,
-                "contested": contested, "provenance": provenance,
+                "contested": contested, "source_provenance": source_provenance,
             })
 
     return pd.DataFrame(rows, columns=S.CLAIM_COLUMNS)

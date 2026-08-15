@@ -85,7 +85,7 @@ def test_a_proposed_mapping_is_capped_at_weak_even_on_a_strong_field():
     meta = {700: {"Type": "mystery"}}
     out = C.sample_claims(meta, {700: "X-1"}, vocab)
     assert out.iloc[0].tier == S.T_WEAK
-    assert out.iloc[0].provenance == S.P_PROPOSED
+    assert out.iloc[0].source_provenance == S.P_PROPOSED
 
 
 def test_a_proposal_cannot_corroborate_its_way_past_the_audit_floor():
@@ -102,7 +102,7 @@ def test_a_proposal_cannot_corroborate_its_way_past_the_audit_floor():
     row = out.iloc[0]
     assert row.internal_assay_id == 11
     assert row.tier == S.T_WEAK          # NOT corroborated
-    assert row.provenance == S.P_LEARNED  # the learned weak field still owns it
+    assert row.source_provenance == S.P_LEARNED  # the learned weak field still owns it
     # ...and the evidence columns must name the row that owns it. `provenance`,
     # `source_field` and `raw_value` describe ONE vocabulary row or they
     # describe nothing: `Instrument` sorts ahead of `Protocol` in CLAIM_FIELDS,
@@ -146,7 +146,7 @@ def test_provenance_names_the_row_the_evidence_columns_name():
     assert row.tier == S.T_CORROBORATED   # the curator row supplied the weak half
     assert row.source_field == "Type"
     assert row.raw_value == "cometchip"
-    assert row.provenance == S.P_LEARNED  # NOT curator: it names the Type row
+    assert row.source_provenance == S.P_LEARNED  # NOT curator: it names the Type row
 
 
 def test_a_proposal_never_contests_a_learned_claim():

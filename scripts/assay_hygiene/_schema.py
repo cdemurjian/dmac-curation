@@ -141,27 +141,36 @@ T_WEAK = "weak"
 T_CONFLICT = "conflict"
 T_NONE = "none"
 
-# `contested` and `provenance` ride BEHIND the original seven, which is a
+# `contested` and `source_provenance` ride BEHIND the original seven, which is a
 # deliberate ordering and not just an append. `contested` is a policy dial the
 # Mode 3 audit reads (Task 7 excludes contested rows by default: admitting them
 # raises the flag baseline from 879 to 1,570, and those extra rows carry a
-# measured ~30% mapping-error rate). `provenance` is what makes the proposal cap
-# auditable after the fact -- a claim tiered T_WEAK on a `proposed` mapping and
-# one tiered T_WEAK on a `learned` weak field are indistinguishable without it.
+# measured ~30% mapping-error rate). `source_provenance` is what makes the
+# proposal cap auditable after the fact -- a claim tiered T_WEAK on a `proposed`
+# mapping and one tiered T_WEAK on a `learned` weak field are indistinguishable
+# without it.
 #
-# `provenance` here is ROW-level, not claim-level: it describes the one
-# vocabulary row named by `source_field` and `raw_value`, and NOT the highest
-# precedence among everything backing the claim. So a claim backed by a learned
-# strong field AND a curator weak field reports `learned`, naming the strong row
-# the evidence columns actually point at; the curator's ruling is what made that
-# claim `corroborated`, and vocabulary.csv stays the record of who ruled what.
-# Ranking provenance across sources instead would print `curator` beside a
-# `source_field` whose mapping no curator ever touched -- the same incoherence
-# claims.py's representative-source rule exists to remove. Pinned by
-# test_provenance_names_the_row_the_evidence_columns_name.
+# It is `source_provenance` and NOT `provenance` because it is ROW-scoped: it
+# describes the one vocabulary row named by `source_field` and `raw_value`, and
+# NOT the highest precedence among everything backing the claim. So a claim
+# backed by a learned strong field AND a curator weak field reports `learned`,
+# naming the strong row the evidence columns actually point at; the curator's
+# ruling is what made that claim `corroborated`, and vocabulary.csv stays the
+# record of who ruled what. Ranking provenance across sources instead would
+# print `curator` beside a `source_field` whose mapping no curator ever touched
+# -- the same incoherence claims.py's representative-source rule exists to
+# remove. Pinned by test_provenance_names_the_row_the_evidence_columns_name.
+#
+# The NAME carries that scope because a comment cannot. VOCAB_COLUMNS below has
+# its own `provenance`, meaning the provenance of a MAPPING, and the two frames
+# sit one join apart: under a bare `provenance` here, two meanings live under one
+# name in adjacent frames, where picking wrong is a one-token edit that yields a
+# populated, wrong column rather than an error. That is the same hazard
+# EDGE_COLUMNS documents for `edge_internal_assay_id`, and it is why this column
+# was renamed before its first consumer (Task 7) was written rather than after.
 CLAIM_COLUMNS = [
     "sample_id", "uuid", "internal_assay_id", "internal_assay_title",
-    "tier", "source_field", "raw_value", "contested", "provenance",
+    "tier", "source_field", "raw_value", "contested", "source_provenance",
 ]
 
 # --- vocabulary alignment ----------------------------------------------------
