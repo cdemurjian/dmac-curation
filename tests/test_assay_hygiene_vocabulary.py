@@ -453,3 +453,48 @@ def test_a_raw_value_that_normalises_to_none_raises_instead_of_collapsing():
     # and it is the KEY that is guarded, not the frame: str keys still merge
     fixed = _vocab([("Protocol", "18032418", 11, None, 0, 0, 0.0, S.P_PROPOSED)])
     assert len(V.merge_vocabulary(learned, fixed, _vocab([]), _assays())) == 2
+
+
+def test_the_loader_normalises_a_recognisable_provenance(tmp_path):
+    # A curator hand-editing the csv writes `Curator`, not `curator`. Under a
+    # bare equality test that row ranks -1 in the merge -- BELOW `proposed` --
+    # so their ruling loses to the learned row it was written to overrule, and
+    # nothing in the artifact says so. Normalising through the package's one
+    # normaliser is what makes the file forgiving; the rejection below is what
+    # keeps it honest.
+    p = tmp_path / "curator.csv"
+    p.write_text(
+        "source_field,raw_value,internal_assay_id,internal_assay_title,"
+        "support,n_samples,purity,provenance\n"
+        "Type,cometchip,12,,0,0,0.0, Curator \n"
+    )
+    back = V.load_vocabulary(p)
+    assert back.iloc[0].provenance == S.P_CURATOR
+    learned = _vocab([("Type", "cometchip", 11, None, 900, 850, 0.99, S.P_LEARNED)])
+    out = V.merge_vocabulary(learned, _vocab([]), back, _assays())
+    assert out.iloc[0].internal_assay_id == 12, "the curator's ruling lost"
+
+
+@pytest.mark.parametrize("prov", ["proposal", "", "learnt", "GUESS"])
+def test_the_loader_rejects_a_provenance_it_does_not_recognise(tmp_path, prov):
+    # provenance decides trust: `proposed` is capped below the Mode 3 audit
+    # floor and may not contest. There is no safe default for a value nobody
+    # recognises -- treating it as backed defeats the cap, treating it as a
+    # proposal silently discards a decision -- so the file boundary refuses it
+    # where the human who wrote it can fix it. Measured 2026-08-14: lifting the
+    # cap and nothing else moves the audit from 866 flags to 876.
+    p = tmp_path / "proposed.csv"
+    p.write_text(
+        "source_field,raw_value,internal_assay_id,internal_assay_title,"
+        "support,n_samples,purity,provenance\n"
+        f"Type,mystery,12,,0,0,0.0,{prov}\n"
+    )
+    with pytest.raises(ValueError, match="provenance"):
+        V.load_vocabulary(p)
+
+
+def test_a_file_with_no_provenance_column_is_rejected_rather_than_guessed(tmp_path):
+    p = tmp_path / "curator.csv"
+    p.write_text("source_field,raw_value,internal_assay_id\nType,mystery,12\n")
+    with pytest.raises(ValueError, match="provenance"):
+        V.load_vocabulary(p)

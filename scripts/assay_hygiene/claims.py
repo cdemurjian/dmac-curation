@@ -126,9 +126,16 @@ def sample_claims(
         # proposal that happens to name a different assay does not make the
         # sample contested, or a support=0 guess could push a curator's own
         # registration below the audit floor.
+        #
+        # Tested by MEMBERSHIP of S.EVIDENCE_PROVENANCES, never by `!=
+        # S.P_PROPOSED`. The inequality made `proposed` the only untrusted
+        # spelling, so `Proposed`, `PROPOSED`, `proposal` and `` all read as
+        # evidence-backed here while `merge_vocabulary` ranked those same rows
+        # LEAST trusted -- one column, two opposite defaults, and the cap
+        # defeated by a casing typo. See S.EVIDENCE_PROVENANCES.
         backed = {
             iaid for iaid, sources in found.items()
-            if any(p != S.P_PROPOSED for _, _, p in sources)
+            if any(p in S.EVIDENCE_PROVENANCES for _, _, p in sources)
         }
         contested = len(backed) > 1
 
@@ -148,8 +155,16 @@ def sample_claims(
             #
             # Excluding proposals here also makes the cap structural rather than
             # a special case: a proposal-only claim has no backing sources at
-            # all, so it falls to T_WEAK on its own.
-            backing = [s for s in sources if s[2] != S.P_PROPOSED]
+            # all, so it falls to T_WEAK on its own. A proposal therefore never
+            # raises ANY claim's tier, not merely a proposal-only one -- so a
+            # proposal naming the same assay as an existing evidence-backed
+            # claim cannot promote it either. Measured 2026-08-14, proposing all
+            # 180 unresolved terms that have a candidate adds 8,442 new `weak`
+            # claims and changes no existing claim's tier at all.
+            #
+            # Membership again, not `!= S.P_PROPOSED`: the same casing typo that
+            # defeated the contest rule above defeated the cap here.
+            backing = [s for s in sources if s[2] in S.EVIDENCE_PROVENANCES]
             has_strong = any(f in S.STRONG_FIELDS for f, _, _ in backing)
             has_weak = any(f in S.WEAK_FIELDS for f, _, _ in backing)
             if has_strong and has_weak:

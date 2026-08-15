@@ -220,3 +220,49 @@ def test_claim_index_is_keyed_on_field_and_value_together_and_carries_provenance
                            5, 5, 1.0, S.P_CURATOR)
     assert C.claim_index(hand)[("Type", "tissue scope")] == (
         12, "Tissue Collection", S.P_CURATOR)
+
+
+def _one_sample(proposed_provenance):
+    """One sample whose ONLY evidence is a Type row spelled `proposed` how?
+
+    A support=0 guess on a strong field. Under the cap it must tier `weak` and
+    the sample must not be contested; if the spelling defeats the cap it tiers
+    `strong`, crosses the Mode 3 audit floor, and contests the learned claim.
+    """
+    vocab = pd.DataFrame(
+        [("Protocol", "comet.docx", 11, "Comet Chip", 400, 380, 0.95,
+          S.P_LEARNED),
+         ("Type", "mystery", 12, "Tissue Collection", 0, 0, 0.0,
+          proposed_provenance)],
+        columns=S.VOCAB_COLUMNS,
+    )
+    meta = {1: {"Type": "mystery", "Protocol": "comet.docx"}}
+    return C.sample_claims(meta, {1: "A-1"}, vocab)
+
+
+def test_the_proposal_cap_survives_every_spelling_of_proposed():
+    # The cap and the contest rule were both tested as `p != S.P_PROPOSED`,
+    # which makes the EXACT string `proposed` the only untrusted value while
+    # `merge_vocabulary` ranks any unrecognised provenance LEAST trusted. One
+    # column, two opposite defaults. Measured before the fix, every spelling
+    # below tiered `strong` and contested the learned claim -- so a support=0
+    # guess crossed the audit floor AND demoted a real claim, defeating both
+    # rules at once. Membership of S.EVIDENCE_PROVENANCES makes anything
+    # unanticipated untrusted by construction rather than by enumeration.
+    for spelling in ("proposed", "Proposed", "PROPOSED", " proposed ",
+                     "proposal", "", "guess", None):
+        out = _one_sample(spelling)
+        guess = out[out.internal_assay_id == 12].iloc[0]
+        assert guess.tier == S.T_WEAK, f"{spelling!r} defeated the tier cap"
+        assert not out.contested.any(), f"{spelling!r} defeated the contest rule"
+        # and the evidence-backed claim keeps the tier its own evidence earned
+        assert out[out.internal_assay_id == 11].iloc[0].tier == S.T_WEAK
+
+
+def test_a_curator_spelling_is_still_evidence_backed():
+    # The mirror of the test above, and the reason the fix is a membership test
+    # over TWO values rather than "anything but proposed is untrusted".
+    # `curator` must still contest and still carry a tier.
+    out = _one_sample(S.P_CURATOR)
+    assert out[out.internal_assay_id == 12].iloc[0].tier == S.T_STRONG
+    assert out.contested.all()

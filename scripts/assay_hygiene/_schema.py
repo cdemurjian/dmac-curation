@@ -183,6 +183,34 @@ P_LEARNED = "learned"
 P_PROPOSED = "proposed"
 P_CURATOR = "curator"
 
+# Every provenance this package recognises, and the subset carrying empirical
+# backing. `claims.py` tests MEMBERSHIP of EVIDENCE_PROVENANCES rather than
+# inequality against P_PROPOSED, and that is the whole point of the tuple.
+#
+# Under `p != P_PROPOSED` this column was read under OPPOSITE defaults by two
+# modules: `vocabulary.merge_vocabulary` ranks an unrecognised provenance -1,
+# meaning LEAST trusted, while `p != P_PROPOSED` read that same value as
+# EVIDENCE-BACKED. So a support=0 guess written as `Proposed`, `PROPOSED`,
+# `proposal` or `` defeated the proposal cap and the contest rule together --
+# it crossed the Mode 3 audit floor AND could contest a real claim. The
+# producer of the column is an LLM writing a csv per
+# `commands/curate-assay-vocabulary.md`.
+#
+# Membership makes the default STRUCTURAL: anything unanticipated is untrusted,
+# which is the same direction merge_vocabulary already ranks it. Measured
+# 2026-08-14 on the real extract, lifting the cap and nothing else moves the
+# audit from 866 flags to 876 at the shipped defaults (879 -> 902 with
+# `include_unmappable` on).
+#
+# The two layers own different halves and both are needed. THIS one is the
+# safety invariant and it holds for any frame, including one a caller builds in
+# memory. `vocabulary.load_vocabulary` owns the data-quality half at the file
+# boundary: it normalises the spelling and REJECTS a value that is still not one
+# of these three, so a curator writing `Proposed` gets their row honoured rather
+# than silently demoted, and one writing junk is told rather than ignored.
+PROVENANCES = (P_LEARNED, P_PROPOSED, P_CURATOR)
+EVIDENCE_PROVENANCES = (P_LEARNED, P_CURATOR)
+
 # `n_samples` sits immediately after `support` because it is the check on it.
 # `support` counts EDGES and one sample fans out to many, so a term can clear
 # min_support off a single curator's single row: measured 2026-08-14 on the real

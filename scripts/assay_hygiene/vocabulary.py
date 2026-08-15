@@ -293,8 +293,13 @@ def merge_vocabulary(
         + ". A vocabulary key is text; give it as text."
     )
     # an unrecognised provenance ranks below all three known sources rather
-    # than raising: a junk value in a hand-edited file must not be able to
-    # outrank a curator, and must not stop the run either.
+    # than raising: this function also takes frames a caller BUILT in memory,
+    # which never passed a loader, and a junk value there must not be able to
+    # outrank a curator or stop the run. `load_vocabulary` is where a FILE's
+    # provenance is normalised and rejected, and `S.EVIDENCE_PROVENANCES` is
+    # what makes the in-memory case untrusted downstream: -1 here and
+    # not-evidence-backed there are the same ruling, which is exactly what
+    # `claims.py`'s old `!= P_PROPOSED` test broke.
     allrows["_rank"] = allrows.provenance.map(_PRECEDENCE).fillna(-1)
     allrows = allrows.sort_values("_rank", kind="stable").drop_duplicates(
         subset=["source_field", "raw_value"], keep="last"
@@ -389,6 +394,19 @@ def load_vocabulary(path) -> pd.DataFrame:
     The pin is here rather than in `normalise_value` on purpose -- this package
     has ONE normaliser and it stays that way. This is a parsing concern: the
     keys are text, so they are read as text.
+
+    `provenance` is NORMALISED AND THEN VALIDATED, and this file boundary is
+    where that invariant lives. The column decides how much a row is trusted:
+    `claims.sample_claims` caps a `proposed` row at T_WEAK and refuses it a vote
+    in the contest rule, and `merge_vocabulary` ranks an unrecognised value
+    below all three known sources. Normalising first means a curator writing
+    `Proposed` or ` curator ` gets the row they meant instead of one silently
+    demoted below `proposed`; rejecting what is left means junk is reported
+    where a human can fix it, in their own file, rather than travelling on as an
+    unrecognised value whose treatment two modules would then have to agree
+    about. `merge_vocabulary` still TOLERATES an unrecognised provenance,
+    because a caller can build a frame in memory without passing through here,
+    and `S.EVIDENCE_PROVENANCES` makes that case untrusted by construction.
     """
     p = Path(path)
     if not p.exists():
@@ -398,4 +416,23 @@ def load_vocabulary(path) -> pd.DataFrame:
     for col in S.VOCAB_COLUMNS:
         if col not in df.columns:
             df[col] = None
-    return df[S.VOCAB_COLUMNS]
+    df = df[S.VOCAB_COLUMNS].copy()
+    # normalise through the package's one normaliser, so `Proposed`, `PROPOSED`
+    # and ` curator ` are the values they obviously mean
+    df["provenance"] = [S.normalise_value(v) for v in df.provenance]
+    bad = sorted({
+        f"{f}/{v!r}" for f, v, prov in zip(df.source_field, df.raw_value,
+                                           df.provenance)
+        if prov not in S.PROVENANCES
+    })
+    if bad:
+        raise ValueError(
+            f"{len(bad)} row(s) in {p} carry a provenance that is not one of "
+            f"{', '.join(S.PROVENANCES)}: {'; '.join(bad[:10])}"
+            + (" ..." if len(bad) > 10 else "")
+            + ". provenance decides how far a row is trusted -- a `proposed`"
+            " row is capped below the Mode 3 audit floor and cannot contest an"
+            " evidence-backed claim -- so an unrecognised one cannot be given a"
+            " default without guessing at that trust. Write one of the three."
+        )
+    return df
