@@ -969,16 +969,26 @@ audit setting (`include_contested=False`):
 |---|---|---|---|
 | as originally specified | 879 | 13 | 102 |
 | strong-beats-weak instead | 1,535 | 23 | 63 |
-| per-claim + contested, no cap | 879 | 23 | 0 |
+| per-claim + contested, cap removed | 879 | 23 | 0 |
 | **per-claim + contested + proposal cap** | **879** | **0** | **0** |
 
-**Proposals are Mode-3-inert under this design, and that is deliberate.** The cap
-puts every proposal-only claim at `T_WEAK`, below the audit floor, so a proposal
-can neither raise a flag nor remove one. A `support = 0` model guess should not
-be able to accuse a curator's own registration. The escalation path is explicit:
-a curator who agrees with a proposal promotes that row to
-`provenance = curator`, which outranks `learned` in `_PRECEDENCE` and
-legitimately earns a strong tier.
+**Proposals are Mode-3-inert under this design, and that is deliberate.** Every
+proposal-only claim sits at `T_WEAK`, below the audit floor, so a proposal can
+neither raise a flag nor remove one. A `support = 0` model guess should not be
+able to accuse a curator's own registration. The escalation path is explicit: a
+curator who agrees with a proposal promotes that row to `provenance = curator`,
+which outranks `learned` in `_PRECEDENCE` and legitimately earns a strong tier.
+
+**The cap is not free: it costs 23 flags** at the default audit setting (879 ->
+902 without it). That is the price of not letting an unbacked guess accuse a
+registration, and it is recoverable one row at a time by a curator promoting a
+proposal they agree with.
+
+**Inertness holds only because tier strength ignores proposed sources.** Grading
+over all sources lets a proposal on a strong field supply the strong half of a
+corroboration for a claim whose real evidence is a weak field, carrying it above
+the audit floor — 104 claims on the real extract. See the comment in
+`sample_claims` and the test that pins it.
 
 An earlier draft of this table said the shipped design adds 23 flags against a
 1,570 baseline. Both figures belong to different rows: 23 is per-claim tiering
@@ -1090,6 +1100,23 @@ def test_a_proposed_mapping_is_capped_at_weak_even_on_a_strong_field():
     out = C.sample_claims(meta, {700: "X-1"}, vocab)
     assert out.iloc[0].tier == S.T_WEAK
     assert out.iloc[0].provenance == S.P_PROPOSED
+
+
+def test_a_proposal_cannot_corroborate_its_way_past_the_audit_floor():
+    # The hole the cap was aimed at. Grading tier strength over ALL sources lets
+    # a proposal on a STRONG field supply the strong half of a corroboration for
+    # a claim whose only real evidence is a weak field — and `corroborated` is
+    # above the audit floor, so a support=0 model guess ends up able to accuse a
+    # curator's registration. Measured at 104 such claims on the real extract.
+    vocab = _vocab()
+    vocab.loc[len(vocab)] = ("Instrument", "comet scope", 11, "Comet Chip", 0, 0,
+                             0.0, S.P_PROPOSED)
+    meta = {702: {"Protocol": "comet.docx", "Instrument": "comet scope"}}
+    out = C.sample_claims(meta, {702: "X-3"}, vocab)
+    row = out.iloc[0]
+    assert row.internal_assay_id == 11
+    assert row.tier == S.T_WEAK          # NOT corroborated
+    assert row.provenance == S.P_LEARNED  # the learned weak field still owns it
 
 
 def test_a_proposal_never_contests_a_learned_claim():
@@ -1229,23 +1256,34 @@ def sample_claims(
         contested = len(backed) > 1
 
         for (iaid, title), sources in found.items():
-            fields = [f for f, _, _ in sources]
             provs = {p for _, _, p in sources}
-            has_strong = any(f in S.STRONG_FIELDS for f in fields)
-            has_weak = any(f in S.WEAK_FIELDS for f in fields)
+            # Tier strength is computed over EVIDENCE-BACKED sources ONLY.
+            #
+            # Grading over all sources leaves a hole the cap was aimed squarely
+            # at: a proposal landing on a strong field supplies the strong half
+            # of a corroboration for a claim that already has a learned weak
+            # field, and the claim crosses the audit floor on a model's guess.
+            # Measured on the real extract, 104 claims rise weak -> corroborated
+            # exactly that way. None contradicts its registration in today's
+            # data, so the effect is zero by DATA, not by design -- and the risk
+            # shape is the `m397` case, where a term's carriers split across
+            # assays, the proposal takes the modal one, and the promoted claim
+            # then accuses the minority carriers.
+            #
+            # Excluding proposals here also makes the cap structural rather than
+            # a special case: a proposal-only claim has no backing sources at
+            # all, so it falls to T_WEAK on its own.
+            backing = [f for f, _, p in sources if p != S.P_PROPOSED]
+            has_strong = any(f in S.STRONG_FIELDS for f in backing)
+            has_weak = any(f in S.WEAK_FIELDS for f in backing)
             if has_strong and has_weak:
                 tier = S.T_CORROBORATED
             elif has_strong:
                 tier = S.T_STRONG
             else:
                 tier = S.T_WEAK
-            # A proposal-only claim is capped at weak whatever field carried it:
-            # graded by field alone it would inherit the strong tier's measured
-            # 98.4%, which a model's guess has not earned.
             provenance = (S.P_PROPOSED if provs == {S.P_PROPOSED}
                           else sorted(provs - {S.P_PROPOSED})[0])
-            if provenance == S.P_PROPOSED:
-                tier = S.T_WEAK
             field, raw, _ = sources[0]
             rows.append({
                 "sample_id": sample_id, "uuid": uuids.get(sample_id),
@@ -1260,7 +1298,7 @@ def sample_claims(
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run --with pytest --with pandas --with pyarrow --with openpyxl pytest tests/test_assay_hygiene_claims.py -v`
-Expected: PASS, 10 tests
+Expected: PASS, 11 tests
 
 - [ ] **Step 5: Run against the real extract**
 
