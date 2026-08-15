@@ -137,6 +137,129 @@ def test_nothing_is_dropped_by_a_null_key_component():
     assert out.iloc[0].n_both == 1
 
 
+def _tied_world(n=12):
+    """n rules that tie exactly on (n_both, n_child_only), keyed in reverse.
+
+    Every edge is the same D.IMG -> TIS hop in project 10, and each of the n
+    sample pairs is co-registered in one assay of its own, so every rule comes
+    out at n_both=1, n_child_only=0 and the RULE_KEY is the only thing telling
+    them apart. Assay k carries internal id n-k, so insertion order (the order
+    the edges arrive in) is the exact REVERSE of RULE_KEY order. Without a
+    tiebreak the output is one or the other depending on nothing but arrival.
+    """
+    assays = pd.DataFrame(
+        [(k, f"Assay {k}", 7, 3, 2, 10, "MIT_SRP", n - k, f"Internal {n - k}")
+         for k in range(n)],
+        columns=S.ASSAY_COLUMNS,
+    )
+    edges = pd.DataFrame(
+        [(100 + k, 200 + k, f"D.IMG-{k}", f"TIS-{k}", "D.IMG", "TIS",
+          None, None, None) for k in range(n)],
+        columns=S.EDGE_COLUMNS,
+    )
+    membership = pd.DataFrame(
+        [(100 + k, k) for k in range(n)] + [(200 + k, k) for k in range(n)],
+        columns=S.MEMBERSHIP_COLUMNS,
+    )
+    return edges, membership, assays
+
+
+def test_row_order_does_not_depend_on_the_order_edges_arrive_in():
+    """The output is an artifact a curator DIFFS between extracts.
+
+    Sorting on `["n_both", "n_child_only"]` alone leaves 708 of the 961 real
+    rules tied, 440 of them at (0, 0). That sort is not unstable -- pandas
+    routes a multi-column `sort_values` through `np.lexsort` and ignores
+    `kind` -- so it is reproducible for a GIVEN input order, and the exposure
+    is the input order itself: tied rows come out in `counts` insertion order,
+    which is the order rows sit in edges.parquet.
+    `test_assay_hygiene_stage0.py` already records that "the extractor's row
+    order is not stable across extracts". Measured on the real extract,
+    permuting the edge frame moves 647 of the 961 rows under the two-column
+    sort and leaves the full-key sort byte-identical; a curator would read
+    those 647 as change.
+
+    Both halves are asserted. Reproducibility alone is not the property --
+    vocabulary_evidence's docstring makes the same point -- so the second
+    assertion pins the specific answer, ascending RULE_KEY, and would catch a
+    tiebreak that was merely deterministic (e.g. descending, or on the title).
+    """
+    edges, membership, assays = _tied_world()
+    forward = P.mine_precedent(edges, membership, assays)
+    reverse = P.mine_precedent(edges.iloc[::-1], membership, assays)
+    # every rule really is tied, or this case proves nothing
+    assert set(forward.n_both) == {1} and set(forward.n_child_only) == {0}
+    assert len(forward) == 12
+    assert forward.equals(reverse)
+    assert list(forward.internal_assay_id) == sorted(forward.internal_assay_id)
+
+
+def test_assay_index_rejects_a_fallback_id_that_is_also_an_internal_id():
+    """The collision invariant, enforced where an operator's real run hits it.
+
+    This is the same property as the extract-backed case at the bottom of this
+    file, checked in the single funnel every consumer passes through
+    (`vocabulary_evidence.py:58` imports `assay_index` for exactly this
+    reason). That case can only run beside a 17 MB gitignored extract, so on a
+    fresh clone or in CI it skips and the invariant goes unchecked; this one
+    always runs, and more importantly it fires during a real `main()` rather
+    than only under pytest.
+
+    Assay 11 has no junction row, so it falls back to seek id 11 -- which is
+    also assay 1's genuine internal id. Both sit in project 10, so RULE_KEY
+    cannot separate them and their precedent would silently merge.
+    """
+    assays = pd.DataFrame(
+        [(1, "Comet Chip", 7, 3, 2, 10, "MIT_SRP", 11, "Comet Chip"),
+         (11, "Library Prep", 9, 3, 2, 10, "MIT_SRP", None, None)],
+        columns=S.ASSAY_COLUMNS,
+    )
+    with pytest.raises(ValueError, match=r"junction-less assay.*\[11\]"):
+        P.assay_index(assays)
+
+
+def test_an_empty_fallback_set_is_not_a_collision():
+    """The fully-repaired state passes rather than crashing.
+
+    Every assay has a junction row, so there is no fallback id at all. The
+    check is a set intersection precisely so this case is falsy; a range
+    comparison would raise on the empty sequence and fail the one state the
+    error message tells the operator to reach.
+    """
+    assays = pd.DataFrame(
+        [(1, "Comet Chip", 7, 3, 2, 10, "MIT_SRP", 11, "Comet Chip"),
+         (2, "Library Prep", 9, 3, 2, 10, "MIT_SRP", 1, "Library Prep")],
+        columns=S.ASSAY_COLUMNS,
+    )
+    # internal id 1 equals assay_id 1, which is only a collision if assay 1
+    # were ALSO falling back. It is not, so this must pass.
+    assert P.assay_index(assays)[2] == (10, 1, "Library Prep")
+
+
+def test_a_registration_in_an_unknown_assay_is_not_dropped_silently():
+    """The module's one silent drop, removed.
+
+    A membership row naming an assay absent from the assays frame used to hit
+    a `continue`, so the registration vanished from every rate with no signal
+    -- against the spec's binding "nothing is dropped silently". 0 of the 173
+    membership assay_ids hit this on the real extract, so it is dead defence
+    today; it raises rather than skipping so that an extract where the two
+    frames disagree is diagnosed instead of quietly under-counted.
+    """
+    assays = pd.DataFrame(
+        [(1, "Comet Chip", 7, 3, 2, 10, "MIT_SRP", 11, "Comet Chip")],
+        columns=S.ASSAY_COLUMNS,
+    )
+    edges = pd.DataFrame(
+        [(100, 200, "D.IMG-1", "TIS-1", "D.IMG", "TIS", None, None, None)],
+        columns=S.EDGE_COLUMNS,
+    )
+    membership = pd.DataFrame([(100, 1), (200, 1), (999, 7)],
+                              columns=S.MEMBERSHIP_COLUMNS)
+    with pytest.raises(ValueError, match=r"absent from the assays frame: \[7\]"):
+        P.mine_precedent(edges, membership, assays)
+
+
 EXTRACT = REPO / "assay-hygiene" / "extract"
 
 
@@ -154,14 +277,20 @@ def test_the_fallback_id_space_does_not_collide_with_the_internal_one():
 
     Nothing is broken today only because the 17 junction-less assays sit at
     466-482 and the genuine internal ids run 1-188. One new junction-less
-    assay with a low seek id merges two unrelated assays' precedent into a
-    single rule, with no error and a table that still balances. This test is
-    the only thing between that and a silent wrong answer, and it is not
+    assay with a low seek id merges two unrelated assays' precedent, with no
+    error and a table that still balances. `RULE_KEY` carries `project_id`, so
+    that merge happens only where both assays occur in the SAME project --
+    which is not a mitigation worth relying on: measured on this extract, 12
+    (junction-less, genuine) id pairs already share at least one project/hop,
+    across 4 distinct junction-less assays. Nor is the fallback itself
     hypothetical: 473 of the 360,027 labelled edges already carry a seek id in
-    `edge_internal_assay_id` because the server applies this same fallback.
+    `edge_internal_assay_id` because the server applies this same rule.
 
-    Asserted against the REAL extract, because the hazard is a property of
-    production numbering and a fixture cannot exhibit it.
+    This case asserts against the REAL extract, because only production
+    numbering can show that the LIVE data satisfies the invariant. The
+    invariant itself is enforced in `assay_index`, which raises, so an
+    operator's real run fails loudly without needing a 17 MB gitignored file
+    next to it. Both are needed: this one would skip on every fresh clone.
     """
     if not (EXTRACT / "assays.parquet").exists():
         pytest.skip(f"no extract at {EXTRACT}; run driver_extract.py first")
@@ -172,10 +301,18 @@ def test_the_fallback_id_space_does_not_collide_with_the_internal_one():
     collision = sorted(fallback & genuine)
     assert not collision, (
         f"{len(collision)} junction-less assay(s) are keyed on a seek id that "
-        f"is also a genuine internal_assays id: {collision}. Their precedent "
-        "is now merged with an unrelated assay's. Fix the junction rows in "
+        f"is also a genuine internal_assays id: {collision}. Within a project "
+        "their precedent is now merged. Fix the junction rows in "
         "dmac.assays_internal_assays, or give the fallback its own id space."
     )
-    # and the reason it holds, stated so a future move of either range is
-    # visible in the failure rather than only in the assertion above
-    assert min(fallback) > max(genuine)
+    # The reason it holds, stated so a future move of EITHER range shows up
+    # here rather than only as a mysterious intersection above.
+    #
+    # `if fallback` is load-bearing, not defensive noise. Fixing the junction
+    # rows -- the exact remediation the assertion above prints -- empties
+    # `fallback`, and a bare `min()` would then die with "min() iterable
+    # argument is empty" and report a FAILURE for the fully-repaired state.
+    # A guard that breaks when you follow its own advice trains people to
+    # ignore it.
+    if fallback:
+        assert min(fallback) > max(genuine)

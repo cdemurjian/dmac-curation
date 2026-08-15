@@ -65,16 +65,45 @@ def assay_index(assays: pd.DataFrame) -> dict[int, tuple[int, int, str]]:
     leave alone. The filtered reading is the one that recommends a proposal
     contradicting 13 samples' actual registration.
     See vocabulary_evidence.build_evidence.
+
+    RAISES `ValueError` if a fallback id is also a genuine internal id. That
+    invariant is what makes the fallback safe, and it holds today only by luck
+    of numbering: the 17 junction-less assays sit at 466-482 and the genuine
+    internal ids run 1-188. It is checked HERE, in the single funnel every
+    consumer passes through, rather than only in a test, because the test can
+    only run beside a 17 MB gitignored extract and an operator's real run
+    cannot. See tests/test_assay_hygiene_precedent.py for the extract-backed
+    case that proves the live data satisfies it.
     """
     out: dict[int, tuple[int, int, str]] = {}
+    fallback: set[int] = set()
+    genuine: set[int] = set()
     for aid, pid, title, iaid, ititle in zip(
         assays.assay_id, assays.project_id, assays.title,
         assays.internal_assay_id, assays.internal_assay_title,
     ):
         if pd.isna(iaid):
             out[int(aid)] = (int(pid), int(aid), str(title))
+            fallback.add(int(aid))
         else:
             out[int(aid)] = (int(pid), int(iaid), str(ititle))
+            genuine.add(int(iaid))
+    # set intersection, never min()/max(): a fully-fixed junction table leaves
+    # `fallback` empty, and a range comparison would raise ValueError on the
+    # empty sequence in exactly the state this message tells the operator to
+    # reach. An empty intersection is simply falsy.
+    collision = sorted(fallback & genuine)
+    if collision:
+        raise ValueError(
+            f"{len(collision)} junction-less assay(s) fall back to a seek "
+            f"assays.id that is also a genuine dmac.internal_assays id: "
+            f"{collision}. RULE_KEY carries project_id, so this merges the "
+            "two assays' precedent only where both occur in the SAME project "
+            "-- which is not hypothetical: 12 such pairs already share a hop "
+            "within one project. Fix the junction rows in "
+            "dmac.assays_internal_assays, or give the fallback its own id "
+            "space."
+        )
     return out
 
 
@@ -124,6 +153,22 @@ def mine_precedent(
     memb = membership_index(membership)
     ainfo = assay_index(assays)
 
+    # Checked up front and not per-edge. This was a `continue` inside the loop,
+    # which made it the module's one silent drop, against the spec's binding
+    # "nothing is dropped silently". Hoisting it also widens it: the loop
+    # version could only trip on an assay_id reached by an edge endpoint, so a
+    # registration on a sample with no edges was invisible either way. 0 of the
+    # 173 membership assay_ids hit this today; the list is reported whole
+    # rather than one id at a time so a broken extract is diagnosed in one run.
+    unknown = sorted({int(a) for a in membership.assay_id} - set(ainfo))
+    if unknown:
+        raise ValueError(
+            f"membership registers samples in {len(unknown)} assay(s) absent "
+            f"from the assays frame: {unknown}. Those registrations cannot be "
+            "resolved to an internal assay, and skipping them would drop "
+            "evidence silently. Re-extract so the two frames agree."
+        )
+
     counts: dict[tuple, list[int]] = defaultdict(lambda: [0, 0, 0])
     titles: dict[tuple, str] = {}
 
@@ -133,10 +178,7 @@ def mine_precedent(
         ca = memb.get(int(child_id), frozenset())
         pa = memb.get(int(parent_id), frozenset())
         for assay_id in ca | pa:
-            info = ainfo.get(assay_id)
-            if info is None:
-                continue      # assay absent from the extract; skip rather than guess
-            project_id, iaid, ititle = info
+            project_id, iaid, ititle = ainfo[assay_id]
             key = (project_id, str(child_type), str(parent_type), iaid)
             titles[key] = ititle
             if assay_id in ca and assay_id in pa:
@@ -166,15 +208,29 @@ def mine_precedent(
 
     out = pd.DataFrame(rows, columns=S.PRECEDENT_COLUMNS)
     # RULE_KEY rides behind the two evidence columns as a tiebreak. The
-    # evidence order is unchanged; the tiebreak only orders rows that the
-    # evidence columns leave equal, and 708 of the 961 real rules sit in such
-    # a tie group, 440 of them at (0, 0). Without it their order falls to
-    # `sort_values`' unstable quicksort over dict insertion order, so the
-    # artifact a curator diffs between runs is ordered by an implementation
-    # detail. Same reasoning as vocabulary_evidence's three-key sort.
+    # evidence order is unchanged; the tiebreak only orders rows the evidence
+    # columns leave equal, and 708 of the 961 real rules sit in such a group,
+    # 440 of them at (0, 0).
+    #
+    # NOT because the sort is unstable -- an earlier version of this comment
+    # said that and it is wrong. `sort_values` over a LIST of columns goes
+    # through `np.lexsort` and IS stable; `kind` applies only to a single-column
+    # sort (verified on pandas 3.0.5). So the two-column sort is perfectly
+    # reproducible for a GIVEN input order, and the hazard is the input order
+    # itself: with no tiebreak those 708 rows come out in `counts` insertion
+    # order, which is the order edges happen to sit in edges.parquet.
+    # test_assay_hygiene_stage0.py already records that "the extractor's row
+    # order is not stable across extracts", and measured here, permuting the
+    # edge frame moves 647 of the 961 rows under the two-column sort while
+    # leaving the full-key sort byte-identical. A curator diffing this artifact
+    # between extracts would read those 647 as change. Same reasoning as
+    # vocabulary_evidence's three-key sort, and pinned by
+    # test_row_order_does_not_depend_on_the_order_edges_arrive_in.
     return out.sort_values(
         ["n_both", "n_child_only"] + S.RULE_KEY,
-        ascending=[False, False, True, True, True, True],
+        # built from RULE_KEY, not six hard-coded booleans: a fifth key
+        # component would otherwise raise at runtime rather than at review
+        ascending=[False, False] + [True] * len(S.RULE_KEY),
         ignore_index=True,
     )
 
@@ -189,14 +245,21 @@ def main(extract_dir: str = "assay-hygiene/extract",
     )
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(out_path, index=False)
-    # "with precedent" means n_both > 0: a hop whose every observation is
-    # child_only or parent_only has a rule row but has never once been seen
-    # co-registered, so it is evidence AGAINST propagating, not precedent for
-    # it. Reporting the looser count instead (306 here, every project/hop pair
-    # with any row at all) would overstate what stage C has to work with.
+    # "with precedent" means n_both > 0: a project/hop pair whose every
+    # observation is child_only or parent_only has a rule row but has never
+    # once been seen co-registered, so it is evidence AGAINST propagating, not
+    # precedent for it. The looser count is 306 here.
+    #
+    # It says "project/hop pairs" and not "hops" because the unit is the
+    # TRIPLE (project_id, child_type, parent_type). The extract happens to
+    # contain exactly 213 distinct (child_type, parent_type) pairs, so the
+    # bare word "hops" made this line read as "every hop in the graph has
+    # precedent" against a coincidence. The true type-pair figure is 153 of
+    # 208.
     hops = out[out.n_both > 0][
         ["project_id", "child_type", "parent_type"]].drop_duplicates()
-    print(f"{len(out)} rules over {len(hops)} hops with precedent -> {out_path}")
+    print(f"{len(out)} rules over {len(hops)} project/hop pairs "
+          f"with precedent -> {out_path}")
     print(out.head(20).to_string(index=False))
 
 
