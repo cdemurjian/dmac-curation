@@ -234,6 +234,43 @@ def test_the_flag_accuracy_caveat_travels_with_the_tier_accuracies():
     assert f"**{worst.accuracy:.1%}**" in between
 
 
+def test_the_field_accuracies_name_their_population_and_their_source():
+    """90.4% is the CASCADE, not the accuracy of a weak claim.
+
+    Re-measured 2026-08-15 with `scripts/measure_metadata_accuracy.py` over the
+    real extract, held out by sample against 179,848 labelled test edges:
+
+        strong fields only                  98.4%   118,493
+        strong, then Protocol / DataType    90.4%   166,082   <- the cascade
+        weak fields ONLY                    89.2%   153,309
+        Type and Protocol agree             99.9%    62,957
+
+    The report printed "`weak` 90.4%" directly beneath the count of weak claims,
+    where it reads as their accuracy -- while 90.4% is the whole cascade, and
+    the strong half is what carries it.
+
+    These three are the only figures in the report its own run does not compute,
+    so the text must say so and name what does. Otherwise a reader re-runs the
+    layer and believes they revalidated them.
+    """
+    section = R.build_report(*_frames()).split("## Claims")[1].split("## Mode 3")[0]
+    assert "`weak` 90.4%" not in section, (
+        "90.4% is the strong-then-weak cascade over 166,082 edges, printed "
+        "beside the weak claim count where it reads as their accuracy"
+    )
+    assert "89.2%" in section and "153,309" in section, (
+        "the weak-fields-only figure and its population must both appear"
+    )
+    assert "98.4%" in section and "118,493" in section
+    assert "measure_metadata_accuracy.py" in section, (
+        "the three quoted figures must name the script that produces them"
+    )
+    assert "not recomputed" in section, (
+        "the report must say these are quoted, or a reader re-running the "
+        "layer believes they revalidated them"
+    )
+
+
 def test_the_purity_bands_are_computed_and_always_sum_to_the_total():
     vocab = pd.DataFrame(
         [("Type", "low", 11, "A", 10, 10, 0.50, S.P_LEARNED),
@@ -248,6 +285,13 @@ def test_the_purity_bands_are_computed_and_always_sum_to_the_total():
                # that does not match the rows beneath it.
                ("Type", "orphan"): (5, 10)}
     out = R.purity_band_accuracy(heldout, vocab)
+    # The total row names the SCORED population and never the vocabulary. The
+    # fixture separates the two deliberately -- 3 terms in the vocabulary, 4
+    # scored -- because a `len(vocab)` label reads as maintained and is wrong
+    # the moment a curator writes the proposals file this package asks them
+    # for: 736 becomes 916 while the measurement does not move, attributing a
+    # fixed 333,717-edge result to 180 untrusted proposal rows.
+    assert out.iloc[0].band == "all 4 scored terms", out.iloc[0].band
     by_band = dict(zip(out.band, zip(out.hits, out.tested)))
     assert by_band["< 0.75"] == (1, 4)
     assert by_band["0.75 - 0.90"] == (3, 4)

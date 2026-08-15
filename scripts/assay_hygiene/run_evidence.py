@@ -279,7 +279,16 @@ def purity_band_accuracy(heldout: dict, vocab: pd.DataFrame) -> pd.DataFrame:
                     break
         tallies[label][0] += hit
         tallies[label][1] += tested
-    rows = [{"band": f"all {len(vocab):,} terms",
+    # The total row names the SCORED population and never the vocabulary. Those
+    # are different numbers and only one of them moves with a curator's file:
+    # 620 terms are scored against 736 in the vocabulary today, and the moment
+    # someone writes the proposals file this command asks for, `len(vocab)`
+    # becomes 916 while the measurement is unchanged -- so a vocabulary-sized
+    # label would attribute a fixed 333,717-edge result to 296 rows it cannot
+    # speak for, 180 of them untrusted proposals. The stale literal this
+    # replaced ("all 736 terms") was at least stale in one direction; a wrong
+    # dynamic label is worse, because it looks maintained.
+    rows = [{"band": f"all {len(heldout):,} scored terms",
              "hits": sum(h for h, _ in tallies.values()),
              "tested": sum(t for _, t in tallies.values())}]
     rows += [{"band": label, "hits": tallies[label][0],
@@ -551,9 +560,35 @@ def build_report(precedent, claims, audit, vocab, unresolved, *,
         )
     lines += [
         "",
-        "Tiers are measured, not asserted (2026-08-14, held out BY SAMPLE"
-        " against curator-labelled edges): `corroborated` 99.9% accurate,"
-        " `strong` 98.4%, `weak` 90.4%.",
+        "A tier is a statement about the FIELDS behind a claim, and those"
+        " fields are measured. Held out by sample against 179,848"
+        " curator-labelled test edges: where a strong field predicts it is"
+        " right **98.4%** of the time (118,493 edges), where a weak field"
+        " predicts **89.2%** (153,309), and where `Type` and `Protocol` both"
+        " predict AND agree -- the shape a `corroborated` claim has --"
+        " **99.9%** (62,957).",
+        "",
+        # THE POPULATION IS THE WHOLE POINT OF THIS PARAGRAPH. These three
+        # figures were previously printed as "`corroborated` 99.9% accurate,
+        # `strong` 98.4%, `weak` 90.4%", directly beneath the tier counts, where
+        # each read as the accuracy OF THAT TIER. Two of the three are field
+        # measurements standing in for a tier, which is defensible once said out
+        # loud; the third was simply the wrong population. 90.4% is the whole
+        # strong-then-weak CASCADE over 166,082 held-out edges and is carried by
+        # the strong half. Weak fields alone score 89.2% over 153,309
+        # (re-measured 2026-08-15 with scripts/measure_metadata_accuracy.py).
+        # Every number here now names the population it was taken over.
+        "Read those as the accuracy of the EVIDENCE, and not of the tier counts"
+        " above. The 89.2% is weak fields ALONE: a cascade that lets strong"
+        " fields decide first and falls back to weak ones reads 90.4% over"
+        " 166,082 edges, which is higher only because the strong half carries"
+        " it.",
+        "",
+        "These three are measured by `scripts/measure_metadata_accuracy.py` --"
+        " a separate read-only pass over the same extract, last run"
+        " 2026-08-15 -- and are QUOTED here, not recomputed. Re-running this"
+        " layer does not revalidate them; re-run that script. Everything else"
+        " in this report is computed by the run that wrote it.",
         "",
         "**Do not carry those numbers into the Mode 3 table below.** They are"
         " averages over all claims, and a flag is by construction drawn from"
@@ -575,9 +610,12 @@ def build_report(precedent, claims, audit, vocab, unresolved, *,
         ]
     if purity_bands is not None and len(purity_bands):
         lines += [
-            "Held-out accuracy by the purity of the driving term, measured the"
-            " same way as the tier figures above (train on even sample ids,"
-            " score the odd half against labelled producing edges):",
+            "Held-out accuracy by the purity of the driving term, split the"
+            " same way as the field figures above (train on even sample ids,"
+            " score the odd half against labelled producing edges) but"
+            " recomputed by THIS run. The population is the terms the training"
+            " half supports and the held-out half exercises, which is fewer"
+            f" than the {len(vocab):,} terms in the vocabulary:",
             "",
             "| purity of term | held-out accuracy | test edges |",
             "|---|---|---|",
