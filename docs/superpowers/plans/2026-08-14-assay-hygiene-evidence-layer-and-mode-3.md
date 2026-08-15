@@ -1976,7 +1976,7 @@ def test_report_states_every_headline_count():
         columns=S.CLAIM_COLUMNS,
     )
     audit = pd.DataFrame(
-        [(100, "D.IMG-1", "D.IMG", "12", 11, "Comet Chip",
+        [(100, "D.IMG-1", "D.IMG", "12", "Tissue Collection", 11, "Comet Chip",
           S.T_STRONG, "Type", "CometChip", S.V_MODE3_FLAG)],
         columns=S.AUDIT_COLUMNS,
     )
