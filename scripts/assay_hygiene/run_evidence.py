@@ -433,7 +433,8 @@ def build_report(precedent, claims, audit, vocab, unresolved, *,
         "",
         "So the aggregate is carried by the unambiguous majority, and the band"
         " the flags come from is the one that performs worst. The six terms"
-        " driving 695 of the 866 flags score **77.1%** held out, not 98.4%.",
+        " driving **764** of the 866 flags -- across 8 patterns, not the six"
+        " largest ones -- score **77.1%** held out, not 98.4%.",
         "",
     ]
 
@@ -524,21 +525,99 @@ def build_report(precedent, claims, audit, vocab, unresolved, *,
                 f" {_cell(r.runner_up)} | {peers} |"
                 f" {_cell(r.example_uuids)} |"
             )
-        lines += [
-            "",
-            "### The open question this layer does NOT answer",
-            "",
-            "A purity floor on the claims feeding Mode 3 would remove most of"
-            " the low-confidence flags, and the band table above is the curve"
-            " for choosing one. **No threshold is chosen here.** The right value"
-            " is an output of a curator ruling on the 22 patterns, not a number"
-            " to pick from a distribution, and picking it now would also require"
-            " claims to carry purity -- a `CLAIM_COLUMNS` change made before"
-            " anyone has ruled on a single flag. It is the first question the"
-            " next increment must answer, and the bands above are what it should"
-            " be answered against.",
-            "",
-        ]
+        lines.append("")
+        if pat.peer_rate.notna().any():
+            hi = pat[pat.peer_rate >= 0.93]
+            mid = pat[(pat.peer_rate >= 0.85) & (pat.peer_rate < 0.93)]
+            lo = pat[pat.peer_rate < 0.85]
+            best = hi.sort_values("peer_rate", ascending=False).head(1)
+            lines += [
+                "### This is not a dismissal",
+                "",
+                f"**{int(hi.n.sum()):,} of the {len(audit):,} flags"
+                f" ({len(hi)} of the {len(pat)} patterns) sit at 93% or higher"
+                " peer registration**, and those read as genuine missing"
+                " registrations rather than artifacts: nearly every other sample"
+                " saying the same thing IS registered where this one claims, and"
+                " these are the ones that are not.",
+                "",
+            ]
+            if len(best):
+                b = best.iloc[0]
+                lines += [
+                    f"The clearest case is `{_cell(b.raw_value)}`:"
+                    f" {int(b.peer_registered):,} of its"
+                    f" {int(b.peer_carriers):,} carriers are registered in"
+                    f" {_cell(b.claimed_internal_assay_id)}"
+                    f" {_cell(b.claimed_internal_assay_title)}, and the"
+                    f" {int(b.n)} flagged here"
+                    f" {_plural(int(b.n), 'is the one that is', 'are the ones that are')}"
+                    " not.",
+                    "",
+                ]
+            lines += [
+                f"A reader who concludes from the mechanism above that Mode 3 is"
+                " all vote artifact would discard these. The right reading is"
+                " that the flags are MIXED:"
+                f" ~{int(hi.n.sum()):,} look like genuine gaps,"
+                f" ~{int(lo.n.sum()):,} in {len(lo)} patterns sit below 85% peer"
+                f" registration and look like mapping artifacts, and"
+                f" {int(mid.n.sum()):,} sit in between. Sorting them is the"
+                " curator's job and this table is the instrument for it.",
+                "",
+                "### The open question this layer does NOT answer",
+                "",
+                "A floor on what reaches Mode 3 would remove most of the"
+                " low-confidence flags. **No threshold is chosen here** -- it is"
+                " an output of a curator ruling on these patterns, not a number"
+                " to pick off a distribution. But the axis it should ride on is"
+                " **peer rate, not purity**, and that is worth stating before"
+                " anyone picks one.",
+                "",
+            ]
+            if pat.purity.notna().any():
+                corr = pat.purity.corr(pat.peer_rate)
+                drop = pat[(pat.purity < 0.75) & (pat.peer_rate >= 0.93)]
+                keep = pat[(pat.purity >= 0.75) & (pat.peer_rate < 0.85)]
+                missorted = int(drop.n.sum()) + int(keep.n.sum())
+                lines += [
+                    f"The two axes correlate at only **{corr:.2f}** across these"
+                    " patterns, and they disagree in both directions with real"
+                    " mass behind the disagreement. A 0.75 purity floor would:",
+                    "",
+                    f"- **discard {int(drop.n.sum()):,} flags** that sit at 93%+"
+                    " peer registration -- "
+                    + (", ".join(f"`{_cell(r.raw_value)}` ({r.n} at"
+                                 f" {r.peer_rate:.1%})" for r in drop.itertuples())
+                       or "none") + ", the cleanest gaps in the set;",
+                    f"- **keep {int(keep.n.sum()):,} flags** below 85% peer"
+                    " registration -- "
+                    + (", ".join(f"`{_cell(r.raw_value)}` ({r.n} at purity"
+                                 f" {r.purity:.2f}, peer {r.peer_rate:.1%})"
+                                 for r in keep.itertuples()) or "none")
+                    + ", the likeliest artifacts.",
+                    "",
+                    f"That is **{missorted:,} of {len(audit):,} flags"
+                    f" ({missorted / len(audit):.1%}) sorted the wrong way** by"
+                    " the purity axis alone. Purity measures how consistently a"
+                    " term was used across the whole corpus; peer rate measures"
+                    " how anomalous THIS registration is against its own cohort,"
+                    " which is the question a curator is actually asking. The"
+                    " purity band table above remains evidence -- it is why a"
+                    " flag's claim should not be trusted at the aggregate tier"
+                    " accuracy -- but it is not the axis a floor should ride on.",
+                    "",
+                ]
+        else:
+            lines += [
+                "### The open question this layer does NOT answer",
+                "",
+                "A floor on what reaches Mode 3 would remove most of the"
+                " low-confidence flags. **No threshold is chosen here**: it is an"
+                " output of a curator ruling on these patterns, not a number to"
+                " pick off a distribution.",
+                "",
+            ]
 
     # --- artifacts ----------------------------------------------------------
     if out_dir:
