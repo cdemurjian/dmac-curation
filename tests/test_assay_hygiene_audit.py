@@ -19,6 +19,20 @@ def _assays():
     )
 
 
+def _assays_with_a_junction_less_row():
+    """assay 2 has no junction row, so it falls back to its own (id, title).
+
+    Its resolved id is then 2 -- a seek assays.id, in a namespace no claim ever
+    speaks -- which is what makes a sample registered in it unmappable rather
+    than known-different.
+    """
+    return pd.DataFrame(
+        [(1, "Comet Chip", 7, 3, 2, 10, "MIT_SRP", 11, "Comet Chip"),
+         (2, "Tissue Collection", 8, 3, 2, 10, "MIT_SRP", None, None)],
+        columns=S.ASSAY_COLUMNS,
+    )
+
+
 def _nodes(rows):
     return pd.DataFrame(rows, columns=S.NODES_COLUMNS)
 
@@ -177,6 +191,101 @@ def test_the_flagged_row_reports_the_type_of_its_own_node():
     claims = _claims([(100, "MUS-1", 11, "Comet Chip", S.T_STRONG, "Type", "x", False, S.P_LEARNED)])
     out = A.audit_contradictions(claims, membership, _assays(), nodes)
     assert out.iloc[0].sample_type == "MUS"
+
+
+def test_a_registration_in_an_unmappable_id_space_is_not_a_contradiction():
+    """A junction-less registration cannot establish a contradiction.
+
+    The sample is registered in fallback id 2, a seek assays.id. The claim
+    names internal id 11. They cannot be equal -- they are different namespaces
+    -- so the comparison reads as disagreement no matter what the registration
+    actually is. `assay_index`'s collision guard makes a false AGREEMENT
+    impossible but says nothing about this, the false CONTRADICTION.
+
+    Excluded by ID SPACE and not by title: the two titles here differ ("Comet
+    Chip" against "Tissue Collection"), so a title-equality rule would let this
+    row through. That is not hypothetical -- on the real extract 14 flags carry
+    a fallback id and only 13 have a matching title, and the 14th (sample
+    244038, registered 466;467, claiming 24 DNA Extraction) is precisely this
+    shape.
+    """
+    membership = pd.DataFrame([(100, 2)], columns=S.MEMBERSHIP_COLUMNS)
+    nodes = _nodes([("D.IMG-1", 100, "D.IMG")])
+    claims = _claims([(100, "D.IMG-1", 11, "Comet Chip", S.T_STRONG, "Type", "x", False, S.P_LEARNED)])
+    assays = _assays_with_a_junction_less_row()
+
+    assert A.audit_contradictions(claims, membership, assays, nodes).empty
+    # The identical world with the junction row present DOES flag, or the case
+    # above proves only that something else swallowed the row.
+    assert len(A.audit_contradictions(claims, membership, _assays(), nodes)) == 1
+
+
+def test_unmappable_registrations_can_be_admitted_deliberately():
+    membership = pd.DataFrame([(100, 2)], columns=S.MEMBERSHIP_COLUMNS)
+    nodes = _nodes([("D.IMG-1", 100, "D.IMG")])
+    claims = _claims([(100, "D.IMG-1", 11, "Comet Chip", S.T_STRONG, "Type", "x", False, S.P_LEARNED)])
+    out = A.audit_contradictions(claims, membership,
+                                 _assays_with_a_junction_less_row(), nodes,
+                                 include_unmappable=True)
+    assert len(out) == 1
+
+
+def test_one_mappable_registration_does_not_rescue_an_unmappable_one():
+    """The exclusion is on ANY unmappable id in the set, not on all of them.
+
+    A sample registered in both a mappable and a junction-less assay still has
+    a registration whose identity is unknown, and that unknown one could be the
+    assay the claim names. Recovering it could only ADD to the compared set,
+    and adding can only ever REMOVE a flag.
+    """
+    membership = pd.DataFrame([(100, 1), (100, 2)], columns=S.MEMBERSHIP_COLUMNS)
+    nodes = _nodes([("D.IMG-1", 100, "D.IMG")])
+    # claims internal 13: registered in neither 11 (mappable) nor 2 (fallback)
+    claims = _claims([(100, "D.IMG-1", 13, "Other", S.T_STRONG, "Type", "x", False, S.P_LEARNED)])
+    assays = _assays_with_a_junction_less_row()
+
+    assert A.audit_contradictions(claims, membership, assays, nodes).empty
+    assert len(A.audit_contradictions(claims, membership, assays, nodes,
+                                      include_unmappable=True)) == 1
+
+
+def test_the_registered_titles_align_positionally_with_the_registered_ids():
+    """Index i of the id column names index i of the title column.
+
+    The two columns are one fact split in half, and a reader judging a flag
+    reads across them. Built independently they could drift into a row that
+    decodes to the wrong assay, which is worse than the bare id column this
+    replaced: a wrong title is confidently wrong, a missing one is only
+    unhelpful. Both are built from one sorted list off `assay_index`, the same
+    funnel the ids came from.
+
+    The titles here are deliberately ANTI-alphabetical against their ids (11
+    Zebrafish, 12 Alpha), so an implementation that collects or sorts the
+    titles independently of the ids emits a different string and fails. Under
+    the shared fixture's "Comet Chip" / "Tissue Collection" the id order and
+    the alphabetical order coincide, so this case would pass against a
+    decoupled implementation -- it would certify the alignment in its own title
+    without testing it, which is the failure mode this file has already had to
+    correct once.
+    """
+    assays = pd.DataFrame(
+        [(1, "Comet Chip", 7, 3, 2, 10, "MIT_SRP", 11, "Zebrafish Imaging"),
+         (2, "Tissue Collection", 8, 3, 2, 10, "MIT_SRP", 12, "Alpha Screening")],
+        columns=S.ASSAY_COLUMNS,
+    )
+    membership = pd.DataFrame(
+        [(100, 1), (100, 2)], columns=S.MEMBERSHIP_COLUMNS)
+    nodes = _nodes([("D.IMG-1", 100, "D.IMG")])
+    claims = _claims([(100, "D.IMG-1", 13, "Other", S.T_STRONG, "Type", "x", False, S.P_LEARNED)])
+    row = A.audit_contradictions(claims, membership, assays, nodes).iloc[0]
+
+    ids = row.registered_internal_assay_ids.split(";")
+    names = row.registered_internal_assay_titles.split(";")
+    assert ids == ["11", "12"]
+    assert len(ids) == len(names)
+    assert names == ["Zebrafish Imaging", "Alpha Screening"]
+    assert dict(zip(ids, names)) == {"11": "Zebrafish Imaging",
+                                     "12": "Alpha Screening"}
 
 
 def test_row_order_does_not_depend_on_the_order_claims_arrive_in():

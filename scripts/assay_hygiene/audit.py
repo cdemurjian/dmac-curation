@@ -13,16 +13,20 @@ accurate and corroborated ones 99.9% (measured 2026-08-14, held out by sample);
 weak claims are 90.4%, so flagging on them would hand a curator roughly one
 false positive in ten. Contested claims -- ones whose sample's own evidence
 names more than one assay -- have not settled what they assert, and on that
-subset the winning claim's mapping is still wrong about 30% of the time. Both
-floors are parameters so a curator can widen them deliberately, never by
-accident.
+subset the winning claim's mapping is still wrong about 30% of the time. And a
+sample registered under a junction-less assay has a registration whose internal
+identity is unknown, so nothing can be said to contradict it.
+
+All three floors are parameters (`tiers`, `include_contested`,
+`include_unmappable`) so a curator can widen them deliberately, never by
+accident, and so no row this mode refuses is unrecoverable.
 """
 from __future__ import annotations
 
 import pandas as pd
 
 from . import _schema as S
-from .precedent import assay_index
+from .precedent import assay_index, fallback_assay_ids, membership_index
 
 # Tiers trusted enough to contradict a curator's own registration.
 DEFAULT_TIERS = (S.T_CORROBORATED, S.T_STRONG)
@@ -55,9 +59,13 @@ def registered_internal(
     or a row-count anomaly. 0 of the 173 membership assay_ids on the real
     extract hit this today.
 
-    Returns a plain dict built with `setdefault`, not a defaultdict, for the
-    same reason `precedent.membership_index` does: callers ask about samples
-    registered nowhere, and a defaultdict answers by CREATING the entry.
+    This is `precedent.membership_index` COMPOSED with `assay_index` and not a
+    third grouping of the membership frame: the seek-side grouping is defined
+    once, in the module that owns the funnel, and this function is only the
+    namespace crossing on top of it. It inherits the plain-dict return that
+    docstring argues for -- callers ask about samples registered nowhere, and a
+    defaultdict would answer by CREATING the entry, so `999 in idx` would be
+    true of every sample ever asked about.
     """
     ainfo = assay_index(assays)
 
@@ -71,10 +79,10 @@ def registered_internal(
             "dropped itself. Re-extract so the two frames agree."
         )
 
-    out: dict[int, set[int]] = {}
-    for sample_id, assay_id in zip(membership.sample_id, membership.assay_id):
-        out.setdefault(int(sample_id), set()).add(ainfo[int(assay_id)][1])
-    return out
+    return {
+        sample_id: {ainfo[a][1] for a in assay_ids}
+        for sample_id, assay_ids in membership_index(membership).items()
+    }
 
 
 def audit_contradictions(
@@ -84,11 +92,45 @@ def audit_contradictions(
     nodes: pd.DataFrame,
     tiers: tuple[str, ...] = DEFAULT_TIERS,
     include_contested: bool = False,
+    include_unmappable: bool = False,
 ) -> pd.DataFrame:
     """Flag samples whose claim names an assay they are not registered in.
 
     A sample registered in NOTHING is not flagged: that is Mode 1's population,
     and Mode 3 needs something to contradict.
+
+    A sample whose registered set contains an UNMAPPABLE id is not flagged
+    either, and this one is about namespaces rather than population. A claim
+    speaks a dmac internal id; a junction-less registration resolves to a seek
+    `assays.id`, which is a different namespace (see `assay_index`). That
+    function's collision guard makes a false AGREEMENT impossible -- no
+    fallback id can equal a genuine one -- but it does nothing about a false
+    CONTRADICTION, because an id in the wrong namespace can never match and so
+    reads as disagreement every time. A fallback id in `have` is therefore a
+    registration whose internal identity is UNKNOWN, not one known to differ,
+    and recovering that identity could only ever ADD to `have`. Adding to
+    `have` can only ever REMOVE a flag -- the same monotone direction this
+    whole mode rests on -- so the contradiction is NOT ESTABLISHED and the
+    audit refuses to assert it.
+
+    Excluded by ID SPACE and never by title. A title rule would make the
+    display string load-bearing for identity, which this package refuses (124
+    seek ids collide numerically with genuine internal ids under 122 different
+    titles), and it also misses cases: measured on the real extract, 14 flags
+    carry a fallback id while only 13 have a title equal to the claimed one.
+    The 14th (sample 244038, registered 466;467, claiming 24 DNA Extraction) is
+    exactly the row a title rule would let through.
+
+    Measured 2026-08-14: the exclusion removes 13 of 879 at the default and 14
+    of 1,570 with contested admitted. It is one of only 23 distinct flag
+    patterns, so it is 4.3% of a curator's actual judgement surface rather than
+    1.5% of a row count. Four of the 17 junction-less assays share a normalised
+    title with a genuine internal id (467/64, 468/34, 481/61, 482/99); only 481
+    produces flags today and the other three are latent, waiting on an at-floor
+    claim. The real repair is upstream -- 17 junction rows in
+    dmac.assays_internal_assays -- which is strictly better and also clears the
+    latent collision `assay_index` raises on. This rule holds while that is
+    outstanding, and after it, should a junction row ever go missing again.
 
     Contested rows are excluded by a SEPARATE parameter rather than by tier.
     Folding contestedness into the tier is what made the previous design
@@ -106,6 +148,14 @@ def audit_contradictions(
     order.
     """
     registered = registered_internal(membership, assays)
+    unmappable = fallback_assay_ids(assays)
+    # internal id -> title, read off the SAME funnel that produced the ids in
+    # `registered`, so the decoded column cannot disagree with the id column it
+    # sits beside. Every id in `have` resolves by construction: both come from
+    # `assay_index`. Measured on the real extract, 0 of 458 assay records carry
+    # an internal id with no title and no internal id resolves to two distinct
+    # titles, so `titles` is total and single-valued over its 154 keys.
+    titles = {iaid: title for _, iaid, title in assay_index(assays).values()}
     # Keyed on uuid and NOT sample_id. `nodes` is documented as a uuid index
     # and sample_id is not unique in it: measured on the real extract
     # 2026-08-14, 86 sample_ids carry two node rows under two uuids and 51 of
@@ -131,11 +181,20 @@ def audit_contradictions(
             continue                      # unregistered -> Mode 1, not Mode 3
         if int(c.internal_assay_id) in have:
             continue                      # claim agrees with the record
+        if (have & unmappable) and not include_unmappable:
+            continue                      # identity unknown -> not established
+        # Sorted once and read twice, so index i of the id column names index i
+        # of the title column. Building either independently would let the two
+        # drift into a row that decodes to the wrong assay -- the failure the
+        # column was added to prevent.
+        reg = sorted(have)
         rows.append({
             "sample_id": int(c.sample_id),
             "uuid": c.uuid,
             "sample_type": types.get(c.uuid),
-            "registered_internal_assay_ids": ";".join(str(i) for i in sorted(have)),
+            "registered_internal_assay_ids": ";".join(str(i) for i in reg),
+            "registered_internal_assay_titles": ";".join(
+                str(titles.get(i)) for i in reg),
             "claimed_internal_assay_id": int(c.internal_assay_id),
             "claimed_internal_assay_title": c.internal_assay_title,
             "tier": c.tier,

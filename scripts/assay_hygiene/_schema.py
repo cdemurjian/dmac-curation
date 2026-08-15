@@ -198,10 +198,36 @@ VOCAB_COLUMNS = [
 ]
 
 # --- audit (mode 3) ----------------------------------------------------------
+#
+# `registered_internal_assay_titles` rides immediately behind its id column and
+# holds the SAME ids decoded, in the SAME positions, both `;`-joined: index i of
+# one names index i of the other. It is not decoration. Mode 3's whole product
+# is a list a curator reads and rules on, and without it a row reads
+# `registered 115, claims 24 DNA Extraction` -- a bare id on the registered side
+# against a decoded one on the claimed side -- so the reader cannot judge the
+# contradiction the row asserts without a lookup they have no artifact for. The
+# frame was internally inconsistent from the moment it carried both
+# `claimed_internal_assay_id` and `claimed_internal_assay_title`.
+#
+# Titles come from `precedent.assay_index`, the same funnel that produced the
+# ids, so no second source of truth appears and no id can decode to a title its
+# own registration does not carry. Every id resolves by construction, both
+# columns being built from that one map. Measured on the real extract
+# 2026-08-14: 0 of the 458 assay records carry an internal id with no title, and
+# 0 internal ids resolve to more than one distinct title over the 154 in the
+# map, so the decode is total and single-valued on today's data.
+#
+# Added in Task 7's fix round, deliberately BEFORE the first consumer existed:
+# `AUDIT_COLUMNS` had exactly one non-test reference in the tree (audit.py's
+# constructor) and Task 8 was unwritten, so this is the one moment a column
+# costs nothing. Position is chosen for the same reason STAGE0_PLAN_COLUMNS
+# fixes its own: a reader scanning the header meets the two halves of one fact
+# side by side.
 AUDIT_COLUMNS = [
     "sample_id", "uuid", "sample_type",
-    "registered_internal_assay_ids", "claimed_internal_assay_id",
-    "claimed_internal_assay_title", "tier", "source_field", "raw_value",
+    "registered_internal_assay_ids", "registered_internal_assay_titles",
+    "claimed_internal_assay_id", "claimed_internal_assay_title",
+    "tier", "source_field", "raw_value",
     "verdict",
 ]
 

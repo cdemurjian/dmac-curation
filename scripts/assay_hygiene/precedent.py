@@ -37,6 +37,33 @@ import pandas as pd
 from . import _schema as S
 
 
+def fallback_assay_ids(assays: pd.DataFrame) -> set[int]:
+    """The resolved ids that are SEEK `assays.id`s rather than dmac internal ones.
+
+    These are exactly the ids `assay_index` invents for the 17 junction-less
+    records, so a value here is a value that reaches a consumer's resolved set
+    for one of those records. An id in this set names a registration whose
+    internal identity is UNKNOWN -- not one known to differ from anything.
+
+    Split out of `assay_index`, which now consumes it, so that
+    `pd.isna(internal_assay_id)` -- the predicate deciding which id space a
+    registration belongs to -- has exactly ONE definition in the package. A
+    second copy of that predicate is the same class of bug as a second
+    definition of "registered", which is what produced 13 spurious findings
+    earlier in this increment.
+
+    Mode 3 is the caller that needs it separately. `assay_index`'s collision
+    guard makes a false AGREEMENT impossible, but it does nothing about a false
+    CONTRADICTION: an id in one namespace can never match an id in the other, so
+    it always reads as disagreement. See `audit.audit_contradictions`.
+    """
+    return {
+        int(aid)
+        for aid, iaid in zip(assays.assay_id, assays.internal_assay_id)
+        if pd.isna(iaid)
+    }
+
+
 def assay_index(assays: pd.DataFrame) -> dict[int, tuple[int, int, str]]:
     """assay_id -> (project_id, internal_assay_id, internal_assay_title).
 
@@ -76,15 +103,16 @@ def assay_index(assays: pd.DataFrame) -> dict[int, tuple[int, int, str]]:
     case that proves the live data satisfies it.
     """
     out: dict[int, tuple[int, int, str]] = {}
-    fallback: set[int] = set()
+    # One definition of "this record has no junction row", shared with every
+    # other caller that has to reason about the two id spaces.
+    fallback = fallback_assay_ids(assays)
     genuine: set[int] = set()
     for aid, pid, title, iaid, ititle in zip(
         assays.assay_id, assays.project_id, assays.title,
         assays.internal_assay_id, assays.internal_assay_title,
     ):
-        if pd.isna(iaid):
+        if int(aid) in fallback:
             out[int(aid)] = (int(pid), int(aid), str(title))
-            fallback.add(int(aid))
         else:
             out[int(aid)] = (int(pid), int(iaid), str(ititle))
             genuine.add(int(iaid))

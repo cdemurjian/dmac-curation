@@ -37,6 +37,35 @@ def test_assay_index_falls_back_when_there_is_no_junction_row():
     assert P.assay_index(assays)[2] == (10, 2, "Antibody Panel")
 
 
+def test_fallback_assay_ids_names_the_ids_assay_index_invents():
+    """The two agree by construction, not by both being maintained.
+
+    `fallback_assay_ids` is the one definition of "this record has no junction
+    row" and `assay_index` consumes it, so the set returned here is exactly the
+    set of resolved ids living in the seek namespace rather than the dmac one.
+    Mode 3 needs that distinction separately: an id in one namespace can never
+    equal an id in the other, so it always reads as a contradiction (see
+    audit.audit_contradictions).
+
+    Asserted against `assay_index`'s own output rather than a hand-written set,
+    so the two cannot drift apart.
+    """
+    assays = pd.DataFrame(
+        [(1, "Comet Chip", 7, 3, 2, 10, "MIT_SRP", 11, "Comet Chip"),
+         (2, "Antibody Panel", 8, 3, 2, 10, "MIT_SRP", None, None)],
+        columns=S.ASSAY_COLUMNS,
+    )
+    fallback = P.fallback_assay_ids(assays)
+    assert fallback == {2}
+
+    resolved = {aid: info[1] for aid, info in P.assay_index(assays).items()}
+    # a fallback record resolves to its OWN assay_id; a genuine one does not
+    assert {aid for aid, iaid in resolved.items() if aid == iaid} == fallback
+    # a fully-junctioned frame has none, which is the state the guard's
+    # remediation message tells an operator to reach
+    assert P.fallback_assay_ids(S.make_fixture()["assays"]) == set()
+
+
 def test_comet_chip_hop_records_two_both_sides_and_one_child_only():
     fx = S.make_fixture()
     out = P.mine_precedent(fx["edges"], fx["membership"], fx["assays"])
