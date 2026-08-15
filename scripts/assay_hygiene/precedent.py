@@ -220,11 +220,16 @@ def mine_precedent(
     # itself: with no tiebreak those 708 rows come out in `counts` insertion
     # order, which is the order edges happen to sit in edges.parquet.
     # test_assay_hygiene_stage0.py already records that "the extractor's row
-    # order is not stable across extracts", and measured here, permuting the
-    # edge frame moves 647 of the 961 rows under the two-column sort while
-    # leaving the full-key sort byte-identical. A curator diffing this artifact
-    # between extracts would read those 647 as change. Same reasoning as
-    # vocabulary_evidence's three-key sort, and pinned by
+    # order is not stable across extracts". Measured: permuting the edge frame
+    # changes the two-column output while leaving the full-key output
+    # byte-identical, so a curator diffing this artifact between extracts would
+    # read the difference as change. How MANY rows move under a permutation is
+    # a property of the permutation and not of the code -- 615 at
+    # random_state=7, and 631 / 635 / 621 at seeds 0 / 1 / 42 -- so no bare
+    # count belongs in that sentence. The seed-free figure is the two sorts
+    # against each other on the SAME as-extracted input: 647 of the 961 rows
+    # land at a different index. Same reasoning as vocabulary_evidence's
+    # three-key sort, and pinned by
     # test_row_order_does_not_depend_on_the_order_edges_arrive_in.
     return out.sort_values(
         ["n_both", "n_child_only"] + S.RULE_KEY,

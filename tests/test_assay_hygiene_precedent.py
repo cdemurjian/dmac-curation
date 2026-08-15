@@ -175,9 +175,13 @@ def test_row_order_does_not_depend_on_the_order_edges_arrive_in():
     which is the order rows sit in edges.parquet.
     `test_assay_hygiene_stage0.py` already records that "the extractor's row
     order is not stable across extracts". Measured on the real extract,
-    permuting the edge frame moves 647 of the 961 rows under the two-column
-    sort and leaves the full-key sort byte-identical; a curator would read
-    those 647 as change.
+    permuting the edge frame changes the two-column output and leaves the
+    full-key output byte-identical, so a curator would read the difference as
+    change. The COUNT of rows that move is a property of the permutation
+    rather than of the code -- 615 at `random_state=7`, and 631 / 635 / 621 at
+    seeds 0 / 1 / 42 -- so it is quoted with its seed or not at all. The
+    seed-free figure is the two sorts against each other on the SAME
+    as-extracted input: 647 of the 961 rows land at a different index.
 
     Both halves are asserted. Reproducibility alone is not the property --
     vocabulary_evidence's docstring makes the same point -- so the second

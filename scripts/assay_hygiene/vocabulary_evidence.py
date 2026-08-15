@@ -86,14 +86,33 @@ def registered_assays(
     Same junction crossing as `audit.registered_internal`, carrying the title
     as well because this table is read by a human. If those two ever disagree,
     this one is wrong: the audit defines what "registered" means for a verdict.
+
+    RAISES `ValueError` on a membership row naming an assay absent from the
+    assays frame. This was a `continue`, which made it the second silent drop
+    on the same class of input in the same package: `precedent.mine_precedent`
+    consumes the same `assay_index` funnel and now raises there, so leaving
+    this one quiet meant the spec's binding "nothing is dropped silently" was
+    satisfied on one path and not its sibling -- and a term's `n_registered`
+    would read low with no signal at all, which is the exact failure mode
+    point 1 of the module docstring exists to prevent. Checked up front rather
+    than per row, so a broken extract is diagnosed whole. Measured on the real
+    extract 2026-08-14: 0 of the 173 distinct membership assay_ids hit it
+    across all 214,296 rows, so it changes no number in the current artifact.
     """
     ainfo = assay_index(assays)
+    unknown = sorted({int(a) for a in membership.assay_id} - set(ainfo))
+    if unknown:
+        raise ValueError(
+            f"membership registers samples in {len(unknown)} assay(s) absent "
+            f"from the assays frame: {unknown}. Those registrations cannot be "
+            "resolved to an internal assay, and skipping them would silently "
+            "understate n_registered for every term their samples carry. "
+            "Re-extract so the two frames agree."
+        )
     out: dict[int, set[tuple[int, str]]] = {}
     for sample_id, assay_id in zip(membership.sample_id, membership.assay_id):
-        info = ainfo.get(int(assay_id))
-        if info is None:
-            continue
-        out.setdefault(int(sample_id), set()).add((info[1], info[2]))
+        _, iaid, ititle = ainfo[int(assay_id)]
+        out.setdefault(int(sample_id), set()).add((iaid, ititle))
     return out
 
 

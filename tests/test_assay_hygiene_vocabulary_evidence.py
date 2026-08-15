@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
@@ -79,6 +80,32 @@ def test_a_junction_less_registration_is_not_invisible():
     assert row.n_registered == 3, "a junction-less registration went missing"
     assert row.n_candidate_assays == 2, "the term must not read as unanimous"
     assert row.share == round(2 / 3, 3)
+
+
+def test_a_registration_in_an_unknown_assay_is_not_dropped_silently():
+    """The second silent drop on the same funnel, closed to match the first.
+
+    `registered_assays` used to `continue` past a membership row naming an
+    assay absent from the assays frame, so the registration vanished with no
+    signal. `precedent.mine_precedent` consumes the same `assay_index` funnel
+    on the same class of input and raises there, so leaving this one quiet met
+    the spec's binding "nothing is dropped silently" on one path and not its
+    sibling.
+
+    The consequence here is specifically bad. A dropped registration does not
+    just shrink a count: it lowers `n_registered` for every term those samples
+    carry, which is the DENOMINATOR of `share`. That inflates share toward a
+    spurious 1.00 and can make a term read as unanimous -- the identical
+    failure mode as the junction-less bug above, reached by a different route.
+
+    Measured on the real extract 2026-08-14: 0 of the 173 distinct membership
+    assay_ids are unknown across all 214,296 rows, so this changes no number
+    in the current artifact. It is a guard, not a fix.
+    """
+    membership = _membership([(100, 1), (200, 1), (300, 777)])
+    with pytest.raises(ValueError,
+                       match=r"absent from the assays frame: \[777\]"):
+        VE.registered_assays(membership, _assays())
 
 
 def test_base_rate_exposes_a_candidate_that_is_just_the_sample_type():
