@@ -179,6 +179,10 @@ def score_vocabulary(
 # branching so adding a fourth source later is one line.
 _PRECEDENCE = {S.P_PROPOSED: 0, S.P_LEARNED: 1, S.P_CURATOR: 2}
 
+# Case-insensitive spelling -> the canonical field name. Built from CLAIM_FIELDS
+# so it cannot drift from the fields anything actually reads.
+_FIELD_CANON = {f.lower(): f for f in S.CLAIM_FIELDS}
+
 
 def merge_vocabulary(
     learned: pd.DataFrame,
@@ -266,6 +270,26 @@ def merge_vocabulary(
     if not frames:
         return pd.DataFrame(columns=S.VOCAB_COLUMNS)
     allrows = pd.concat(frames, ignore_index=True)
+    # BOTH HALVES of the key are canonicalised before deduping, for one reason.
+    # `raw_value` is normalised (see the docstring); `source_field` is matched
+    # case-insensitively back to its CLAIM_FIELDS spelling. A curator writing
+    # `type` where the learned row says `Type` otherwise produces a SECOND
+    # surviving row in vocabulary.csv: the learned row still wins every lookup,
+    # because `claim_index` and `sample_claims` key on the field exactly as
+    # `CLAIM_FIELDS` spells it, and `unresolved_terms` compares the field the
+    # same way -- so the term does not come back in the judgment queue either.
+    # Their ruling then applies to nothing, silently, in the one artifact whose
+    # whole purpose is hand correction. Exactly the failure the raw_value
+    # normalisation exists to prevent, on the other half of the same key, so it
+    # is fixed in the same place: on the key itself, not in each consumer.
+    #
+    # A field NOT in CLAIM_FIELDS travels through verbatim. It maps nothing
+    # either way, and rewriting it would invent a field the metadata does not
+    # carry.
+    allrows["source_field"] = [
+        _FIELD_CANON.get(f.strip().lower(), f) if isinstance(f, str) else f
+        for f in allrows.source_field
+    ]
     # normalise the key BEFORE deduping, so a curator spelling and a learned
     # spelling of one term are one term. See the docstring.
     before = list(allrows.raw_value)
@@ -334,6 +358,12 @@ def unresolved_terms(
     in this queue -- asking a human to rule again on a question they have
     already answered, in the one artifact whose entire purpose is to be short.
     normalise_value is idempotent, so this costs the learned rows nothing.
+
+    The FIELD half of the key is compared as spelled, and deliberately so: it is
+    canonicalised once in `merge_vocabulary`, on the dedup key itself, so a
+    curator writing `type` is already `Type` by the time any consumer sees the
+    frame. Re-deriving the case rule here would put a second copy of it in the
+    package, and the copies could disagree.
     """
     known = {
         (r.source_field, S.normalise_value(r.raw_value))
@@ -361,10 +391,48 @@ def unresolved_terms(
     return out.sort_values("n_samples", ascending=False, ignore_index=True)
 
 
+# The three whole-number columns. `internal_assay_id` is the load-bearing one:
+# it is an IDENTITY, and `11.0` is not how anyone writes an assay id.
+_INT_COLUMNS = ("internal_assay_id", "support", "n_samples")
+
+
+def _as_int64(s: pd.Series) -> pd.Series:
+    """A whole-number column as pandas' nullable Int64, or unchanged.
+
+    Returns the column untouched unless every value is either missing or an
+    exact integer, so this can never silently round a real fraction away or
+    mangle a column a future caller puts something else in.
+    """
+    num = pd.to_numeric(s, errors="coerce")
+    if int(num.isna().sum()) != int(pd.isna(s).sum()):
+        return s                            # something non-numeric in there
+    present = num.dropna()
+    if len(present) and not (present == present.round()).all():
+        return s
+    return num.astype("Int64")
+
+
 def save_vocabulary(df: pd.DataFrame, path) -> None:
+    """Write the csv, keeping the whole-number columns whole.
+
+    A single missing `internal_assay_id` promotes the whole column to float64 --
+    pandas has no other way to carry NaN in an int column -- and `to_csv` then
+    writes every id as `11.0`. Today's 736 learned rows are all non-null so the
+    file is clean; the FIRST proposals or curator file containing one null id is
+    what turns every id in the artifact into a float, and that artifact is the
+    next thing anyone produces. Nullable Int64 carries the missing value without
+    the promotion, so a null id writes as an empty cell and 11 writes as `11`.
+
+    Round-trips: `load_vocabulary` reads `11` back as an int and an empty cell
+    back as NaN, which is the same shape the frame went in as.
+    """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(p, index=False)
+    out = df.copy()
+    for col in _INT_COLUMNS:
+        if col in out.columns:
+            out[col] = _as_int64(out[col])
+    out.to_csv(p, index=False)
 
 
 def load_vocabulary(path) -> pd.DataFrame:
@@ -372,7 +440,12 @@ def load_vocabulary(path) -> pd.DataFrame:
 
     A missing file reads as an empty vocabulary rather than raising, because
     `proposed` and `curator` legitimately do not exist until someone has
-    produced them.
+    produced them. A ZERO-BYTE file reads the same way, and that is not
+    pedantry: `touch assay-hygiene/vocabulary-curator.csv` is the obvious way to
+    start one, and `read_csv` answers an empty file with `EmptyDataError`, so a
+    curator opening a new file takes the whole layer down at the point they were
+    about to do the work. An empty file holds no rulings, which is precisely
+    what a missing file holds.
 
     `keep_default_na=False` matters: a raw_value of `nan` or `null` is a real
     string a curator may have typed, and pandas would otherwise read it back as
@@ -409,7 +482,7 @@ def load_vocabulary(path) -> pd.DataFrame:
     and `S.EVIDENCE_PROVENANCES` makes that case untrusted by construction.
     """
     p = Path(path)
-    if not p.exists():
+    if not p.exists() or p.stat().st_size == 0:
         return pd.DataFrame(columns=S.VOCAB_COLUMNS)
     df = pd.read_csv(p, keep_default_na=False, na_values=[""],
                      dtype={"source_field": str, "raw_value": str})

@@ -8,6 +8,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
 from assay_hygiene import _schema as S
+from assay_hygiene import claims as C
 from assay_hygiene import vocabulary as V
 
 
@@ -498,3 +499,95 @@ def test_a_file_with_no_provenance_column_is_rejected_rather_than_guessed(tmp_pa
     p.write_text("source_field,raw_value,internal_assay_id\nType,mystery,12\n")
     with pytest.raises(ValueError, match="provenance"):
         V.load_vocabulary(p)
+
+
+def test_a_curator_field_spelling_variant_overrides_the_learned_row():
+    # The other half of the key, and the same failure as the raw_value case
+    # above. A curator writing `type` where the learned row says `Type`
+    # otherwise leaves TWO rows in vocabulary.csv: claim_index and sample_claims
+    # key on the field as CLAIM_FIELDS spells it, so the learned row still wins
+    # every lookup, and unresolved_terms compares the field the same way, so the
+    # term does not return to the judgment queue either. Their ruling applies to
+    # nothing, and the artifact shows their row sitting right there.
+    learned = _vocab([("Type", "cometchip", 11, None, 900, 850, 0.99, S.P_LEARNED)])
+    curator = _vocab([("type", "cometchip", 12, None, 0, 0, 0.0, S.P_CURATOR)])
+    out = V.merge_vocabulary(learned, _vocab([]), curator, _assays())
+    assert len(out) == 1, "one term, spelled two ways, survived as two"
+    assert out.iloc[0].source_field == "Type"
+    assert out.iloc[0].internal_assay_id == 12
+
+    # and the term is gone from the queue for the right reason: it is mapped,
+    # under the spelling the metadata actually uses
+    q = V.unresolved_terms({1: {"Type": "CometChip"}, 2: {"Type": "cometchip"},
+                            3: {"Type": "COMETCHIP"}}, out, {}, min_occurrences=1)
+    assert list(q.raw_value) == []
+
+
+def test_a_field_outside_CLAIM_FIELDS_travels_through_verbatim():
+    # The canonicalisation is a case fix, not an invention. A field nothing
+    # reads maps nothing either way, and rewriting it would name a metadata
+    # field that does not exist.
+    curator = _vocab([("Funder", "nih", 11, None, 0, 0, 0.0, S.P_CURATOR)])
+    out = V.merge_vocabulary(_vocab([]), _vocab([]), curator, _assays())
+    assert out.iloc[0].source_field == "Funder"
+
+
+def test_an_empty_file_reads_as_an_empty_vocabulary(tmp_path):
+    # `touch assay-hygiene/vocabulary-curator.csv` is how a curator starts one.
+    # read_csv answers a zero-byte file with EmptyDataError, so that gesture
+    # takes down the whole layer at the moment they sit down to do the work. A
+    # file with no rulings in it holds what a missing file holds.
+    p = tmp_path / "curator.csv"
+    p.write_text("")
+    out = V.load_vocabulary(p)
+    assert len(out) == 0
+    assert list(out.columns) == S.VOCAB_COLUMNS
+
+
+def test_a_null_id_does_not_float_drift_the_whole_id_column(tmp_path):
+    # One missing internal_assay_id promotes the column to float64 -- pandas has
+    # no other way to carry NaN in an int column -- and to_csv then writes every
+    # id as `11.0`. Today's 736 learned rows are all non-null, so the live file
+    # is clean; the first proposals or curator file carrying a null id is what
+    # turns every id in the artifact into a float, and that file is the next
+    # thing anyone produces.
+    df = _vocab([("Type", "cometchip", 11, "Comet Chip", 900, 850, 0.99,
+                  S.P_LEARNED),
+                 ("Protocol", "18032418", None, None, 0, 0, 0.0, S.P_CURATOR)])
+    p = tmp_path / "vocabulary.csv"
+    V.save_vocabulary(df, p)
+    text = p.read_text()
+    assert "11.0" not in text, text
+    assert ",11," in text
+    # and it round-trips to the same shape it went in as
+    back = V.load_vocabulary(p)
+    assert back.iloc[0].internal_assay_id == 11
+    assert pd.isna(back.iloc[1].internal_assay_id)
+    assert back.iloc[0].support == 900 and back.iloc[0].n_samples == 850
+
+
+def test_a_null_id_row_is_a_working_ruled_not_an_assay_state(tmp_path):
+    # UNDOCUMENTED UNTIL NOW, and it is the only way to record "this term names
+    # no assay" -- the ruling rule 3 of /curate-assay-vocabulary asks for on the
+    # 12 IACUC protocol numbers. Left out of the file instead, as that rule used
+    # to say, the term reappears in every future unresolved queue with no record
+    # that anyone ever ruled on it.
+    #
+    # Three properties, all needed and none obvious:
+    curator = _vocab([("Protocol", "18032418", None, None, 0, 0, 0.0,
+                       S.P_CURATOR)])
+    p = tmp_path / "curator.csv"
+    V.save_vocabulary(curator, p)
+    vocab = V.merge_vocabulary(_vocab([]), _vocab([]), V.load_vocabulary(p),
+                               _assays())
+    # 1. the row survives the merge, id still null -- the title rebuild does not
+    #    reach for a lookup on a missing id
+    assert len(vocab) == 1
+    assert pd.isna(vocab.iloc[0].internal_assay_id)
+    # 2. it yields no claim, so nothing can be flagged off it
+    meta = {i: {"Protocol": "18032418"} for i in (1, 2, 3)}
+    assert len(C.sample_claims(meta, {}, vocab)) == 0
+    # 3. and the term leaves the judgment queue, which is the whole point: the
+    #    ruling is recorded, and nobody is asked to make it again
+    assert list(V.unresolved_terms(meta, vocab, {}, min_occurrences=1)
+                .raw_value) == []
