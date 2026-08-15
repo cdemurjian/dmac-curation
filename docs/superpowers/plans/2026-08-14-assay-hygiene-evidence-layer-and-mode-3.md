@@ -1634,7 +1634,11 @@ uv run --with pandas --with pyarrow python -m assay_hygiene.precedent
 ```
 
 Expected against the post-stage-0 graph, measured 2026-08-14: **961 rules** over
-**213 hops with precedent**. `D.TITR -> TIS` under `Titer Assay` should read
+**213 project/hop pairs with precedent** -- the unit is the triple (project,
+child type, parent type), which is what `precedent.main` prints. The extract
+also holds exactly 213 distinct (child type, parent type) pairs, a coincidence
+that made the bare word "hops" read as "every hop has precedent"; the true
+type-pair figure is 153 of 208. `D.TITR -> TIS` under `Titer Assay` should read
 `n_both=90,120`, `n_child_only=54,699`, `propagation_rate≈0.622`. `D.FLOW ->
 D.FCS` under `Flow Cytometry` should read `n_both=66,529`, `n_child_only=0`,
 rate `1.000`.

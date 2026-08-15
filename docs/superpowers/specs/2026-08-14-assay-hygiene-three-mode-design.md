@@ -330,16 +330,37 @@ dark, by cause
 
 precedent
   rules mined                         961
-  hops with precedent                 213
-  rate >= 0.95                    5 rules,     99 child-only edges
-  rate 0.60 - 0.80               19 rules, 70,904 child-only edges
-  rate exactly 0                269 rules, 564,500 child-only edges
+  project/hop pairs with precedent    213
+
+  band                rules   of those, with   child-only edges
+                              child-only > 0   in the band
+  rate >= 0.95          175                5                 99
+  rate 0.60 - 0.80       19               19             70,904
+  rate exactly 0        709              269            564,500
 ```
+
+BOTH rule columns are given because the earlier version of this table silently
+mixed them. It read `rate >= 0.95 -> 5 rules, 99 child-only edges`: the rule
+count scoped to rules that carry child-only volume, beside the edge count taken
+over the whole band. Unscoped the band holds **175** rules, and `rate exactly 0`
+holds **709**, of which 440 sit at (`n_both` 0, `n_child_only` 0) -- parent-only
+observations with nothing to propagate -- leaving the 269 the old row quoted.
+The middle row was correct unscoped and is unchanged.
+
+"project/hop pairs" and not "hops": the unit is the triple (`project_id`,
+`child_type`, `parent_type`). This extract happens to hold exactly 213 distinct
+(`child_type`, `parent_type`) pairs as well, so the bare word read as "every hop
+in the graph has precedent" against a coincidence. The true type-pair figure is
+**153 of 208** appearing on a rule row (213 appear on an edge).
 
 The concentration matters: the actionable mid-band is essentially two rules,
 `D.TITR -> TIS` under Titer Assay at 0.622 and `D.FCRB -> TIS` under Fc Receptor
 Binding at 0.796. Above 0.95 there are 99 child-only edges in the entire
-database. A threshold picked by intuition would do nothing.
+database, spread over the 5 of those 175 rules that have any. A threshold picked
+by intuition would do nothing.
 
 Reproduce with `scripts/remeasure_post_stage0.py` and
-`scripts/measure_metadata_accuracy.py`, both read-only over the extract.
+`scripts/measure_metadata_accuracy.py`, both read-only over the extract. The
+first prints every row above, including all three bands at both scopes; it did
+not print any of the three when this table was written, which is how the scope
+mix survived.

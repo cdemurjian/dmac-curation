@@ -21,10 +21,22 @@ of stale ones.
 from __future__ import annotations
 
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
+
+# The identity funnel, the membership grouping and the precedent miner all come
+# from the package rather than being re-implemented here. This script had its
+# own inline copy of `assay_index` -- without the collision guard -- and its own
+# copy of the stage B counting loop carrying `if info is None: continue`, which
+# is a silent drop against the spec's binding "nothing is dropped silently" and
+# against the up-front ValueError `mine_precedent` and `registered_assays`
+# already raise. 0 rows reached it on the 2026-08-14 extract, which is what a
+# third copy of a rule looks like right up until it disagrees.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from assay_hygiene.precedent import (  # noqa: E402
+    assay_index, membership_index, mine_precedent,
+)
 
 EXTRACT = Path("assay-hygiene/extract")
 
@@ -46,22 +58,16 @@ def main() -> int:
     # 17 assays have no junction row and resolve to no internal_assay_id. They
     # fall back to (assay_id, title), the same rule neo4j_sync.py:1418-1431
     # (v4-stable-wt; 944-957 in NExtSEEK/dev-v3-merge) uses, so the key is
-    # never null and nothing is dropped.
+    # never null and nothing is dropped. `precedent.assay_index` is that rule --
+    # the single funnel, collision guard included -- and this script asks it
+    # rather than restating it.
     no_junction = assays.internal_assay_id.isna().sum()
-    ainfo: dict[int, tuple[int, int, str]] = {}
-    for a, p, t, ia, it in zip(assays.assay_id, assays.project_id, assays.title,
-                               assays.internal_assay_id, assays.internal_assay_title):
-        if pd.isna(ia):
-            ainfo[int(a)] = (int(p), int(a), str(t))       # fallback identity
-        else:
-            ainfo[int(a)] = (int(p), int(ia), str(it))
+    ainfo = assay_index(assays)
     print(f"assays w/o junction row {no_junction:>7,}  (fall back to (assay_id, title))")
     print(f"distinct internal ids {len({v[1] for v in ainfo.values()}):>9,}")
 
     # --- membership index -----------------------------------------------------
-    memb: dict[int, set[int]] = defaultdict(set)
-    for s, a in zip(membership.sample_id, membership.assay_id):
-        memb[int(s)].add(int(a))
+    memb = membership_index(membership)
     print(f"samples with >=1 assay {len(memb):>8,}")
 
     # --- labelled / dark ------------------------------------------------------
@@ -163,36 +169,11 @@ def main() -> int:
     print(f"child in none              {d_none:>10,}  {pct(d_none, dark)}")
 
     # --- stage B precedent distribution --------------------------------------
-    counts: dict[tuple, list[int]] = defaultdict(lambda: [0, 0, 0])
-    titles: dict[tuple, str] = {}
-    for c, p, ct, pt in zip(edges.child_id, edges.parent_id,
-                            edges.child_type, edges.parent_type):
-        ca = memb.get(int(c), set())
-        pa = memb.get(int(p), set())
-        for aid in ca | pa:
-            info = ainfo.get(aid)
-            if info is None:
-                continue
-            project_id, iaid, ititle = info
-            key = (project_id, str(ct), str(pt), iaid)
-            titles[key] = ititle
-            if aid in ca and aid in pa:
-                counts[key][0] += 1
-            elif aid in ca:
-                counts[key][1] += 1
-            else:
-                counts[key][2] += 1
-
-    rows = []
-    for key, (both, child_o, parent_o) in counts.items():
-        den = both + child_o
-        rows.append({
-            "project_id": key[0], "child_type": key[1], "parent_type": key[2],
-            "internal_assay_id": key[3], "internal_assay_title": titles[key],
-            "n_both": both, "n_child_only": child_o, "n_parent_only": parent_o,
-            "propagation_rate": (both / den) if den else 0.0,
-        })
-    prec = pd.DataFrame(rows)
+    # `precedent.mine_precedent` IS this measurement. Re-implementing the
+    # counting loop here made a third copy of the rule and lost the up-front
+    # check that a membership row naming an unknown assay is an error rather
+    # than a skipped row.
+    prec = mine_precedent(edges, membership, assays)
     print()
     print("--- stage B precedent -----------------------------------------------")
     print(f"rules mined          {len(prec):>10,}")
@@ -201,22 +182,61 @@ def main() -> int:
     # evidence. Where two or more do, the deterministic band cannot decide and
     # the tiebreak or the LLM slice is reached. This is NOT the spec's 87.8%,
     # which is per-edge; see above.
+    #
+    # "project/hop pairs" and NOT "hops": the unit is the TRIPLE (project_id,
+    # child_type, parent_type). The extract happens to hold exactly 213 distinct
+    # (child_type, parent_type) pairs as well, so the bare word "hops" read as
+    # "every hop in the graph has precedent" against a coincidence. The true
+    # type-pair figure is 153 of 208 (208 appear on a precedent row; 213 appear
+    # on an edge). Same correction as precedent.main.
     hop = prec[prec.n_both > 0].groupby(
         ["project_id", "child_type", "parent_type"], dropna=False
     ).size()
     unambiguous = int((hop == 1).sum())
-    print(f"hops with precedent  {len(hop):>10,}")
+    print(f"project/hop pairs w/ precedent {len(hop):>4,}")
     print(f"  exactly one assay  {unambiguous:>10,}  {pct(unambiguous, len(hop))}")
     print(f"  two or more        {len(hop) - unambiguous:>10,}  "
           f"{pct(len(hop) - unambiguous, len(hop))}")
+    pairs = prec[["child_type", "parent_type"]].drop_duplicates()
+    with_prec = prec[prec.n_both > 0][
+        ["child_type", "parent_type"]].drop_duplicates()
+    print(f"  separately, TYPE pairs with precedent {len(with_prec):>5,}"
+          f" of {len(pairs):,} on a rule row"
+          f" ({len(edges[['child_type', 'parent_type']].drop_duplicates()):,}"
+          " on an edge)")
 
-    for lo in (0.95, 0.90, 0.80, 0.608):
-        sel = prec[(prec.propagation_rate >= lo) & (prec.n_both > 0)]
-        print(f"rules with rate >= {lo:<5}  {len(sel):>6,}  "
-              f"covering {int(sel.n_child_only.sum()):>8,} child-only edges")
+    # THE BANDS THE SPEC QUOTES, each printed at BOTH scopes, because the two
+    # differ by two orders of magnitude and the spec's table silently mixed
+    # them: it reported the RULE count scoped to rules with child-only volume
+    # while reporting the EDGE count over the whole band. Unscoped, `rate >=
+    # 0.95` is 175 rules and not 5; `rate == 0` is 709 and not 269. The
+    # child-only-bearing count is the one that matters for "what would a
+    # threshold actually move", and it is labelled as that rather than left to
+    # stand for the band.
+    print()
+    print("--- propagation-rate bands (the spec's table) ------------------------")
+    print(f"{'band':<18} {'rules':>7} {'w/ child-only':>14} {'child-only edges':>18}")
+    bands = [(">= 0.95", prec.propagation_rate >= 0.95),
+             (">= 0.90", prec.propagation_rate >= 0.90),
+             (">= 0.80", prec.propagation_rate >= 0.80),
+             ("0.60 - 0.80", (prec.propagation_rate >= 0.60)
+              & (prec.propagation_rate < 0.80)),
+             (">= 0.608", prec.propagation_rate >= 0.608),
+             ("exactly 0", prec.propagation_rate == 0)]
+    for label, mask in bands:
+        sel = prec[mask]
+        movable = sel[sel.n_child_only > 0]
+        print(f"{label:<18} {len(sel):>7,} {len(movable):>14,} "
+              f"{int(sel.n_child_only.sum()):>18,}")
+    zeros = prec[(prec.n_both == 0) & (prec.n_child_only == 0)]
+    print(f"  of the `exactly 0` rules, {len(zeros):,} sit at (n_both=0,"
+          " n_child_only=0) -- parent-only observations, nothing to propagate")
 
     out = Path("assay-hygiene/precedent-remeasured.csv")
-    prec.sort_values(["n_both", "n_child_only"], ascending=False).to_csv(out, index=False)
+    # mine_precedent already sorts on a TOTAL order (the two evidence columns
+    # then the whole RULE_KEY), so this is written as returned rather than
+    # re-sorted on two columns that leave 708 of 961 rows tied.
+    prec.to_csv(out, index=False)
     print(f"\nwrote {out}")
 
     # The plan's named sanity anchor, re-measured.
