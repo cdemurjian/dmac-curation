@@ -194,7 +194,13 @@ VOCAB_COLUMNS = [
 # --- audit (mode 3) ----------------------------------------------------------
 AUDIT_COLUMNS = [
     "sample_id", "uuid", "sample_type",
-    "registered_internal_assay_ids", "claimed_internal_assay_id",
+    # ids AND titles on the registered side, positionally aligned. The frame
+    # already carries both for the CLAIMED assay; carrying only ids here made
+    # the csv unjudgeable without a decoder, and Mode 3's entire product is a
+    # curator's attention. Titles come from assay_index so there is no second
+    # source of truth.
+    "registered_internal_assay_ids", "registered_internal_assay_titles",
+    "claimed_internal_assay_id",
     "claimed_internal_assay_title", "tier", "source_field", "raw_value",
     "verdict",
 ]
@@ -1654,7 +1660,7 @@ git commit -m "$(printf 'feat(assay-hygiene): stage B precedent miner keyed on i
 
 **Interfaces:**
 - Consumes: `_schema.AUDIT_COLUMNS`, `V_MODE3_FLAG`, tier constants; `precedent.membership_index`, `precedent.assay_index`
-- Produces: `registered_internal(membership: pd.DataFrame, assays: pd.DataFrame) -> dict[int, set[int]]`; `audit_contradictions(claims, membership, assays, nodes, tiers: tuple[str, ...] = DEFAULT_TIERS, include_contested: bool = False) -> pd.DataFrame` returning `AUDIT_COLUMNS`, where `DEFAULT_TIERS = (T_CORROBORATED, T_STRONG)`
+- Produces: `registered_internal(membership: pd.DataFrame, assays: pd.DataFrame) -> dict[int, set[int]]`; `audit_contradictions(claims, membership, assays, nodes, tiers: tuple[str, ...] = DEFAULT_TIERS, include_contested: bool = False, include_unmappable: bool = False) -> pd.DataFrame` returning `AUDIT_COLUMNS`, where `DEFAULT_TIERS = (T_CORROBORATED, T_STRONG)`
 
 **Mode 3 writes nothing.** It compares what a sample claims against what it is
 registered in and reports disagreement. A wrong flag costs attention, not data,
@@ -1860,6 +1866,33 @@ def audit_contradictions(
     change rather than a re-derivation. They are excluded by default because on
     the disagreement subset the winning claim's mapping is wrong about 30% of
     the time, three times the rate the weak floor already refuses.
+
+    `include_unmappable` is the second such dial, and it exists for the same
+    reason: a flag that cannot be ESTABLISHED must not be asserted.
+
+    A claim speaks a dmac `internal_assays` id. A registration on one of the 17
+    junction-less assays resolves instead to a SEEK `assays.id`, a different
+    namespace. `assay_index`'s guard makes a false AGREEMENT impossible and does
+    nothing about a false CONTRADICTION: an id in the wrong namespace can never
+    match, so it always reads as disagreement. A fallback id in the registered
+    set therefore means that registration's internal identity is UNKNOWN, not
+    that it is known to differ. Recovering it could only ADD to that set, and
+    adding to it can only ever REMOVE a flag -- the same monotonicity direction
+    this whole design rests on. So the flag is not established, and the audit
+    refuses to assert it.
+
+    Measured: removes 13 of 879 flags at the default, 14 of 1,570 with contested
+    admitted. The 14th is exactly the case a title-equality rule would miss,
+    which is why this keys on the ID SPACE and never on titles. Task 3 ruled a
+    blank title diagnostic rather than fillable, and that stands.
+
+    Four of the 17 fallbacks share a normalised title with a genuine internal id
+    (467/64 Short Read Sequencing, 468/34 Genome Alignment, 481/61 RNA
+    Extraction, 482/99 Gene Expression Analysis). Only 481 produces flags today;
+    the other three are latent, waiting on an at-floor claim. Fixing the 17
+    junction rows upstream in `dmac.assays_internal_assays` is strictly better
+    and clears the latent three too, but it is a MySQL write outside this
+    increment and a junction row can go missing again.
     """
     registered = registered_internal(membership, assays)
     types = {
