@@ -195,12 +195,20 @@ honest short file is the deliverable, a padded long one is not.
    including them). Every proposal-selection variant in rule 6's range gives the
    same 0 / 0.
 
-   The one way a proposal reaches the audit at all: if it names the **same**
-   assay as an existing evidence-backed claim, it is no longer proposal-only, so
-   the cap lifts and the claim can rise from `weak` to `corroborated` and cross
-   the floor. 100 claims move that way here, and none of them contradicts its
-   sample's registration, so the measured effect is still zero. That is a
-   measurement, not a guarantee.
+   That cap is not free, and it is the only thing buying the zero. Lift it and
+   nothing else, leaving the contest rule and the audit floor exactly as they
+   are, and the same 180 proposals raise **23 flags** at the shipped setting
+   (879 -> 902). Grading a guess by the field that carried it is worth 23 false
+   positives.
+
+   The one way a proposal reaches the audit *with* the cap in place: if it names
+   the **same** assay as an existing evidence-backed claim, it is no longer
+   proposal-only, so the cap lifts for that claim and it can rise from `weak` to
+   `corroborated` and cross the floor. **104** claims move that way here. The
+   audit drops 4 of them as contested, leaving 100 that genuinely reach it, all
+   100 on samples registered somewhere, and none of the 100 contradicting its
+   registration. So the measured effect is still zero. That is a measurement,
+   not a guarantee.
 
    So the corollary is the whole of it: **a proposal derived from the membership
    of a term's own carriers cannot flag those carriers, because it was built to

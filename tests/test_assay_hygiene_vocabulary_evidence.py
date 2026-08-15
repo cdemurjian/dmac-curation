@@ -54,9 +54,18 @@ def test_a_junction_less_registration_is_not_invisible():
     Sample 300 is registered ONLY under the junction-less assay 481. Building
     the map by filtering `internal_assay_id.notna()` drops that row, so 300
     reads as registered nowhere, the term looks unanimous on assay 11, and a
-    proposal built on it contradicts 300's actual registration. Measured on the
-    real extract that exact reading turned `Type: m397` from 2 candidates at
-    share 0.835 into 1 candidate at share 1.00 and invented 13 Mode 3 flags.
+    proposal built on it contradicts 300's actual registration.
+
+    Measured on the real extract, that reading turns `Type: m397` from 79
+    registered / 2 candidates / share 0.835 into 66 registered / 1 candidate /
+    share 1.00 — the difference between a term rule 6 says to leave alone and
+    one it says to propose.
+
+    It produces NO Mode 3 symptom. Since the Mode 3 amendment a proposed mapping
+    is capped at `T_WEAK` and raises no flag at all, so the wrong entry lands in
+    the vocabulary silently. (Before that amendment the same reading produced 13
+    flags; do not go looking for them now.) A silent wrong answer is the reason
+    this guard is a test rather than something a downstream run would surface.
     """
     membership = _membership([(100, 1), (200, 1), (300, 481)])
     reg = VE.registered_assays(membership, _assays())
