@@ -152,6 +152,59 @@ def test_report_states_every_headline_count():
     assert "cometchip" in md
 
 
+def test_unresolved_sample_count_counts_samples_not_occurrences():
+    """The function that fixes the occurrence/sample defect, tested on its own.
+
+    Sample 1 carries BOTH unresolved terms and sample 2 carries one, so the
+    per-term sum is 3 and the answer is 2. That gap is the entire reason the
+    function exists; a fixture where every sample carried exactly one term
+    would be satisfied by the very implementation it replaced.
+
+    Also pinned: a term the vocabulary DID resolve contributes nothing (sample
+    3 carries only `cometchip`, which is not in the tail), the sample's raw
+    value is normalised before comparison (`MYSTERY` matches `mystery`), and a
+    sample carrying no claim field at all is not counted.
+    """
+    unresolved = pd.DataFrame(
+        [("Type", "mystery", 2, "u-1; u-2"),
+         ("Protocol", "12345", 1, "u-1")],
+        columns=["source_field", "raw_value", "n_samples", "example_uuids"],
+    )
+    meta = {
+        1: {"Type": "MYSTERY", "Protocol": "12345"},   # both terms, one sample
+        2: {"Type": "mystery"},                        # one term
+        3: {"Type": "cometchip"},                      # resolved -> not counted
+        4: {"Name": "no claim fields at all"},         # nothing -> not counted
+    }
+    assert int(unresolved.n_samples.sum()) == 3, "fixture must carry the gap"
+    assert R.unresolved_sample_count(meta, unresolved) == 2
+    # an empty tail is 0, not a crash
+    assert R.unresolved_sample_count(meta, unresolved.iloc[:0]) == 0
+
+
+def test_the_flag_accuracy_caveat_travels_with_the_tier_accuracies():
+    """98.4% must not be readable as the accuracy of a flag.
+
+    A flag is by construction drawn from the ambiguous tail the aggregate
+    averages away -- measured on the real extract, median purity 0.707 behind a
+    flag against 1.000 across all flag-eligible claims, and 65.8% held-out
+    accuracy in the purity<0.75 band against 99.9% at >=0.90. So the caveat is
+    pinned to the SAME stretch of report as the numbers it qualifies, rather
+    than left to a footnote a reader reaches after the flag table.
+    """
+    md = R.build_report(*_frames())
+    head = md.split("## Mode 3")[0]
+    assert "98.4%" in head, "fixture no longer exercises the tier accuracies"
+    between = head.split("98.4%")[1]
+    assert "Mode 3" in between, (
+        "the tier accuracies are printed with no caveat before the flag "
+        "section; a reader carries 98.4% straight into the flag table"
+    )
+    assert "65.8%" in between and "purity" in between, (
+        "the caveat must carry the measured band accuracy, not just a warning"
+    )
+
+
 def test_report_says_plainly_that_nothing_was_written():
     """Also the empty-frame smoke test: every rollup must survive no rows.
 

@@ -105,22 +105,155 @@ def _registered(ids, titles) -> str:
     return " | ".join(f"{i} {t}" for i, t in zip(id_list, title_list))
 
 
-def review_patterns(audit: pd.DataFrame) -> pd.DataFrame:
+PATTERN_COLUMNS = PATTERN_KEY + [
+    "registered_display", "claimed_internal_assay_title", "tiers", "n",
+    "n_projects", "purity", "n_samples", "runner_up",
+    "peer_carriers", "peer_registered", "peer_rate",
+    "n_examples", "example_sample_id", "example_uuids",
+]
+
+
+def term_carriers(meta: dict[int, dict]) -> dict[tuple[str, str], set[int]]:
+    """(field, normalised value) -> every sample whose metadata carries it.
+
+    This is the denominator behind `peer_rate`, and it is deliberately the
+    WHOLE population rather than the labelled-edge population `n_samples`
+    counts: the question it answers is "of everyone who says this, how many are
+    registered where this one claims", and a sample with no labelled producing
+    edge still has a registration and still counts as a peer.
+    """
+    out: dict[tuple[str, str], set[int]] = {}
+    for sid, d in meta.items():
+        for field in S.CLAIM_FIELDS:
+            value = S.normalise_value(d.get(field))
+            if value:
+                out.setdefault((field, value), set()).add(sid)
+    return out
+
+
+def runner_up_index(edges: pd.DataFrame, meta: dict[int, dict],
+                    titles: dict[int, str] | None = None,
+                    ) -> dict[tuple[str, str], str]:
+    """(field, value) -> the SECOND-place assay in the vote, rendered.
+
+    `learn_vocabulary` takes the mode of an edge-weighted tally and emits only
+    the winner, which is what makes a Mode 3 flag possible in the first place:
+    where a term's vote is split, the minority class is registered in the
+    runner-up and gets accused of contradicting the winner. A curator cannot
+    see that from the flag row -- `Blood` reads as an unambiguous claim on
+    Tissue Collection until you learn it split 69/31 against the very assay the
+    flagged samples are registered in.
+
+    Reaches for `vocabulary._tally`, the module-private walk, on purpose: it is
+    the one function holding the full Counter, and re-deriving the vote here
+    would put a second copy of the tally rule in the tree. Same package, which
+    is exactly what a single leading underscore permits.
+    """
+    tally, _ = V._tally(edges, meta, lambda _: True)
+    titles = titles or {}
+    out: dict[tuple[str, str], str] = {}
+    for key, counter in tally.items():
+        total = sum(counter.values())
+        top = counter.most_common(2)
+        if len(top) < 2 or not total:
+            out[key] = "none (unanimous)"
+            continue
+        iaid, n = top[1]
+        out[key] = f"{iaid} {titles.get(iaid, '?')} {n / total:.0%}"
+    return out
+
+
+def flag_purity_contrast(claims: pd.DataFrame, audit: pd.DataFrame,
+                         vocab: pd.DataFrame) -> dict:
+    """How much more ambiguous the FLAGGED terms are than the eligible ones.
+
+    Computed rather than quoted, because it is the number that stops a reader
+    carrying the aggregate tier accuracy into the flag table, and a hard-coded
+    one goes stale the first time the vocabulary moves.
+    """
+    pur = {(r.source_field, S.normalise_value(r.raw_value)): r.purity
+           for r in vocab.itertuples()}
+
+    def series(frame):
+        return pd.Series([
+            pur[k] for k in (
+                (r.source_field, S.normalise_value(r.raw_value))
+                for r in frame.itertuples())
+            if k in pur], dtype="float64")
+
+    eligible = claims[claims.tier.isin(A.DEFAULT_TIERS)
+                      & ~pd.Series(claims.contested).fillna(False).astype(bool)] \
+        if len(claims) else claims
+    ep, fp = series(eligible), series(audit)
+    if not len(ep) or not len(fp):
+        return {}
+    return {
+        "eligible_n": len(ep), "flagged_n": len(fp),
+        "eligible_median": float(ep.median()), "flagged_median": float(fp.median()),
+        "eligible_below": float((ep < 0.80).mean()),
+        "flagged_below": float((fp < 0.80).mean()),
+    }
+
+
+def review_patterns(audit: pd.DataFrame, *,
+                    vocab: pd.DataFrame | None = None,
+                    runners: dict | None = None,
+                    carriers: dict | None = None,
+                    registered: dict | None = None,
+                    projects: dict | None = None) -> pd.DataFrame:
     """The distinct contradictions behind the flags, commonest first.
 
     This is the artifact Mode 3 is actually judged on. It is a rollup and not a
     sample: every flag is represented by the pattern it belongs to, so a
     curator ruling on the table rules on all of them, and `n` tells them what
     each ruling is worth.
+
+    Every enrichment argument is optional and the bare `review_patterns(audit)`
+    call still returns the pure rollup, so the grouping stays testable without
+    five indexes in hand. What each adds, and why a curator needs it:
+
+      `vocab`       `purity` and `n_samples` for the term that drove the flag.
+          A flag off a term at purity 1.00 and one at 0.52 are different claims
+          and the row does not otherwise say which it is.
+      `runners`     the runner-up label. See `runner_up_index`.
+      `carriers` + `registered`   `peer_rate`: of every sample carrying this
+          term, how many ARE registered in the assay this pattern claims. This
+          is the strongest true/false discriminator measured on this data and
+          it is independent of purity -- `Blood` sits at purity 0.69 and yet
+          98.7% of its 7,195 carriers are registered in Tissue Collection, so
+          the 97 that are not look like a genuine gap rather than a vote
+          artifact. Sorting the 22 patterns by it separates them far more
+          cleanly than sorting by purity does.
+      `projects`    `n_projects`, and with it the exemplar count: a pattern
+          spanning three projects gets three exemplars, one per project, because
+          a single example cannot show a curator that the pattern recurs under
+          different curators' conventions.
     """
     if not len(audit):
-        return pd.DataFrame(columns=PATTERN_KEY + [
-            "registered_display", "claimed_internal_assay_title", "tiers", "n",
-            "example_sample_id", "example_uuid"])
-    g = audit.groupby(PATTERN_KEY, dropna=False, sort=False)
+        return pd.DataFrame(columns=PATTERN_COLUMNS)
+    pur = {(r.source_field, S.normalise_value(r.raw_value)):
+           (r.purity, r.n_samples)
+           for r in (vocab.itertuples() if vocab is not None else ())}
     rows = []
-    for key, part in g:
+    for key, part in audit.groupby(PATTERN_KEY, dropna=False, sort=False):
         first = part.iloc[0]
+        term = (first.source_field, S.normalise_value(first.raw_value))
+        claimed = int(first.claimed_internal_assay_id)
+
+        # exemplars: one per project, capped at 3. Deterministic -- projects in
+        # sorted order, lowest sample_id within each -- so the csv a curator
+        # diffs does not reshuffle between runs.
+        by_project: dict[str, int] = {}
+        for sid in sorted(int(s) for s in part.sample_id):
+            by_project.setdefault(
+                str(projects.get(sid, "?")) if projects else "?", sid)
+        picked = [by_project[p] for p in sorted(by_project)][:3]
+        uuid_of = dict(zip((int(s) for s in part.sample_id), part.uuid))
+
+        peers = carriers.get(term, set()) if carriers else set()
+        have = (sum(1 for s in peers if claimed in registered.get(s, set()))
+                if peers and registered else 0)
+
         rows.append({
             **dict(zip(PATTERN_KEY, key)),
             "registered_display": _registered(
@@ -129,10 +262,18 @@ def review_patterns(audit: pd.DataFrame) -> pd.DataFrame:
             "claimed_internal_assay_title": first.claimed_internal_assay_title,
             "tiers": "; ".join(sorted(set(part.tier))),
             "n": len(part),
-            "example_sample_id": int(first.sample_id),
-            "example_uuid": first.uuid,
+            "n_projects": len(by_project) if projects else None,
+            "purity": pur.get(term, (None, None))[0],
+            "n_samples": pur.get(term, (None, None))[1],
+            "runner_up": runners.get(term) if runners else None,
+            "peer_carriers": len(peers) if peers else None,
+            "peer_registered": have if peers else None,
+            "peer_rate": (have / len(peers)) if peers else None,
+            "n_examples": len(picked),
+            "example_sample_id": picked[0],
+            "example_uuids": "; ".join(str(uuid_of[s]) for s in picked),
         })
-    out = pd.DataFrame(rows)
+    out = pd.DataFrame(rows, columns=PATTERN_COLUMNS)
     # Sorted by size then by the whole key, so the ordering is total and the
     # csv a curator diffs between runs does not reshuffle on a tie.
     return out.sort_values(["n"] + PATTERN_KEY,
@@ -143,6 +284,8 @@ def review_patterns(audit: pd.DataFrame) -> pd.DataFrame:
 def build_report(precedent, claims, audit, vocab, unresolved, *,
                  unresolved_samples: int | None = None,
                  dial_counts: dict | None = None,
+                 flag_purity: dict | None = None,
+                 patterns: pd.DataFrame | None = None,
                  out_dir: str | None = None) -> str:
     """The operator report. Pure formatting over frames already computed.
 
@@ -258,10 +401,44 @@ def build_report(precedent, claims, audit, vocab, unresolved, *,
         " against curator-labelled edges): `corroborated` 99.9% accurate,"
         " `strong` 98.4%, `weak` 90.4%.",
         "",
+        "**Do not carry those numbers into the Mode 3 table below.** They are"
+        " averages over all claims, and a flag is by construction drawn from"
+        " the ambiguous tail they average away: a claim can only contradict a"
+        " registration when the term behind it is one the vocabulary was NOT"
+        " sure about.",
+        "",
+    ]
+    if flag_purity:
+        lines += [
+            f"- median purity of the term behind a **flag**:"
+            f" **{flag_purity['flagged_median']:.3f}**, against"
+            f" **{flag_purity['eligible_median']:.3f}** for all"
+            f" {flag_purity['eligible_n']:,} flag-eligible claims",
+            f"- share of flags whose term sits below 0.80 purity:"
+            f" **{flag_purity['flagged_below']:.1%}**, against"
+            f" **{flag_purity['eligible_below']:.1%}** of flag-eligible claims",
+            "",
+        ]
+    lines += [
+        "Held-out accuracy by the purity of the driving term, measured the same"
+        " way as the tier figures above (2026-08-14, train on even sample ids,"
+        " score the odd half against labelled producing edges):",
+        "",
+        "| purity of term | held-out accuracy | test edges |",
+        "|---|---|---|",
+        "| all 736 terms | 94.1% | 333,717 |",
+        "| < 0.75 | **65.8%** | 55,849 |",
+        "| 0.75 - 0.90 | 88.1% | 2,916 |",
+        "| >= 0.90 | 99.9% | 274,952 |",
+        "",
+        "So the aggregate is carried by the unambiguous majority, and the band"
+        " the flags come from is the one that performs worst. The six terms"
+        " driving 695 of the 866 flags score **77.1%** held out, not 98.4%.",
+        "",
     ]
 
     # --- mode 3 -------------------------------------------------------------
-    pat = review_patterns(audit)
+    pat = patterns if patterns is not None else review_patterns(audit)
     flag_samples = audit.sample_id.nunique() if len(audit) else 0
     lines += [
         "## Mode 3: contradictions",
@@ -314,19 +491,54 @@ def build_report(precedent, claims, audit, vocab, unresolved, *,
             f" Every one of the {len(audit):,} flags belongs to a pattern below,"
             " and `n` is what each ruling is worth.",
             "",
-            "| n | sample type | registered in | metadata claims | via | example |",
-            "|---:|---|---|---|---|---|",
+            "`purity` is the driving term's share of the vote that mapped it,"
+            " `evidence` the distinct samples backing that vote, `runner-up`"
+            " the assay it beat -- which for most of these IS the assay the"
+            " sample is registered in, so the flag is the vocabulary's own"
+            " minority class being accused by its majority. **`peers` is the"
+            " column to read first**: of every sample carrying this term, how"
+            " many ARE registered in the assay this pattern claims. A high peer"
+            " rate makes a flag look like a genuine gap; a low one makes it look"
+            " like a mapping the term never really supported.",
+            "",
+            "| n | sample type | registered in | metadata claims | via | purity"
+            " | evidence | runner-up | peers in claimed | examples |",
+            "|---:|---|---|---|---|---:|---:|---|---|---|",
         ]
         for r in pat.itertuples():
+            peers = "-"
+            if getattr(r, "peer_carriers", None) and not pd.isna(r.peer_carriers):
+                peers = (f"{int(r.peer_registered):,} / {int(r.peer_carriers):,}"
+                         f" ({r.peer_rate:.1%})")
+            proj = ""
+            if getattr(r, "n_projects", None) and not pd.isna(r.n_projects) \
+                    and int(r.n_projects) > 1:
+                proj = f" _({int(r.n_projects)} projects)_"
             lines.append(
-                f"| {r.n:,} | {_cell(r.sample_type)} |"
+                f"| {r.n:,}{proj} | {_cell(r.sample_type)} |"
                 f" {_cell(r.registered_display)} |"
                 f" {_cell(r.claimed_internal_assay_id)}"
                 f" {_cell(r.claimed_internal_assay_title)} |"
                 f" {_cell(r.source_field)} = `{_cell(r.raw_value)}` |"
-                f" {_cell(r.example_uuid)} |"
+                f" {_num(r.purity, 2)} | {_num(r.n_samples)} |"
+                f" {_cell(r.runner_up)} | {peers} |"
+                f" {_cell(r.example_uuids)} |"
             )
-        lines.append("")
+        lines += [
+            "",
+            "### The open question this layer does NOT answer",
+            "",
+            "A purity floor on the claims feeding Mode 3 would remove most of"
+            " the low-confidence flags, and the band table above is the curve"
+            " for choosing one. **No threshold is chosen here.** The right value"
+            " is an output of a curator ruling on the 22 patterns, not a number"
+            " to pick from a distribution, and picking it now would also require"
+            " claims to carry purity -- a `CLAIM_COLUMNS` change made before"
+            " anyone has ruled on a single flag. It is the first question the"
+            " next increment must answer, and the bands above are what it should"
+            " be answered against.",
+            "",
+        ]
 
     # --- artifacts ----------------------------------------------------------
     if out_dir:
@@ -426,13 +638,29 @@ def main(extract_dir: str = "assay-hygiene/extract",
             wide.to_csv(out / "mode3-contradictions-with-contested.csv",
                         index=False)
 
-    pat = review_patterns(au)
+    # The five indexes the pattern rollup needs to be judgeable rather than
+    # merely counted. `assay_index` supplies the titles the runner-up is
+    # rendered with, from the same funnel the audit decoded its ids through, so
+    # no second source of truth for a title appears.
+    titles = {iaid: title
+              for _, iaid, title in P.assay_index(assays).values()}
+    pat = review_patterns(
+        au,
+        vocab=vocab,
+        runners=runner_up_index(edges, meta, titles),
+        carriers=term_carriers(meta),
+        registered=A.registered_internal(membership, assays),
+        projects=dict(zip(samples.sample_id.astype(int),
+                          samples.project_ids.astype(str))),
+    )
     pat.to_csv(out / "mode3-review-patterns.csv", index=False)
 
     report = build_report(
         prec, cl, au, vocab, unresolved,
         unresolved_samples=unresolved_sample_count(meta, unresolved),
         dial_counts=dial_counts,
+        flag_purity=flag_purity_contrast(cl, au, vocab),
+        patterns=pat,
         out_dir=out_dir,
     )
     (out / "evidence-report.md").write_text(report)
