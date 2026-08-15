@@ -184,17 +184,40 @@ def test_unresolved_sample_count_counts_samples_not_occurrences():
     assert R.unresolved_sample_count(meta, unresolved.iloc[:0]) == 0
 
 
+def _heldout():
+    """A held-out tally over the _frames() vocabulary, spanning two bands.
+
+    `comet.docx` sits at purity 0.80 and the other three at 0.95-0.99, so the
+    0.75-0.90 band and the >=0.90 band both carry test edges and the worst band
+    is decided by the numbers rather than by which row it is.
+    """
+    return {("Protocol", "comet.docx"): (60, 100),      # 60.0%, band 0.75-0.90
+            ("Type", "cometchip"): (990, 1000),         # 99.0%, band >=0.90
+            ("Type", "total rna"): (90, 100),           # 90.0%, band >=0.90
+            ("Software", "flowjo"): (100, 100)}         # 100%,  band >=0.90
+
+
 def test_the_flag_accuracy_caveat_travels_with_the_tier_accuracies():
     """98.4% must not be readable as the accuracy of a flag.
 
     A flag is by construction drawn from the ambiguous tail the aggregate
     averages away -- measured on the real extract, median purity 0.707 behind a
-    flag against 1.000 across all flag-eligible claims, and 65.8% held-out
-    accuracy in the purity<0.75 band against 99.9% at >=0.90. So the caveat is
-    pinned to the SAME stretch of report as the numbers it qualifies, rather
-    than left to a footnote a reader reaches after the flag table.
+    flag against 1.000 across all flag-eligible claims, and the purity<0.75 band
+    scoring far below the >=0.90 one. So the caveat is pinned to the SAME
+    stretch of report as the numbers it qualifies, rather than left to a
+    footnote a reader reaches after the flag table.
+
+    The band figure is asserted AGAINST THE COMPUTED TABLE and never against a
+    literal. Those figures sat hard-coded in the markdown ten lines below a
+    docstring saying such a number must be computed "because ... a hard-coded
+    one goes stale the first time the vocabulary moves", and this test's
+    `65.8%` is what cemented them there.
     """
-    md = R.build_report(*_frames())
+    frames = _frames()
+    heldout = _heldout()
+    bands = R.purity_band_accuracy(heldout, frames[3])
+    md = R.build_report(*frames, purity_bands=bands,
+                        flag_drivers=R.flag_driver_accuracy(frames[2], heldout))
     head = md.split("## Mode 3")[0]
     assert "98.4%" in head, "fixture no longer exercises the tier accuracies"
     between = head.split("98.4%")[1]
@@ -202,9 +225,95 @@ def test_the_flag_accuracy_caveat_travels_with_the_tier_accuracies():
         "the tier accuracies are printed with no caveat before the flag "
         "section; a reader carries 98.4% straight into the flag table"
     )
-    assert "65.8%" in between and "purity" in between, (
+    banded = bands.iloc[1:]
+    worst = banded[banded.tested > 0].sort_values("accuracy").iloc[0]
+    assert f"{worst.accuracy:.1%}" in between and "purity" in between, (
         "the caveat must carry the measured band accuracy, not just a warning"
     )
+    # and the emphasised band is the worst one, chosen by measurement
+    assert f"**{worst.accuracy:.1%}**" in between
+
+
+def test_the_purity_bands_are_computed_and_always_sum_to_the_total():
+    vocab = pd.DataFrame(
+        [("Type", "low", 11, "A", 10, 10, 0.50, S.P_LEARNED),
+         ("Type", "mid", 11, "A", 10, 10, 0.80, S.P_LEARNED),
+         ("Type", "high", 11, "A", 10, 10, 0.99, S.P_LEARNED)],
+        columns=S.VOCAB_COLUMNS,
+    )
+    heldout = {("Type", "low"): (1, 4), ("Type", "mid"): (3, 4),
+               ("Type", "high"): (4, 4),
+               # a term the vocabulary carries no purity for. None exist today,
+               # and a silent skip is how "none exist today" becomes a total
+               # that does not match the rows beneath it.
+               ("Type", "orphan"): (5, 10)}
+    out = R.purity_band_accuracy(heldout, vocab)
+    by_band = dict(zip(out.band, zip(out.hits, out.tested)))
+    assert by_band["< 0.75"] == (1, 4)
+    assert by_band["0.75 - 0.90"] == (3, 4)
+    assert by_band[">= 0.90"] == (4, 4)
+    assert by_band["unbanded (no purity in the vocabulary)"] == (5, 10)
+    assert out.iloc[0].tested == 22 and out.iloc[0].hits == 13
+    assert int(out.iloc[1:].tested.sum()) == int(out.iloc[0].tested)
+    assert out.iloc[0].accuracy == pytest.approx(13 / 22)
+
+
+def test_the_flag_drivers_are_the_largest_by_a_stated_rule():
+    """The sentence names N terms, so N has to come from a rule, not a hand.
+
+    The literal this replaces read "the six terms driving 764 of the 866 flags
+    ... score 77.1%". Measured on the real extract, that set skips the
+    third-largest driver (`Type: histopathology`, 44 flags, 100.0% held out) and
+    reaches past it to the seventh (`Type: necropsy`, 25). The six LARGEST
+    drivers are 783 flags at 77.4%. A selection whose only excluded member in
+    range is the one scoring 100% is not a measurement.
+    """
+    audit = pd.DataFrame(
+        [(i, f"S-{i}", "TIS", "12", "Tissue Collection", 11, "Comet Chip",
+          S.T_STRONG, "Type", value, S.V_MODE3_FLAG)
+         for i, value in enumerate(["big"] * 5 + ["mid"] * 3 + ["small"])],
+        columns=S.AUDIT_COLUMNS,
+    )
+    heldout = {("Type", "big"): (5, 10), ("Type", "mid"): (9, 10),
+               ("Type", "small"): (10, 10)}
+    out = R.flag_driver_accuracy(audit, heldout, top=2)
+    assert out["terms"] == 2
+    assert out["flags"] == 8 and out["total_flags"] == 9
+    assert out["tested"] == 20
+    assert out["accuracy"] == pytest.approx(14 / 20)
+    # `small` scores 100% and is left out because it is the smallest driver --
+    # the rule -- not because of what it scores
+    assert R.flag_driver_accuracy(audit, heldout, top=3)["accuracy"] == \
+        pytest.approx(24 / 30)
+
+
+def test_the_band_section_is_omitted_rather_than_remembered():
+    # No bands passed, no band table: a report that cannot measure the figure
+    # says nothing, instead of printing the last one anybody wrote down.
+    assert "held-out accuracy" not in R.build_report(*_frames()).lower()
+
+
+def test_heldout_by_term_holds_out_by_sample_and_scores_per_term():
+    # Samples 0, 4 and 6 are even, so they train the mapping: three labelled
+    # edges, all naming assay 11, which clears min_support. Sample 5 is odd and
+    # is the only scored one; its labelled edge also says 11, so `cometchip`
+    # scores 1 of 1. Two things must NOT appear: sample 5's `Protocol: mystery`
+    # has no train support and contributes nothing rather than counting as a
+    # miss, and sample 3's edge is dark, which is not ground truth.
+    edges = pd.DataFrame(
+        [(0, 900, "C-0", "P", "D.IMG", "TIS", 11, None, None),
+         (4, 900, "C-4", "P", "D.IMG", "TIS", 11, None, None),
+         (6, 900, "C-6", "P", "D.IMG", "TIS", 11, None, None),
+         (5, 900, "C-5", "P", "D.IMG", "TIS", 11, None, None),
+         (3, 900, "C-3", "P", "D.IMG", "TIS", None, None, None)],
+        columns=S.EDGE_COLUMNS,
+    )
+    meta = {0: {"Type": "CometChip"}, 4: {"Type": "cometchip"},
+            6: {"Type": "  COMETCHIP"},
+            5: {"Type": "CometChip", "Protocol": "mystery"},
+            3: {"Type": "CometChip"}}
+    out = R.heldout_by_term(edges, meta)
+    assert out == {("Type", "cometchip"): (1, 1)}
 
 
 def test_peer_rate_is_measured_against_the_whole_carrier_cohort():

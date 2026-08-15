@@ -203,6 +203,138 @@ def flag_purity_contrast(claims: pd.DataFrame, audit: pd.DataFrame,
     }
 
 
+# The bands the report reports accuracy over, as (exclusive upper bound, label).
+# `None` is the open top band. Kept as data so the label and the cut cannot
+# drift apart -- they were two hand-typed literals in a markdown table before.
+PURITY_BANDS = ((0.75, "< 0.75"), (0.90, "0.75 - 0.90"), (None, ">= 0.90"))
+
+
+def heldout_by_term(edges: pd.DataFrame, meta: dict[int, dict],
+                    min_support: int = 3) -> dict[tuple[str, str], tuple[int, int]]:
+    """(field, normalised value) -> (correct, tested) on the held-out half.
+
+    The same split `vocabulary.score_vocabulary` scores -- train on even sample
+    ids, predict the odd half's labelled producing edges, BY SAMPLE because a
+    child fans out to many parents -- reported per TERM rather than per field.
+    That is what lets the report band terms by purity and name the accuracy of
+    the few terms driving most of the flags, both of which were hard-coded
+    literals before.
+
+    Reaches for `vocabulary._tally` for the reason `runner_up_index` does: it is
+    the one walk that holds the vote, and a second copy here would be a second
+    definition of the training set.
+    """
+    train, _ = V._tally(edges, meta, lambda sid: sid % 2 == 0)
+    mapping = {k: c.most_common(1)[0][0]
+               for k, c in train.items() if sum(c.values()) >= min_support}
+    out: dict[tuple[str, str], list[int]] = {}
+    for child_id, iaid in zip(edges.child_id, edges.edge_internal_assay_id):
+        if pd.isna(iaid):
+            continue
+        child_id = int(child_id)
+        if child_id % 2 == 0:
+            continue                       # train side
+        d = meta.get(child_id) or {}
+        for field in S.CLAIM_FIELDS:
+            value = S.normalise_value(d.get(field))
+            if not value:
+                continue
+            pred = mapping.get((field, value))
+            if pred is None:
+                continue
+            slot = out.setdefault((field, value), [0, 0])
+            slot[0] += int(pred == int(iaid))
+            slot[1] += 1
+    return {k: (h, t) for k, (h, t) in out.items()}
+
+
+def purity_band_accuracy(heldout: dict, vocab: pd.DataFrame) -> pd.DataFrame:
+    """Held-out accuracy by the purity of the term that drove the prediction.
+
+    This is the evidence for the report's central caveat -- that the aggregate
+    tier accuracy is carried by the unambiguous majority, and a flag comes from
+    the band that performs worst -- so it is COMPUTED. `flag_purity_contrast`
+    ten lines above already says why: "a hard-coded one goes stale the first
+    time the vocabulary moves", and these seven figures sat hard-coded in the
+    markdown directly beneath it.
+
+    A term the vocabulary has no purity for lands in its own `unbanded` row
+    rather than being dropped, so the bands always sum to the total. None exist
+    today -- every term the training half supports at 3 edges is supported at 3
+    edges overall, so the trained mapping is a subset of the vocabulary's keys --
+    which is exactly the sort of "true today" property that must not be enforced
+    by a silent skip.
+    """
+    pur = {(r.source_field, S.normalise_value(r.raw_value)): r.purity
+           for r in vocab.itertuples()}
+    tallies: dict[str, list[int]] = {label: [0, 0] for _, label in PURITY_BANDS}
+    tallies["unbanded"] = [0, 0]
+    for key, (hit, tested) in heldout.items():
+        p = pur.get(key)
+        label = "unbanded"
+        if p is not None and not pd.isna(p):
+            for upper, name in PURITY_BANDS:
+                if upper is None or float(p) < upper:
+                    label = name
+                    break
+        tallies[label][0] += hit
+        tallies[label][1] += tested
+    rows = [{"band": f"all {len(vocab):,} terms",
+             "hits": sum(h for h, _ in tallies.values()),
+             "tested": sum(t for _, t in tallies.values())}]
+    rows += [{"band": label, "hits": tallies[label][0],
+              "tested": tallies[label][1]}
+             for _, label in PURITY_BANDS]
+    if tallies["unbanded"][1]:
+        rows.append({"band": "unbanded (no purity in the vocabulary)",
+                     "hits": tallies["unbanded"][0],
+                     "tested": tallies["unbanded"][1]})
+    out = pd.DataFrame(rows, columns=["band", "hits", "tested"])
+    out["accuracy"] = [h / t if t else float("nan")
+                       for h, t in zip(out.hits, out.tested)]
+    return out
+
+
+def flag_driver_accuracy(audit: pd.DataFrame, heldout: dict,
+                         patterns: pd.DataFrame | None = None,
+                         top: int = 6) -> dict:
+    """The biggest flag-driving terms, and how they score held out.
+
+    The concrete half of the caveat: name the handful of terms behind most of
+    the flags and score exactly those, rather than leaving a reader to apply an
+    aggregate to a population it excludes.
+
+    `top` is a STATED rule -- the N terms carrying the most flags -- and that
+    matters. The hard-coded sentence this replaces read "the six terms driving
+    764 of the 866 flags ... score 77.1%", a set that skipped the third-largest
+    driver (`Type: histopathology`, 44 flags) and reached past it for the
+    seventh (`Type: necropsy`, 25). Histopathology is the one term in that range
+    scoring 100.0% held out. Under the stated rule the same six largest drivers
+    are 783 flags at 77.4%.
+    """
+    if not len(audit):
+        return {}
+    counts: dict[tuple[str, str], int] = {}
+    for r in audit.itertuples():
+        key = (r.source_field, S.normalise_value(r.raw_value))
+        counts[key] = counts.get(key, 0) + 1
+    # size first, then the key, so a tie cannot make the sentence depend on the
+    # audit frame's row order
+    chosen = [k for k, _ in sorted(counts.items(),
+                                   key=lambda kv: (-kv[1], kv[0]))[:top]]
+    hits = sum(heldout.get(k, (0, 0))[0] for k in chosen)
+    tested = sum(heldout.get(k, (0, 0))[1] for k in chosen)
+    if not tested:
+        return {}
+    pats = None
+    if patterns is not None and len(patterns):
+        pats = sum(1 for r in patterns.itertuples()
+                   if (r.source_field, S.normalise_value(r.raw_value)) in set(chosen))
+    return {"terms": len(chosen), "flags": sum(counts[k] for k in chosen),
+            "total_flags": len(audit), "patterns": pats,
+            "accuracy": hits / tested, "tested": tested}
+
+
 def review_patterns(audit: pd.DataFrame, *,
                     vocab: pd.DataFrame | None = None,
                     runners: dict | None = None,
@@ -293,12 +425,17 @@ def build_report(precedent, claims, audit, vocab, unresolved, *,
                  unresolved_samples: int | None = None,
                  dial_counts: dict | None = None,
                  flag_purity: dict | None = None,
+                 purity_bands: pd.DataFrame | None = None,
+                 flag_drivers: dict | None = None,
                  patterns: pd.DataFrame | None = None,
                  out_dir: str | None = None) -> str:
     """The operator report. Pure formatting over frames already computed.
 
-    The three keyword arguments are facts the frames cannot supply and are all
-    optional, so the five-positional contract still holds:
+    Every keyword argument is a fact the five frames cannot supply, and all are
+    optional, so the five-positional contract still holds. `purity_bands` and
+    `flag_drivers` come from `purity_band_accuracy` and `flag_driver_accuracy`;
+    the section they feed is omitted entirely when they are absent, rather than
+    falling back to a remembered number:
 
       `unresolved_samples`  how many DISTINCT samples carry an unresolved term.
           `unresolved.n_samples.sum()` is not that number -- it adds per-term
@@ -436,24 +573,42 @@ def build_report(precedent, claims, audit, vocab, unresolved, *,
             f" **{flag_purity['eligible_below']:.1%}** of flag-eligible claims",
             "",
         ]
-    lines += [
-        "Held-out accuracy by the purity of the driving term, measured the same"
-        " way as the tier figures above (2026-08-14, train on even sample ids,"
-        " score the odd half against labelled producing edges):",
-        "",
-        "| purity of term | held-out accuracy | test edges |",
-        "|---|---|---|",
-        "| all 736 terms | 94.1% | 333,717 |",
-        "| < 0.75 | **65.8%** | 55,849 |",
-        "| 0.75 - 0.90 | 88.1% | 2,916 |",
-        "| >= 0.90 | 99.9% | 274,952 |",
-        "",
-        "So the aggregate is carried by the unambiguous majority, and the band"
-        " the flags come from is the one that performs worst. The six terms"
-        " driving **764** of the 866 flags -- across 8 patterns, not the six"
-        " largest ones -- score **77.1%** held out, not 98.4%.",
-        "",
-    ]
+    if purity_bands is not None and len(purity_bands):
+        lines += [
+            "Held-out accuracy by the purity of the driving term, measured the"
+            " same way as the tier figures above (train on even sample ids,"
+            " score the odd half against labelled producing edges):",
+            "",
+            "| purity of term | held-out accuracy | test edges |",
+            "|---|---|---|",
+        ]
+        # Emphasise the worst-performing BAND, chosen by measurement rather than
+        # by which row it happens to be: the sentence under the table calls it
+        # out, and hard-coding which row is bolded is how the literals this
+        # replaces went stale in the first place. Row 0 is the total and is
+        # never a band.
+        bands_only = purity_bands.iloc[1:]
+        bands_only = bands_only[bands_only.tested > 0]
+        worst = bands_only.accuracy.idxmin() if len(bands_only) else None
+        for r in purity_bands.itertuples():
+            acc = "-" if pd.isna(r.accuracy) else f"{r.accuracy:.1%}"
+            if r.Index == worst:
+                acc = f"**{acc}**"
+            lines.append(f"| {r.band} | {acc} | {r.tested:,} |")
+        lines.append("")
+        tail = ("So the aggregate is carried by the unambiguous majority, and"
+                " the band the flags come from is the one that performs worst.")
+        if flag_drivers:
+            tail += (
+                f" The {flag_drivers['terms']} terms driving"
+                f" **{flag_drivers['flags']:,}** of the"
+                f" {flag_drivers['total_flags']:,} flags"
+                + (f" -- across {flag_drivers['patterns']} patterns --"
+                   if flag_drivers.get("patterns") else "")
+                + f" score **{flag_drivers['accuracy']:.1%}** held out over"
+                f" {flag_drivers['tested']:,} test edges."
+            )
+        lines += [tail, ""]
 
     # --- mode 3 -------------------------------------------------------------
     pat = patterns if patterns is not None else review_patterns(audit)
@@ -751,11 +906,14 @@ def main(extract_dir: str = "assay-hygiene/extract",
     )
     pat.to_csv(out / "mode3-review-patterns.csv", index=False)
 
+    heldout = heldout_by_term(edges, meta)
     report = build_report(
         prec, cl, au, vocab, unresolved,
         unresolved_samples=unresolved_sample_count(meta, unresolved),
         dial_counts=dial_counts,
         flag_purity=flag_purity_contrast(cl, au, vocab),
+        purity_bands=purity_band_accuracy(heldout, vocab),
+        flag_drivers=flag_driver_accuracy(au, heldout, pat),
         patterns=pat,
         out_dir=out_dir,
     )
