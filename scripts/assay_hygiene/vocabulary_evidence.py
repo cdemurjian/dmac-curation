@@ -22,16 +22,29 @@ TWO THINGS HERE ARE LOAD-BEARING AND BOTH WERE BUGS FIRST.
    here would mean two definitions of "registered" in one run: this table would
    report a term at share 1.00 while the Mode 3 audit saw a different
    registration for the same sample. Measured, the filtered version reported
-   `Type: m397` as 1 candidate at share 1.00 where this one reports 2 candidates
-   at 0.835, and proposing on that reading invented 13 Mode 3 flags out of
-   nothing. It also moved 3 terms out of "no registered carrier" (89 -> 86).
+   `Type: m397` as 66 registered, 1 candidate, share 1.00, where this one
+   reports 79 registered, 2 candidates, 0.835: the 13 missing carriers are
+   registered under fallback assay 481 and nowhere else. So the filtered table
+   recommends a mapping that contradicts 13 samples' own registration. Under
+   the plan as first written that surfaced as 13 Mode 3 flags; since the Mode 3
+   amendment a proposal caps at T_WEAK and raises no flag at all, so the same
+   defect now buys a wrong vocabulary entry and no symptom. That is a reason to
+   get this table right, not a reason to relax. It also moved 3 terms out of
+   "no registered carrier" (89 -> 86).
 
 2. Every set is iterated in sorted order and every modal pick breaks ties
    explicitly. `Counter.most_common` breaks ties by insertion order, and these
    counters are filled from SETS of tuples whose iteration order depends on
    PYTHONHASHSEED. Three consecutive runs of the first version of this code
-   reported 61, 58 and 59 confounded terms. A table a curator's proposals are
-   built on has to be the same table tomorrow.
+   reported 61, 58 and 59 confounded terms. The two guards are not equals. The
+   TIE-BREAK is the one that decides answers: keep `sorted()` and drop it, and
+   the table is perfectly stable and 23 of 266 rows name a DIFFERENT assay --
+   `p.eng-251216-v1_rna-extraction-protocol.docx` moving from 64 Short Read
+   Sequencing to 61 RNA Extraction, and 8 rows flipping between an assay and
+   its own `X Analysis` twin (30/31, 25/71, 89/91). `sorted()` on its own is
+   decorative given the tie-break -- byte-identical output, measured -- and is
+   kept so insertion order stays defined for anything added here later.
+   Stability is not the property to test for; the specific stable answer is.
 """
 from __future__ import annotations
 

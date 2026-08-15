@@ -170,33 +170,42 @@ honest short file is the deliverable, a padded long one is not.
    could be either and membership does not separate them, leave it unresolved
    and note the ambiguity. Do not guess.
 
-7. **Know what a weak-field proposal does.** `Protocol` and `DataType` are
-   `WEAK_FIELDS`. A weak claim alone lands in tier `weak`, which the Mode 3 audit
-   never reads, so it can never raise a flag on its own. Worse, a weak proposal
-   that names a *different* assay from a sample's existing strong claim turns
-   that sample's tier into `conflict`, which the audit also never reads, and an
-   existing flag disappears.
+7. **A proposal cannot make Mode 3 see less, and will rarely make it see more.**
+   Both halves are design, not luck. The design is the claims and audit sections
+   of the assay-hygiene evidence-layer plan under `docs/superpowers/plans/`, as
+   amended in `bc0bbe0`. Read it there rather than trusting a summary here.
 
-   Simulated end to end against Tasks 5 and 7 on the 2026-08-14 extract, against
-   a baseline of 879 Mode 3 flags:
+   Two properties of that design govern what your file can do:
 
-   | what you propose | terms | new flags | flags removed |
-   |---|---|---|---|
-   | only the 120 one-candidate terms | 120 | **0** | 101 |
-   | those, minus the base-rate-confounded | 73 | 0 | 98 |
-   | those, on strong fields only | 68 | 0 | 59 |
-   | every term that has any candidate at all | 180 | **13** | 102 |
+   - **Suppression is impossible by construction.** Each claim is tiered on the
+     evidence backing its own assay, and disagreement is recorded in a
+     `contested` column instead of a tier that swallows both claims. Adding a
+     claim therefore cannot lower another claim's tier. An earlier design did
+     collapse disagreeing samples below the audit floor, and adding proposals
+     measurably removed 102 existing flags while adding 13; that is why this one
+     exists. Nothing you write can delete a flag.
+   - **A proposal-only claim is capped at `weak` whatever field carried it**,
+     and the audit floor is `corroborated` / `strong`. So a term you propose
+     that no other evidence names cannot raise a flag either. `Type` being a
+     strong field does not buy your guess the strong tier.
 
-   Read the last row against the first. Following rule 6 raises no false flags;
-   ignoring it and proposing the ambiguous terms too invents 13, and **all 13
-   come from one term** (`Type: m397`, which the evidence table already reports
-   as 2 candidates at share 0.835). Every variant removes far more flags than it
-   adds, so a proposal is not free and "it agreed with membership" is not a
-   defence.
+   Measured on the 2026-08-14 extract, rebuilding the amended Tasks 5 and 7 and
+   adding proposals for all 180 terms that have a candidate: **0 flags added, 0
+   removed**, at both audit settings (879 excluding contested rows, 1,570
+   including them). Every proposal-selection variant in rule 6's range gives the
+   same 0 / 0.
 
-   The corollary is worth saying plainly: a proposal derived from the membership
+   The one way a proposal reaches the audit at all: if it names the **same**
+   assay as an existing evidence-backed claim, it is no longer proposal-only, so
+   the cap lifts and the claim can rise from `weak` to `corroborated` and cross
+   the floor. 100 claims move that way here, and none of them contradicts its
+   sample's registration, so the measured effect is still zero. That is a
+   measurement, not a guarantee.
+
+   So the corollary is the whole of it: **a proposal derived from the membership
    of a term's own carriers cannot flag those carriers, because it was built to
-   agree with them. Its value is coverage, not detection.
+   agree with them. Its value is coverage, not detection.** Judge your file on
+   whether the mappings are right, never on what Mode 3 does afterwards.
 
 8. **Copy `raw_value` byte for byte.** The values in
    `vocabulary-unresolved.csv` are already normalised (lowercased, whitespace
@@ -233,6 +242,6 @@ Then report:
 - how many terms you mapped and how many you left, with the reason for the
   biggest groups you left
 - the specific proposals you were least sure about
-- the Mode 3 consequence: how many of your proposals sit on weak fields, and how
-  many sit on terms with two or more candidate assays. If you proposed any of
-  the latter, say so explicitly; rule 7's last row is what they cost.
+- how many of your proposals sit on terms the evidence table reports with two or
+  more candidate assays. Rule 6 says leave those; if you proposed any anyway,
+  say which and why. Mode 3 will not catch it for you (rule 7).

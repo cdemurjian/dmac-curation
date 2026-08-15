@@ -47,12 +47,14 @@ def assay_index(assays: pd.DataFrame) -> dict[int, tuple[int, int, str]]:
     Measured on the real extract 2026-08-14, filtering instead of falling back
     loses 279 of 214,124 sample-assay registrations across 239 samples, and
     drops 82 samples out of the registered population entirely. That is 0.13%
-    and it is not harmless. It made `Type: m397` read as 79 of 79 carriers
-    registered in one assay at share 1.00, when 13 of them are registered under
-    fallback assay 481 and nowhere else. A proposal built on that reading
-    contradicts the registration of those 13 samples, and Mode 3 flags all 13.
-    Under this function the same term reads 2 candidate assays at share 0.835,
-    which is a term you leave alone. See vocabulary_evidence.build_evidence.
+    and it is not harmless. `Type: m397` has 79 carriers. Filtered, 13 of them
+    vanish from the registered population entirely -- they are registered under
+    fallback assay 481 and nowhere else -- so the term reads `n_registered` 66
+    at share 1.00, a unanimous single candidate. Under this function the same
+    term reads 79 registered, 2 candidates, share 0.835, which is a term you
+    leave alone. The filtered reading is the one that recommends a proposal
+    contradicting 13 samples' actual registration.
+    See vocabulary_evidence.build_evidence.
     """
     out: dict[int, tuple[int, int, str]] = {}
     for aid, pid, title, iaid, ititle in zip(

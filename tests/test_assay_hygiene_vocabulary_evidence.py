@@ -160,16 +160,28 @@ def test_the_table_is_byte_identical_under_any_hash_seed():
     Eight assays shared by all three carriers is an eight-way tie over
     eight-element sets, which is the input the defect needs.
 
-    NOTE ON WHAT THIS DOES AND DOES NOT CATCH. `sorted()` on the set iteration
-    and the explicit tie-break in `_winner` are REDUNDANT: either alone makes
-    the output stable, so reverting one and not the other leaves this test
-    green. Verified both ways. It goes red when both are reverted, which is the
-    realistic "simplify this back to most_common" edit. Do not read a green as
-    evidence that one of the two is unnecessary.
+    STABILITY ALONE IS NOT THE PROPERTY, so this pins the expected row too.
+    Dropping the explicit tie-break while keeping `sorted()` yields a perfectly
+    stable table that names a DIFFERENT assay on 23 of the real extract's 266
+    rows, 8 of them flipping between an assay and its own `X Analysis` twin
+    (30/31, 25/71, 89/91). A test asserting only "the same every time" is blind
+    to the guard that decides 23 answers. With `sorted()` feeding
+    `Counter.most_common` the eight-way tie resolves to the LOWEST key, 101,
+    and the pinned row below is what catches it.
+
+    `sorted()` on its own is decorative given the tie-break -- removing it
+    leaves the output byte-identical, measured on the real extract -- so no
+    assertion here goes red for that one. It stays because insertion order
+    should be defined for whatever is aggregated here next.
     """
     import subprocess
 
     src = _SEED_PROBE.replace("__SCRIPTS__", repr(str(REPO / "scripts")))
+    expected = (
+        "source_field,raw_value,n_samples,sample_types,n_registered,"
+        "n_candidate_assays,cand_id,cand_title,share,base_rate,example_uuids\n"
+        "Type,tied,3,CEL:3,3,8,108,Internal 8,1.0,1.0,T-1"
+    )
     outs = set()
     for seed in ("0", "1", "42", "12345"):
         env = dict(os.environ, PYTHONHASHSEED=seed, PYTHONDONTWRITEBYTECODE="1")
@@ -180,6 +192,11 @@ def test_the_table_is_byte_identical_under_any_hash_seed():
     assert len(outs) == 1, (
         f"the evidence table changed with PYTHONHASHSEED: {len(outs)} distinct "
         "outputs across four seeds"
+    )
+    assert outs.pop().strip() == expected, (
+        "the table is stable but is no longer the expected table: an eight-way "
+        "tie must resolve to the highest key by string form, not the first one "
+        "inserted"
     )
 
 
