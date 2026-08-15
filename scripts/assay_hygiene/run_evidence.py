@@ -20,6 +20,14 @@ be done by a count:
     the first paragraph, in the section that lists the artifacts, and again
     under Mode 3, because a reader who skims one will meet another.
 
+    Scoped to THIS STAGE, and the scope is load-bearing. The report is the one
+    artifact written for a reader who was not present, and `scripts/
+    assay_hygiene/` does contain a write path: `stage0_apply.py` carries the
+    `MERGE` and `DELETE` Cypher for the stage 0 lineage backfill and
+    `driver_stage0.py` runs it on the box. Nothing here reaches them, but a
+    package-scope "there is no write path in this code" is false and a reader
+    who found stage0_apply.py afterwards would be right to distrust the rest.
+
   * MAKE MODE 3 JUDGEABLE. Its precision is agreement with a human and there is
     no automated proxy for that, so the report must hand a curator something
     they can actually rule on. 866 rows is not that. Those 866 flags collapse
@@ -309,8 +317,17 @@ def build_report(precedent, claims, audit, vocab, unresolved, *,
         "**This stage writes nothing.** No row here reaches MySQL, Neo4j or the",
         "NExtSEEK API. Everything below is read out of a parquet extract and",
         "written back out as csv, parquet and this file. Nothing in the database",
-        "changed, and nothing in this report can change it: there is no write",
-        "path in this code to enable.",
+        "changed, and nothing in this report can change it: nothing this stage",
+        "runs has a write path to enable.",
+        "",
+        "That is a statement about this stage, and it is deliberately not one",
+        "about the package it lives in. `scripts/assay_hygiene/` also ships",
+        "`stage0_apply.py`, which carries `MERGE` and `DELETE` Cypher for",
+        "Neo4j `DERIVED_FROM` relationships, and `driver_stage0.py`, which is",
+        "piped into `manage.py shell` on the box to run it. That is the stage 0",
+        "lineage backfill -- a separate increment, already applied to",
+        "production, off an operator-reviewed manifest. Nothing in this stage",
+        "calls, imports or can reach either of them.",
         "",
     ]
 
