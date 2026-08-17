@@ -91,20 +91,80 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 ]
 
 # --- classify (stage C) ------------------------------------------------------
+#
+# THE GRAIN CHANGED. This list described a per-EDGE finding until 2026-08-17 and
+# now describes a per-SAMPLE one: one row per `(sample_id,
+# proposed_internal_assay_id)`. Two meanings under one constant name, one frame
+# apart, is this branch's signature defect and it has occurred four times, so
+# the change was made only after verifying the blast radius: `FINDING_COLUMNS`
+# had exactly ONE reference in the whole tree outside this file -- a schema
+# test -- and no producer or consumer at all. There was nothing to migrate.
+#
+# The mitigation for the next reader is structural rather than documentary. The
+# two column sets are DISJOINT apart from `project_id`, which means the same
+# thing in both, so anything written against the per-edge shape
+# (`child_id`, `parent_id`, `verdict`, `candidates`, `matched_*`, `target_*`)
+# raises a KeyError instead of reading a populated, wrong column.
+# tests/test_assay_hygiene_schema.py pins that absence by name.
+#
+# Why per-sample. Mode 1's population is samples registered in NO assay and has
+# no edge to hang a row on; Mode 2's proposal is a membership row, which is
+# per (sample, assay) however many edges support it; and the writer
+# (`smart_merge_assay_assets`) is keyed per sample with a complete assay list.
+# An edge-grained finding could express none of those without a second collapse.
+#
+# Column notes, where the name carries something a reader cannot recover:
+#
+# `registered_internal_assay_ids` is the ANY-membership definition -- a sample
+#   with any membership row is registered -- crossed to the internal namespace
+#   by `audit.registered_internal`. The MAPPABLE definition is a smaller set,
+#   82 samples smaller on the real extract, because 17 assays carry no junction
+#   row. The two differ, they have been confused once already in this project,
+#   and this column is the ANY one.
+# `proposed_*` and not `claimed_*` or `target_*`: under the binding constraint
+#   ("nothing decides, everything proposes") the row is a proposal, and the
+#   header is where a reader forms their belief about what the pipeline already
+#   did. Same reason `proposed_by` is not `decided_by`.
+# `proposed_by` names which evidence produced the proposal -- the gated
+#   vocabulary claim, precedent, or both. On a hop carrying several candidate
+#   assays it is what records that the metadata claim disambiguated.
+# `claim_tier` and not `tier`: `CLAIM_COLUMNS` carries a `tier` one join away
+#   and `PRECEDENT_COLUMNS` carries rates under bare names, so every borrowed
+#   column here is prefixed with the frame it came from. Likewise `vocab_*`
+#   for the vocabulary row's support / purity / provenance, and `precedent_*`
+#   for stage B's counts.
+# `vocab_provenance` holds the same value `CLAIM_COLUMNS.source_provenance`
+#   does -- the provenance of the ONE vocabulary row named by `source_field`
+#   and `raw_value`, never a rank across sources -- and is spelled `vocab_*`
+#   here so it sits with the support and purity it was measured beside.
+# `co_reg_pop` is the SUPPORT behind `co_reg_rate`, in samples of this type.
+#   It rides immediately behind its rate for the reason `n_samples` rides
+#   behind `support` in VOCAB_COLUMNS: a rate of 0.000 over four samples is
+#   noise, and the check on a number belongs next to the number.
+# `precedent_direction` says which of stage B's two rates `precedent_rate`
+#   holds. They differ -- 0.931 against 0.006 on the hop that justified Mode 2
+#   -- so a row carrying a bare rate cannot be audited.
 FINDING_COLUMNS = [
-    "child_id", "parent_id", "child_uuid", "parent_uuid",
-    "child_type", "parent_type",
-    "verdict", "matched_internal_assay_id", "matched_internal_assay_title",
-    "matched_rate", "target_assay_id", "project_id",
-    # every internal_assay_id the child belongs to; stage D's tiebreak needs
-    # this and cannot recover it later, because membership is not carried
-    # into findings
-    "candidates",
+    "sample_id", "uuid", "sample_type", "project_id",
+    "registered_internal_assay_ids",
+    "proposed_internal_assay_id", "proposed_internal_assay_title",
+    "mode", "classification", "gate",
+    "claim_tier", "contested", "source_field", "raw_value",
+    "vocab_support", "vocab_purity", "vocab_provenance",
+    "lineage", "lineage_neighbour_uuid",
+    "co_reg_rate", "co_reg_pop", "compat_band",
+    "precedent_rate", "precedent_direction",
+    "precedent_n_both", "precedent_n_child_only", "precedent_n_parent_only",
+    "proposed_by", "evidence_summary", "action",
 ]
 
 # --- emit (stage E) ----------------------------------------------------------
+# Increment 3's contract, with no consumer anywhere in the tree. `decided_by`
+# was renamed to `proposed_by` here at the same time as the FINDING_COLUMNS
+# rewrite and for the same reason: two names for one concept, one screen apart,
+# is how the wrong one gets shipped, and nothing decides.
 RULE_COLUMNS = PRECEDENT_COLUMNS + [
-    "verdict", "action", "affected_count", "decided_by", "rationale",
+    "verdict", "action", "affected_count", "proposed_by", "rationale",
     "APPROVE", "NOTES",
 ]
 
@@ -292,15 +352,108 @@ A_ADD_CHILD = "ADD_CHILD_TO_ASSAY"
 A_ADD_TO_ASSAY = "ADD_TO_ASSAY"
 A_FLAG_ONLY = "FLAG_ONLY"
 
+# --- stage C vocabulary ------------------------------------------------------
+#
+# Five closed families. Each enumerates itself in a tuple, the way PROVENANCES
+# does, because a "closed vocabulary" a consumer cannot enumerate cannot be
+# checked for closure by that consumer -- it can only be restated, and a
+# restatement is what drifts. The values are prefixed to match their constant
+# names so that a value read out of `findings.csv` names its own family; these
+# columns are read by an operator, not only by a join.
+#
+# Distinct from the V_* / A_* / T_* families by test, not by inspection. V_* is
+# the per-EDGE verdict vocabulary of the superseded stage C (only V_MODE3_FLAG
+# still has a producer, in audit.py), and MODE_1 sitting beside V_MODE1_CHILD is
+# exactly the adjacency this module exists to police.
+
+# Which mode proposes a row. Mode 3 is NAMED and never EMITTED: measured
+# 2026-08-17 over increment 1's 866 flags, not one is a contradiction -- 576 are
+# absences, 31 vocabulary defects, 45 alternative labels, 214 unclassified -- so
+# the detector built for "what samples have INCORRECT assays" does not detect
+# that. The constant stays because the report has to name the mode in order to
+# say it found nothing; a mode the vocabulary cannot spell gets reported as
+# ABSENT, and undetected is a different and worse finding than small.
+MODE_1 = "MODE_1"
+MODE_2 = "MODE_2"
+MODE_3 = "MODE_3"
+MODES = (MODE_1, MODE_2, MODE_3)
+EMITTED_MODES = (MODE_1, MODE_2)
+
+# The vocabulary gate, which runs BEFORE every mode. A claim is only as good as
+# the term that produced it, and until 2026-08-17 no stage tested the term:
+# lineage precedence fired first, so 24 A.FLOW / A.SPC rows whose claims name
+# the measurement assay while the sample is registered in the ANALYSIS assay
+# were laundered into Mode 2 write proposals, and one mapping at purity 0.707
+# produced 212 of 250 compatibility flags.
+GATE_PASS = "GATE_PASS"
+GATE_UNREACHABLE = "GATE_UNREACHABLE"      # this TYPE is never in this assay
+GATE_INCOHERENT = "GATE_INCOHERENT"        # the term family maps to 2+ assays
+GATE_LOW_SUPPORT = "GATE_LOW_SUPPORT"      # under the support OR purity floor
+GATE_OUTCOMES = (GATE_PASS, GATE_UNREACHABLE, GATE_INCOHERENT, GATE_LOW_SUPPORT)
+# The subset that reaches no mode. Precedence rule 1 is then a membership test
+# rather than three inequalities a later edit can forget to extend -- the same
+# argument EVIDENCE_PROVENANCES makes against `p != P_PROPOSED`.
+GATE_REJECTIONS = (GATE_UNREACHABLE, GATE_INCOHERENT, GATE_LOW_SUPPORT)
+
+# What a gated claim turns out to be. ABSENCE and CONTRADICTION are not the same
+# thing and conflating them is the error the operator corrected twice: a sample
+# can legitimately hold more than one assay, typically the one that produced it
+# and the one that consumed it, so a claim naming an assay the sample lacks is
+# an absence until something shows otherwise. CLS_ALT_LABEL is the second
+# correction: where a well-supported population NEVER co-registers the pair, the
+# two are alternative labels a curator chooses between -- 145 D.IMG samples sit
+# in Histopathology and 1,907 never hold it together with Tissue Imaging -- and
+# that is not an error either. CLS_UNRESOLVED is reported at its own size rather
+# than banded into a mode; silently absorbing what the pipeline cannot classify
+# is how a bucket ends up named for what someone assumed was in it.
+CLS_ABSENCE_LINEAGE = "CLS_ABSENCE_LINEAGE"   # a neighbour already carries it
+CLS_ABSENCE_COMPAT = "CLS_ABSENCE_COMPAT"     # no neighbour, but the pair coexists
+CLS_ALT_LABEL = "CLS_ALT_LABEL"               # the pair never coexists
+CLS_UNRESOLVED = "CLS_UNRESOLVED"             # neither test settles it
+CLASSES = (CLS_ABSENCE_LINEAGE, CLS_ABSENCE_COMPAT, CLS_ALT_LABEL, CLS_UNRESOLVED)
+
+# Which lineage neighbour carries the claimed assay, over DERIVED_FROM. Stated
+# once and binding: precedent is mined over DERIVED_FROM, so a lineage test run
+# over CHILD_OF would ask about a different graph than the one its own evidence
+# was measured on -- 52,185 edges apart, about 9% of every Mode 2 figure.
+LIN_CHILD = "LIN_CHILD"      # a CHILD registers it -> propose adding the PARENT
+LIN_PARENT = "LIN_PARENT"    # a PARENT registers it -> propose adding the CHILD
+LIN_NONE = "LIN_NONE"
+LINEAGE_RELATIONS = (LIN_CHILD, LIN_PARENT, LIN_NONE)
+
+# How often two assays coexist on samples of one type. BAND_NO_SUPPORT is a
+# separate outcome from BAND_NEVER on purpose and the distinction is the whole
+# value of the band: a rate of 0.000 over four samples is noise, and reporting
+# it as "these never coexist" would manufacture an alternative-label finding out
+# of an empty population.
+BAND_NEVER = "BAND_NEVER"
+BAND_SOMETIMES = "BAND_SOMETIMES"
+BAND_ROUTINE = "BAND_ROUTINE"
+BAND_NO_SUPPORT = "BAND_NO_SUPPORT"
+COMPAT_BANDS = (BAND_NEVER, BAND_SOMETIMES, BAND_ROUTINE, BAND_NO_SUPPORT)
+
+# BOTH NUMBERS BELOW ARE REPORTING BANDS AND NEITHER IS A TUNED THRESHOLD.
+# There is no backtest behind either one and neither gates anything. Under the
+# binding constraint -- nothing decides, everything proposes -- a threshold
+# cannot gate a write because there is no autonomous write to gate: every row in
+# all three modes reaches the operator as a proposal they approve or reject.
+# These two order what that operator reads first. Task 7 emits the Mode 2
+# backtest curves, and a curve sets reading order, not permission; if a later
+# reader finds a `>=` on either of these deciding whether a row is PROPOSED
+# rather than merely how it is BANDED, that is the defect, not the number.
+MIN_CO_REG_SUPPORT = 30     # samples of the type, below which a rate is unread
+CO_OCCUR_BAND = 0.5         # the routinely / sometimes boundary
+
 
 def make_fixture() -> dict[str, pd.DataFrame]:
-    """A six-edge synthetic world for the precedent and classify stages.
+    """A seven-edge synthetic world for the precedent, gate and classify stages.
 
     assay 1 "Comet Chip"        project 10, propagating   (D.IMG -> TIS)
     assay 2 "Tissue Collection" project 10, non-propagating
+    assay 3 "Patient Visit"     project 10, the producing side of the domain rule
 
     samples: 100/101 D.IMG children, 200/201 TIS parents,
-             300/301 dark children, 400 dark parent
+             300/301 dark children, 400 dark parent, 700 a two-assay PAV parent
 
     Branches this data DOES reach:
       CLEAN             100 -> 200 and 101 -> 201, both endpoints co-registered
@@ -311,23 +464,72 @@ def make_fixture() -> dict[str, pd.DataFrame]:
       MODE_2_PROPAGATE  102 -> 202, child in Comet Chip and parent only in
                         Tissue Collection, on a hop whose precedent propagates
 
+    Added 2026-08-17 for the gate and the two Mode 2 directions:
+
+      the domain rule    203 -> 700. A sample can legitimately hold more than
+                         one assay, typically the one that PRODUCED it and the
+                         one that CONSUMED it: PAV 700 sits in 3 Patient Visit,
+                         which produced it, and in 2 Tissue Collection, which
+                         consumed it to make TIS 203. Neither registration is
+                         wrong and neither excludes the other. Increment 1's
+                         code could represent this nowhere, which is why every
+                         absence read as a contradiction.
+      LIN_PARENT alone   the same hop. Every OTHER Mode-2-eligible hop here
+                         reaches both directions at once, so a classifier
+                         keying direction off "the edge is disjoint" rather
+                         than off the assay was indistinguishable from a
+                         correct one. TIS -> PAV reaches A_ADD_CHILD only, and
+                         A_ADD_CHILD is the measured-weak direction.
+      the gate           `vocabulary` plus four samples, one claim per
+                         rejection kind, each arranged so exactly ONE test
+                         rejects it -- a claim failing two tests at once cannot
+                         show which caught it, which is how 24 vocabulary
+                         defects were filed as lineage absences:
+                           301 `Type: CometChip`       -> GATE_UNREACHABLE, DNA
+                                                          is registered nowhere
+                           202 `Software: cometchip`   -> GATE_INCOHERENT
+                           203 `Type: rare term`       -> GATE_LOW_SUPPORT, count
+                           203 `DataType: illumina library`
+                                                       -> GATE_LOW_SUPPORT, purity
+                           202 `Instrument: curator call`
+                                                       -> GATE_PASS despite
+                                                          support 0, because a
+                                                          curator ruling outranks
+                                                          the data. 202 therefore
+                                                          also proves the gate is
+                                                          per CLAIM, not per
+                                                          sample.
+                           700 `Instrument: tissue scope`
+                                                       -> GATE_PASS on an assay
+                                                          700 already holds, so
+                                                          a mode drops it for a
+                                                          reason that is not the
+                                                          gate.
+                         Every claim above names an assay its sample does NOT
+                         already hold. Without that the gate cases would be
+                         shadowed: a claim naming an assay the sample already
+                         holds yields no proposal whether the gate works or not.
+
     Branches this data does NOT reach:
       MODE_1_PARENT     no edge pairs a registered child with a wholly dark
                         parent. 102 -> 202 is not this case: its parent is
                         registered, just in a different assay, which is mode 2.
-      MODE_2_AMBIGUOUS  no child is registered in 2+ assays, so ``candidates``
-                        is single-element on every row and no tiebreak can fire
-                        here. Proving the stage-D tiebreak works needs a fixture
-                        of its own; a tiebreak that never fires is
-                        indistinguishable from a correct one.
-      MODE_3_FLAG       nothing in this world produces it.
+      MODE_2_AMBIGUOUS  no CHILD is registered in 2+ assays, so no stage-D
+                        tiebreak can fire here. Proving the tiebreak works needs
+                        a fixture of its own; a tiebreak that never fires is
+                        indistinguishable from a correct one. (700 holds two
+                        assays, but only ever as a parent.)
+      MODE_3_FLAG       nothing in this world produces it, and Mode 3 has no
+                        detector to produce it with.
 
-    The data is frozen. Later stages hand-trace counts off these exact rows
-    (for D.IMG -> TIS under Comet Chip: n_both=2, n_child_only=1, hence
-    propagation_rate=2/3), so editing a membership row or a type column
-    silently invalidates their arithmetic. tests/test_assay_hygiene_schema.py
-    pins this structure, including the two unreached branches above, so the
-    data and this docstring cannot drift apart.
+    The 2026-08-14 rows are frozen and the 2026-08-17 additions were chosen not
+    to disturb them: no existing sample, membership row, hop or assay changed,
+    and the D.IMG -> TIS / Comet Chip arithmetic every later stage hand-traces
+    (n_both=2, n_child_only=1, n_parent_only=0, so propagation_rate=2/3 against
+    reverse_rate=1.0) is untouched. Those two rates DIFFER, which is what stops
+    a Mode 2 test from passing under a direction swap.
+    tests/test_assay_hygiene_schema.py pins all of it, including the branches
+    this world does not reach, so the data and this docstring cannot drift.
     """
     edges = pd.DataFrame(
         [
@@ -342,6 +544,8 @@ def make_fixture() -> dict[str, pd.DataFrame]:
             (300, 200, "DNA-1", "TIS-1", "DNA", "TIS", None, None, None),
             # neither endpoint registered -> mode 1 both dark
             (301, 400, "DNA-2", "TIS-9", "DNA", "TIS", None, None, None),
+            # the domain rule: 700 produced 203, and holds both assays
+            (203, 700, "TIS-4", "PAV-1", "TIS", "PAV", None, None, None),
         ],
         columns=EDGE_COLUMNS,
     )
@@ -352,6 +556,7 @@ def make_fixture() -> dict[str, pd.DataFrame]:
             (102, 1), (202, 2),          # disjoint -> the mode 2 case
             (203, 2), (500, 1),          # disjoint, but hop does not propagate
             (200, 2), (201, 2),          # parents also in Tissue Collection
+            (700, 2), (700, 3),          # produced by 3, consumed by 2
         ],
         columns=MEMBERSHIP_COLUMNS,
     )
@@ -359,6 +564,7 @@ def make_fixture() -> dict[str, pd.DataFrame]:
         [
             (1, "Comet Chip", 7, 3, 2, 10, "MIT_SRP", 11, "Comet Chip"),
             (2, "Tissue Collection", 8, 3, 2, 10, "MIT_SRP", 12, "Tissue Collection"),
+            (3, "Patient Visit", 9, 3, 2, 10, "MIT_SRP", 13, "Patient Visit"),
         ],
         columns=ASSAY_COLUMNS,
     )
@@ -381,11 +587,81 @@ def make_fixture() -> dict[str, pd.DataFrame]:
              '{"Type": "CometChip", "Instrument": "tissue scope"}', None, "10"),
             # nothing that names an assay -> none
             (300, "DNA-1", '{"Protocol": "/sops/9", "Name": "dna1"}', None, "10"),
+            # --- one claim per gate rejection, added 2026-08-17 ---
+            #
+            # EVERY claim below names an assay its sample does NOT already
+            # hold, and every one except 301's is REACHABLE for its type. That
+            # is deliberate and it is not free: 202 and 203 are the only samples
+            # here with room for it, because a claim naming an assay the sample
+            # already holds produces no proposal for a reason that has nothing
+            # to do with the gate, and a gate regression test written on such a
+            # claim passes whether or not the gate works.
+            #
+            # DNA is registered in NO assay, so any DNA claim is unreachable.
+            # `CometChip` is the SAME term that passes for D.IMG, which is what
+            # makes this an incredible CLAIM rather than an unknown term. Being
+            # registered nowhere, 301 is also Mode 1's population: the gate has
+            # to stop this becoming a Mode 1 proposal.
+            (301, "DNA-2", '{"Type": "CometChip", "Name": "dna2"}', None, "10"),
+            # 202 is a TIS in Tissue Collection only. Both claims name Comet
+            # Chip, which TIS samples do hold and 202 does not; one is rejected
+            # for its term family and the other must pass on provenance alone,
+            # so the gate is forced to be per CLAIM and not per sample.
+            (202, "TIS-3",
+             '{"Software": "cometchip", "Instrument": "curator call"}',
+             None, "10"),
+            # 203, likewise, carries the two floor cases: a term with almost no
+            # support, and `illumina library`, which is the real one -- purity
+            # 0.707 over 2,210 samples, and it produced 212 of the 250 compat
+            # flags on its own.
+            (203, "TIS-4",
+             '{"Type": "rare term", "DataType": "illumina library"}',
+             None, "10"),
+            # already registered in what it claims: a proposal this sample does
+            # not need, and it must be dropped for THAT reason and not by the
+            # gate, which passes the claim.
+            (700, "PAV-1", '{"Instrument": "tissue scope"}', None, "10"),
         ],
         columns=SAMPLE_COLUMNS,
     )
-    return {"edges": edges, "membership": membership,
-            "assays": assays, "samples": samples}
+    # Explicit, not learned. Every value is already normalised, because
+    # `normalise_value` is what each lookup goes through and a row spelled
+    # `CometChip` would match nothing.
+    vocabulary = pd.DataFrame(
+        [
+            # passes every test, for D.IMG
+            ("Type", "cometchip", 11, "Comet Chip", 900, 850, 0.99, P_LEARNED),
+            ("Protocol", "comet.docx", 11, "Comet Chip", 400, 380, 0.95, P_LEARNED),
+            ("Instrument", "tissue scope", 12, "Tissue Collection",
+             50, 50, 1.0, P_LEARNED),
+            # an INCOHERENT family: one field, one leading token, two assays.
+            # The real one is flowjo -> 30 / 31 / 31 / 153, one product split
+            # across four assays with nothing checking that it maps coherently.
+            # Both members clear every floor, so only the family can reject them.
+            ("Software", "cometchip", 11, "Comet Chip", 120, 40, 0.98, P_LEARNED),
+            ("Software", "cometchip v2", 12, "Tissue Collection",
+             90, 30, 0.97, P_LEARNED),
+            # under the purity floor, and well over the support one
+            ("DataType", "illumina library", 11, "Comet Chip",
+             2210, 2210, 0.707, P_LEARNED),
+            # under the support floor, and at full purity
+            ("Type", "rare term", 11, "Comet Chip", 2, 1, 1.0, P_LEARNED),
+            # under BOTH floors and gated out by neither: a human decision
+            # outranks the data, whatever its support
+            ("Instrument", "curator call", 11, "Comet Chip",
+             0, 0, 0.0, P_CURATOR),
+            # the NEGATIVE case for stem extraction: same field, different
+            # products, different assays, sharing a substring but not a leading
+            # token. A substring rule collapses these and reports a family that
+            # is not one; the incoherent pair above must still collapse.
+            ("DataType", "chip seq", 12, "Tissue Collection",
+             300, 210, 0.96, P_LEARNED),
+            ("DataType", "chipper", 11, "Comet Chip", 250, 180, 0.95, P_LEARNED),
+        ],
+        columns=VOCAB_COLUMNS,
+    )
+    return {"edges": edges, "membership": membership, "assays": assays,
+            "samples": samples, "vocabulary": vocabulary}
 
 
 def make_stage0_fixture() -> dict[str, pd.DataFrame]:

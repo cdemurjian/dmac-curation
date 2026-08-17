@@ -3,6 +3,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
@@ -65,20 +66,95 @@ def test_fixture_shapes_match_declared_columns():
     assert list(fx["assays"].columns) == S.ASSAY_COLUMNS
 
 
-def test_finding_columns_end_with_candidates():
-    # `candidates` carries every assay title the child belongs to. Stage D's
-    # tiebreak reads it and membership is NOT carried into findings, so if this
-    # column is dropped or reordered off the end the tiebreak silently never
-    # fires -- which looks exactly like a tiebreak that is working.
-    assert "candidates" in S.FINDING_COLUMNS
-    assert S.FINDING_COLUMNS[-1] == "candidates"
+def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
+    """The stage C contract, pinned as a literal and in order.
+
+    REPLACES `test_finding_columns_end_with_candidates`, which pinned the
+    per-EDGE shape: `candidates` last, because stage D's tiebreak read it off
+    the end. That shape is gone -- the row is now keyed
+    `(sample_id, proposed_internal_assay_id)` and membership rides on the row
+    itself as `registered_internal_assay_ids`, so there is nothing for a
+    tiebreak to recover later and nothing at the end to protect. The successor
+    below is strictly stronger than the assertion it replaces: the old test
+    pinned two facts about one column, this one pins all 30 columns, their
+    order, and their uniqueness.
+
+    Pinned against a literal for the reason `VOCAB_COLUMNS` and `CLAIM_COLUMNS`
+    are: a test asserting only "the frame matches the constant" stays green
+    through any reordering of the constant itself.
+    """
+    assert S.FINDING_COLUMNS == [
+        "sample_id", "uuid", "sample_type", "project_id",
+        "registered_internal_assay_ids",
+        "proposed_internal_assay_id", "proposed_internal_assay_title",
+        "mode", "classification", "gate",
+        "claim_tier", "contested", "source_field", "raw_value",
+        "vocab_support", "vocab_purity", "vocab_provenance",
+        "lineage", "lineage_neighbour_uuid",
+        "co_reg_rate", "co_reg_pop", "compat_band",
+        "precedent_rate", "precedent_direction",
+        "precedent_n_both", "precedent_n_child_only", "precedent_n_parent_only",
+        "proposed_by", "evidence_summary", "action",
+    ]
+    assert len(set(S.FINDING_COLUMNS)) == len(S.FINDING_COLUMNS)
+
+
+def test_no_per_edge_finding_column_survives_the_grain_change():
+    """The grain moved from per-EDGE to per-SAMPLE under an unchanged name.
+
+    That is this branch's signature defect -- two meanings one frame apart --
+    and the mitigation is that the two column sets are disjoint except for
+    `project_id`, which means the same thing in both. Every name the per-edge
+    shape carried is now ABSENT, so code written against the old grain dies with
+    a KeyError instead of reading a populated, wrong column.
+
+    Verified at the time of the change: `FINDING_COLUMNS` had exactly one
+    reference outside `_schema.py` in the whole tree, the schema test replaced
+    above. There was no per-edge consumer to migrate.
+    """
+    for col in ("child_id", "parent_id", "child_uuid", "parent_uuid",
+                "child_type", "parent_type", "verdict", "candidates",
+                "matched_internal_assay_id", "matched_internal_assay_title",
+                "matched_rate", "target_assay_id"):
+        assert col not in S.FINDING_COLUMNS, f"per-edge column {col} survived"
+    # the new key, which is what makes the row per (sample, proposed assay)
+    assert "sample_id" in S.FINDING_COLUMNS
+    assert "proposed_internal_assay_id" in S.FINDING_COLUMNS
+
+
+def test_nothing_in_a_finding_row_is_named_as_a_decision():
+    """"Nothing decides. Everything proposes." is binding and it is a NAME rule.
+
+    The assay column is `proposed_*` and not `claimed_*` or `target_*`, and the
+    evidence column is `proposed_by` and not `decided_by`, because the artifact
+    an operator reads is where a wrong name does its damage: a column headed
+    `decided_by` tells a reader the pipeline already ruled, in a file whose
+    whole premise is that it has not.
+
+    `RULE_COLUMNS` is asserted here too. It is increment 3's constant and has no
+    consumer anywhere in the tree, but it sat one screen away carrying
+    `decided_by`, which is the same two-names-for-one-concept hazard the rest of
+    this module documents.
+    """
+    for col in S.FINDING_COLUMNS + S.RULE_COLUMNS:
+        assert not col.startswith("decided"), f"{col} names a decision"
+        assert not col.startswith("claimed_"), f"{col} predates the proposal rule"
+        assert not col.startswith("target_"), f"{col} predates the proposal rule"
+    assert "proposed_by" in S.FINDING_COLUMNS
+    assert "proposed_by" in S.RULE_COLUMNS
+    assert "proposed_internal_assay_id" in S.FINDING_COLUMNS
+    assert "proposed_internal_assay_title" in S.FINDING_COLUMNS
 
 
 def test_fixture_encodes_the_four_canonical_situations():
     fx = S.make_fixture()
-    # 1 propagating hop, 1 non-propagating hop, 1 dark child, 1 dark pair
-    assert len(fx["edges"]) == 6
-    assert set(fx["assays"]["title"]) == {"Comet Chip", "Tissue Collection"}
+    # 1 propagating hop, 1 non-propagating hop, 1 dark child, 1 dark pair,
+    # plus the TIS -> PAV hop carrying the domain rule (see the fixture
+    # docstring): a PAV legitimately registered in the assay that produced it
+    # AND the one that consumed it.
+    assert len(fx["edges"]) == 7
+    assert set(fx["assays"]["title"]) == {"Comet Chip", "Tissue Collection",
+                                          "Patient Visit"}
 
     # The four situations, derived from the frames rather than asserted by id.
     pairs = _edge_registration(fx)
@@ -87,7 +163,7 @@ def test_fixture_encodes_the_four_canonical_situations():
     dark_child = [1 for c, _ in pairs if not c]
     both_dark = [1 for c, p in pairs if not c and not p]
 
-    assert len(co_registered) == 2           # the precedent-establishing hops
+    assert len(co_registered) == 3           # 2 precedent-establishing + TIS/PAV
     assert len(disjoint_but_registered) == 2  # mode-2 candidate + the CLEAN hop
     assert len(dark_child) == 2               # mode-1 child + the both-dark pair
     assert len(both_dark) == 1
@@ -98,7 +174,8 @@ def test_fixture_encodes_the_four_canonical_situations():
     # set -- a set still matches after a type is flipped to one that already
     # appears on another edge, which is exactly the silent edit to catch.
     hops = Counter(zip(fx["edges"]["child_type"], fx["edges"]["parent_type"]))
-    assert dict(hops) == {("D.IMG", "TIS"): 3, ("DNA", "TIS"): 2, ("TIS", "MUS"): 1}
+    assert dict(hops) == {("D.IMG", "TIS"): 3, ("DNA", "TIS"): 2,
+                          ("TIS", "MUS"): 1, ("TIS", "PAV"): 1}
 
 
 def test_comet_chip_hop_carries_the_frozen_propagation_counts():
@@ -195,8 +272,8 @@ def test_frozen_fixture_arithmetic_is_unaffected_by_the_new_column():
     # The companion plan hand-traces n_both=2 / n_child_only=1 off these rows.
     # Adding a column to `assays` must not disturb edges or membership.
     fx = S.make_fixture()
-    assert len(fx["edges"]) == 6
-    assert len(fx["membership"]) == 10
+    assert len(fx["edges"]) == 7
+    assert len(fx["membership"]) == 12
 
 
 def test_stage0_fixture_covers_every_drop_reason_and_one_keeper():
@@ -368,6 +445,7 @@ def test_fixture_membership_content_pins_the_propagation_arithmetic():
         (102, 1), (202, 2),          # disjoint -> the mode 2 case
         (203, 2), (500, 1),          # disjoint, but hop does not propagate
         (200, 2), (201, 2),          # parents also in Tissue Collection
+        (700, 2), (700, 3),          # the domain rule: produced by 3, consumed by 2
     }
 
     # the rate Tasks 5 and 6 actually quote, re-derived from the rows above
@@ -418,3 +496,415 @@ def test_audit_columns_carry_both_sides_of_the_comparison():
     assert "internal_assay_id" not in S.AUDIT_COLUMNS
     assert "internal_assay_title" not in S.AUDIT_COLUMNS
     assert len(set(S.AUDIT_COLUMNS)) == len(S.AUDIT_COLUMNS)
+
+
+# --- stage C vocabulary ------------------------------------------------------
+
+
+def _string_constants(prefix):
+    """Every module-level `str` constant named `prefix*`, as {name: value}.
+
+    Derived from the module rather than hand-listed, so a constant added to the
+    family without being added to its closed tuple fails the closure test below
+    instead of quietly becoming a value nothing recognises. The `str` filter is
+    what keeps the tuples themselves (`GATE_OUTCOMES`, `MODES`) out of their own
+    membership check.
+    """
+    return {n: v for n, v in vars(S).items()
+            if n.startswith(prefix) and isinstance(v, str)}
+
+
+def test_every_stage_c_family_is_closed():
+    """Each family enumerates itself, and the tuple is the enumeration.
+
+    A closed vocabulary that cannot be enumerated cannot be checked for closure
+    by any consumer, which is the whole point: the gate, the classifier and the
+    report all have to answer "is this one of the four" without restating the
+    four. `PROVENANCES` is the same pattern one section up.
+    """
+    for prefix, closed in (("MODE_", S.MODES),
+                           ("GATE_", S.GATE_OUTCOMES),
+                           ("CLS_", S.CLASSES),
+                           ("LIN_", S.LINEAGE_RELATIONS),
+                           ("BAND_", S.COMPAT_BANDS)):
+        family = _string_constants(prefix)
+        assert set(family.values()) == set(closed), (
+            f"{prefix}* constants {sorted(family)} disagree with the closed "
+            f"tuple {closed}")
+        assert len(set(closed)) == len(closed), f"{prefix}* has a duplicate value"
+
+    # The class vocabulary is the one the spec names as closed, so it is pinned
+    # literally as well: closure against a tuple that itself grew is vacuous.
+    assert S.CLASSES == (S.CLS_ABSENCE_LINEAGE, S.CLS_ABSENCE_COMPAT,
+                         S.CLS_ALT_LABEL, S.CLS_UNRESOLVED)
+    # Rejections are a SUBSET of the outcomes, in the same shape
+    # EVIDENCE_PROVENANCES takes to PROVENANCES: precedence rule 1 ("a rejected
+    # claim reaches no mode, ever") is then a membership test rather than three
+    # inequalities a later edit can forget to extend.
+    assert set(S.GATE_REJECTIONS) < set(S.GATE_OUTCOMES)
+    assert S.GATE_PASS not in S.GATE_REJECTIONS
+
+
+def test_stage_c_vocabulary_does_not_collide_with_the_verdict_action_or_tier_families():
+    """New families, not overloads of the per-edge ones.
+
+    `V_*` is the retired per-edge verdict vocabulary (only `V_MODE3_FLAG` still
+    has a producer, in `audit.py`), `A_*` the action vocabulary and `T_*` the
+    claim tiers. A stage C value equal to one of theirs would be readable in the
+    wrong column without erroring, which is the failure this whole module is
+    shaped around.
+    """
+    existing = set()
+    for prefix in ("V_", "A_", "T_", "D_", "P_"):
+        existing |= set(_string_constants(prefix).values())
+    new = set()
+    for prefix in ("MODE_", "GATE_", "CLS_", "LIN_", "BAND_"):
+        new |= set(_string_constants(prefix).values())
+
+    assert not (existing & new), f"colliding values: {sorted(existing & new)}"
+    # ...and distinct within the new families too, across all five of them
+    all_new = [v for prefix in ("MODE_", "GATE_", "CLS_", "LIN_", "BAND_")
+               for v in _string_constants(prefix).values()]
+    assert len(set(all_new)) == len(all_new)
+
+
+def test_mode_3_is_named_but_has_no_detector_so_it_is_never_emitted():
+    """Mode 3 exists in the design and emits nothing.
+
+    Measured 2026-08-17 over increment 1's 866 audit flags: not one is a
+    contradiction. 576 are absences, 31 vocabulary defects, 45 alternative
+    labels, 214 unclassified. The detector built for "what samples have
+    INCORRECT assays" finds claims that disagree with registrations, and that
+    population is alternative labels, so the mode is UNDETECTED rather than
+    small.
+
+    The constant stays, because the report has to name the mode in order to say
+    it found nothing, and a mode the vocabulary cannot spell would be reported
+    as absent instead of as undetected. `EMITTED_MODES` is what a producer
+    checks against, and it is the pair.
+    """
+    assert S.MODE_3 in S.MODES
+    assert S.MODE_3 not in S.EMITTED_MODES
+    assert S.EMITTED_MODES == (S.MODE_1, S.MODE_2)
+
+
+def test_the_two_reporting_numbers_gate_nothing():
+    """Both are reporting bands with no backtest behind them.
+
+    Under "nothing decides, everything proposes" a threshold cannot gate a
+    write, because there is no autonomous write to gate. These two order what an
+    operator reads. The behavioural half of that claim is `BAND_NO_SUPPORT`:
+    a population under the floor is reported as UNMEASURED, never as
+    `BAND_NEVER`, so a rate of 0.000 over four samples cannot be read as
+    evidence that two assays do not coexist.
+    """
+    assert S.MIN_CO_REG_SUPPORT == 30
+    assert S.CO_OCCUR_BAND == 0.5
+    assert isinstance(S.MIN_CO_REG_SUPPORT, int)   # a count of samples
+    assert 0.0 < S.CO_OCCUR_BAND < 1.0             # a rate
+    assert S.BAND_NO_SUPPORT != S.BAND_NEVER
+    assert {S.BAND_NO_SUPPORT, S.BAND_NEVER} <= set(S.COMPAT_BANDS)
+
+
+# --- what the extended fixture must express ----------------------------------
+
+
+def _types(fx):
+    """sample_id -> sample type, read off the only frame that carries it."""
+    t = dict(zip(fx["edges"]["child_id"], fx["edges"]["child_type"]))
+    t.update(zip(fx["edges"]["parent_id"], fx["edges"]["parent_type"]))
+    return t
+
+
+def _internal(fx):
+    """seek assay_id -> internal_assay_id, for the fixture's fully-junctioned frame."""
+    return dict(zip(fx["assays"]["assay_id"], fx["assays"]["internal_assay_id"]))
+
+
+def _registered_internal(fx):
+    """sample_id -> set of INTERNAL assay ids, ANY-membership definition.
+
+    ANY membership row counts, which is the definition `audit.registered_internal`
+    uses and the one that differs from "has a MAPPABLE membership row" by 82
+    samples on the real extract, because 17 assays carry no junction row. The
+    fixture is fully junctioned, so the two agree here; the helper is named for
+    the definition anyway so a later reader does not have to guess which one a
+    derived count came from.
+    """
+    internal = _internal(fx)
+    out = {}
+    for sid, aid in zip(fx["membership"]["sample_id"], fx["membership"]["assay_id"]):
+        out.setdefault(sid, set()).add(internal[aid])
+    return out
+
+
+def _claims(fx):
+    """(sample_id, sample_type, internal_assay_id, vocab row) per claim.
+
+    Resolved here from the samples and vocabulary frames rather than by calling
+    `claims.sample_claims`, so this file keeps testing the DATA and not stage
+    B2's implementation of it.
+    """
+    vocab = {(r.source_field, r.raw_value): r
+             for r in fx["vocabulary"].itertuples(index=False)}
+    types = _types(fx)
+    out = []
+    for r in fx["samples"].itertuples(index=False):
+        for field, value in json.loads(r.json_metadata).items():
+            row = vocab.get((field, S.normalise_value(value)))
+            if row is not None:
+                out.append((r.sample_id, types[r.sample_id],
+                            row.internal_assay_id, row))
+    return out
+
+
+def test_fixture_expresses_a_sample_legitimately_in_two_assays():
+    """The domain rule increment 1's code could not represent.
+
+    A PAV that had tissue collected from it belongs in the assay that PRODUCED
+    it and the one that CONSUMED it; neither registration excludes the other,
+    and reading the second as a contradiction is the error the operator
+    corrected twice. Derived from the frames: some sample holds two internal
+    assays AND shares one of them with a lineage neighbour, which is what makes
+    the pair evidence rather than coincidence.
+
+    Stated so nobody over-reads this test: the 2026-08-14 rows ALREADY satisfied
+    it -- TIS 200 and 201 each hold Comet Chip and Tissue Collection -- so it
+    passed before the fixture was extended and it survives deleting the new
+    `TIS -> PAV` rows. It is a drift pin on a property the fixture has, not
+    evidence for the addition. The new structural case is pinned by
+    `test_fixture_reaches_both_mode_2_directions`, which does fail without it.
+    """
+    fx = S.make_fixture()
+    reg = _registered_internal(fx)
+    pairs = list(zip(fx["edges"]["child_id"], fx["edges"]["parent_id"]))
+
+    two_assay = {s for s, a in reg.items() if len(a) > 1}
+    assert two_assay, "no sample is registered in two assays"
+
+    # ...and at least one of them proves the rule: it shares an assay with a
+    # neighbour (the consuming side) while holding one the neighbour lacks (the
+    # producing side). Without the second half this is just a co-registration.
+    proved = [(c, p) for c, p in pairs
+              if (p in two_assay and reg.get(c, set()) & reg[p]
+                  and reg[p] - reg.get(c, set()))]
+    assert proved, "no edge shows one shared assay and one legitimately unshared"
+
+
+def test_fixture_reaches_both_mode_2_directions():
+    """Both directions occur, and one hop reaches ONLY the weak one.
+
+    A child carrying an assay its parent lacks proposes A_ADD_PARENT, the
+    direction the domain rule justifies and co-registration corroborates 88/88.
+    A parent carrying one its child lacks proposes A_ADD_CHILD, the mirror,
+    corroborated 15/263. Mode 2 needs both, and a Mode 2 case needs BOTH
+    endpoints registered -- a dark endpoint is Mode 1 and takes precedence, so
+    the `300 -> 200` edge is not an A_ADD_CHILD case however it reads.
+
+    The second assertion is the one that costs something. Before this task every
+    Mode-2-eligible hop reached both directions at once, so a classifier reading
+    direction off "the edge is disjoint" rather than off the ASSAY was
+    indistinguishable from a correct one. The `TIS -> PAV` hop reaches
+    A_ADD_CHILD and nothing else.
+    """
+    fx = S.make_fixture()
+    reg = _registered_internal(fx)
+    lin_child, lin_parent = set(), set()
+    for c, p, ct, pt in zip(fx["edges"]["child_id"], fx["edges"]["parent_id"],
+                            fx["edges"]["child_type"], fx["edges"]["parent_type"]):
+        ca, pa = reg.get(c, set()), reg.get(p, set())
+        if not (ca and pa):
+            continue                      # a dark endpoint is Mode 1, not Mode 2
+        if ca - pa:
+            lin_child.add((ct, pt))
+        if pa - ca:
+            lin_parent.add((ct, pt))
+
+    assert lin_child, "no Mode 2 edge where the child carries an unshared assay"
+    assert lin_parent, "no Mode 2 edge where the parent carries an unshared assay"
+    assert lin_parent - lin_child, (
+        "every Mode 2 hop reaches both directions, so a classifier that keys "
+        "direction off the edge rather than off the assay would pass")
+
+
+def test_fixture_hop_rates_differ_so_a_direction_swap_cannot_pass():
+    """`propagation_rate` and `reverse_rate` differ on at least one hop.
+
+    Mode 2 reads `propagation_rate` for A_ADD_PARENT and `reverse_rate` for
+    A_ADD_CHILD. On a fixture where the two are equal, a classifier that reads
+    the wrong one passes every test written against it. Re-derived from the
+    frames here rather than imported from `precedent`, so this pins the DATA:
+    if a membership edit ever equalised the two, stage B would still be correct
+    and every Mode 2 direction test downstream would go quietly vacuous.
+    """
+    fx = S.make_fixture()
+    reg = _registered_internal(fx)
+    edges = fx["edges"]
+    hop = edges[(edges["child_type"] == "D.IMG") & (edges["parent_type"] == "TIS")]
+    comet = 11
+
+    n_both = n_child_only = n_parent_only = 0
+    for c, p in zip(hop["child_id"], hop["parent_id"]):
+        in_c, in_p = comet in reg.get(c, set()), comet in reg.get(p, set())
+        n_both += in_c and in_p
+        n_child_only += in_c and not in_p
+        n_parent_only += in_p and not in_c
+
+    propagation = n_both / (n_both + n_child_only)
+    reverse = n_both / (n_both + n_parent_only)
+    assert (propagation, reverse) == (2 / 3, 1.0)
+    assert propagation != reverse
+
+
+def _incoherent_families(fx):
+    """(field, leading token) groups whose members map to more than one assay.
+
+    The leading token is a stand-in for whatever stem rule the gate ships; what
+    is asserted below is the DATA -- that such a group exists and that a claim
+    rests on it -- and never this grouping.
+    """
+    families = {}
+    for r in fx["vocabulary"].itertuples(index=False):
+        families.setdefault((r.source_field, r.raw_value.split()[0]),
+                            set()).add(r.internal_assay_id)
+    return {k for k, v in families.items() if len(v) > 1}
+
+
+def _gate_kinds(fx):
+    """claim -> the set of rejection KINDS that fire on it, ANY-membership based.
+
+    Kinds, not outcomes: the support and purity floors are both
+    GATE_LOW_SUPPORT, so they count as one. A curator mapping is exempt from the
+    floors and from the family check, because a human ruling outranks the data.
+    """
+    reg = _registered_internal(fx)
+    types = _types(fx)
+    type_reg = {(types[s], a) for s, assays in reg.items() for a in assays}
+    incoherent = _incoherent_families(fx)
+
+    out = {}
+    for claim in _claims(fx):
+        sid, stype, aid, row = claim
+        kinds = set()
+        if (stype, aid) not in type_reg:
+            kinds.add(S.GATE_UNREACHABLE)
+        if row.provenance != S.P_CURATOR:
+            if (row.source_field, row.raw_value.split()[0]) in incoherent:
+                kinds.add(S.GATE_INCOHERENT)
+            if row.support < S.MIN_CO_REG_SUPPORT or row.purity < 0.8:
+                kinds.add(S.GATE_LOW_SUPPORT)
+        out[claim] = kinds
+    return out
+
+
+def test_fixture_vocabulary_reaches_every_gate_rejection():
+    """One claim per rejection kind, each isolated to the kind it exercises.
+
+    Everything here is derived from the frames rather than asserted by id. Two
+    isolation properties are asserted and both were violated by the first
+    version of this fixture:
+
+    1. **Exactly one kind fires per rejected claim.** A claim failing two tests
+       at once cannot show which one caught it, which is how increment 1 filed
+       24 vocabulary defects as lineage absences.
+    2. **No rejected claim names an assay its sample already holds.** That was
+       true of three of the five cases as first written, and it is the quieter
+       defect: such a claim yields no proposal for a reason that has nothing to
+       do with the gate, so a downstream gate regression test built on it passes
+       whether the gate works or not.
+    """
+    fx = S.make_fixture()
+    reg = _registered_internal(fx)
+    kinds = _gate_kinds(fx)
+    assert kinds, "the fixture's samples produce no claims against its vocabulary"
+
+    fired = {k for ks in kinds.values() for k in ks}
+    assert fired == set(S.GATE_REJECTIONS), (
+        f"the fixture reaches {sorted(fired)}, not every rejection kind")
+
+    for claim, ks in kinds.items():
+        assert len(ks) <= 1, f"{claim[0]} is rejected by {sorted(ks)}, not one kind"
+        if ks:
+            assert claim[2] not in reg.get(claim[0], set()), (
+                f"sample {claim[0]}'s rejected claim names assay {claim[2]}, "
+                "which it already holds, so nothing downstream can tell the "
+                "gate's rejection from an already-registered drop")
+
+    # The unreachable claim's TERM must be reachable for some other type, or the
+    # case does not distinguish an incredible claim from a term nothing maps.
+    unreachable = [c for c, ks in kinds.items() if S.GATE_UNREACHABLE in ks]
+    elsewhere = {c[3].raw_value for c, ks in kinds.items() if not ks}
+    assert {c[3].raw_value for c in unreachable} & elsewhere
+
+    # Both floors are reached separately, or GATE_LOW_SUPPORT is only half tested
+    floored = [c for c, ks in kinds.items() if S.GATE_LOW_SUPPORT in ks]
+    assert any(c[3].support < S.MIN_CO_REG_SUPPORT for c in floored)
+    assert any(c[3].purity < 0.8 for c in floored)
+
+    # The whole incoherent family is reportable, not just its minority member.
+    incoherent = _incoherent_families(fx)
+    assert incoherent
+    for field, token in incoherent:
+        members = [r for r in fx["vocabulary"].itertuples(index=False)
+                   if (r.source_field, r.raw_value.split()[0]) == (field, token)]
+        assert len(members) >= 2
+
+    # The negative case for stem extraction: same field, DIFFERENT products,
+    # different assays, sharing a substring but not a leading token. A substring
+    # rule collapses these and reports a family that is not one.
+    rows = list(fx["vocabulary"].itertuples(index=False))
+    negatives = [(a, b) for a in rows for b in rows
+                 if a.source_field == b.source_field
+                 and a.raw_value < b.raw_value
+                 and a.internal_assay_id != b.internal_assay_id
+                 and a.raw_value.split()[0] != b.raw_value.split()[0]
+                 and (a.raw_value.split()[0] in b.raw_value
+                      or b.raw_value.split()[0] in a.raw_value)]
+    assert negatives, "no pair a substring-based stem rule would wrongly collapse"
+
+    # A curator mapping below EVERY floor, which must still pass: a human
+    # decision outranks the data, whatever its support.
+    curator = [c for c in kinds if c[3].provenance == S.P_CURATOR]
+    assert curator, "no curator-provenance claim"
+    for c in curator:
+        assert c[3].support < S.MIN_CO_REG_SUPPORT and c[3].purity < 0.8, (
+            "the curator claim clears the floors, so it cannot show that "
+            "provenance overrides them")
+        assert not kinds[c]
+
+    # ...and one sample carrying both a rejected and a passing claim, so the
+    # gate is forced to be per CLAIM and not per sample.
+    by_sample = {}
+    for claim, ks in kinds.items():
+        by_sample.setdefault(claim[0], []).append(bool(ks))
+    assert any(any(v) and not all(v) for v in by_sample.values()), (
+        "no sample carries both a rejected and a passing claim")
+
+
+def test_fixture_frames_round_trip_through_parquet(tmp_path):
+    """The fixture must survive the format the real extract is stored in.
+
+    Every frame stage A produces is written to and read back from parquet, and
+    a fixture that cannot make that trip is not a stand-in for one: a column of
+    ints-with-nulls, or the vocabulary's mixed int / float / str row, is exactly
+    where a synthetic frame and a real one diverge. Written under `tmp_path`,
+    never into the checkout, because `plugin_sentinel` treats a file appearing
+    there as a P1.
+    """
+    fx = S.make_fixture()
+    for name, frame in fx.items():
+        path = tmp_path / f"{name}.parquet"
+        frame.to_parquet(path, index=False)
+        back = pd.read_parquet(path)
+        assert list(back.columns) == list(frame.columns), name
+        assert len(back) == len(frame), name
+        pd.testing.assert_frame_equal(back, frame, check_dtype=False)
+
+
+def test_fixture_vocabulary_matches_the_declared_contract():
+    fx = S.make_fixture()
+    assert list(fx["vocabulary"].columns) == S.VOCAB_COLUMNS
+    assert set(fx["vocabulary"]["provenance"]) <= set(S.PROVENANCES)
+    # normalised already, because `normalise_value` is what every lookup goes
+    # through and a fixture carrying `CometChip` would match nothing
+    assert all(v == S.normalise_value(v) for v in fx["vocabulary"]["raw_value"])
