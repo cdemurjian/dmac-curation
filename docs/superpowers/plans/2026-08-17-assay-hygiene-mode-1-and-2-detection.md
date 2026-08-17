@@ -106,9 +106,9 @@ MODE 1
   at strong+corroborated tier                671 samples / 671 rows
 
 MODE 2 CEILING, unfiltered by precedent, over DERIVED_FROM
-  ADD_PARENT      54,780 rows over  42,611 samples
-  ADD_CHILD      116,365 rows over 102,556 samples
-  union          171,013 rows over 115,599 samples
+  ADD_PARENT      55,007 rows over  42,654 samples
+  ADD_CHILD      117,463 rows over 102,582 samples
+  union          172,338 rows over 115,626 samples  (132 pairs reach both ways)
 
 VOCABULARY, the largest single defect source
   learned terms                                736  (0 curator-corrected, ever)
@@ -119,21 +119,33 @@ VOCABULARY, the largest single defect source
 
 **The Mode 2 numbers are a CEILING** and the word must accompany them
 everywhere. Precedent cuts them down hard: at `rate >= 0.5`, ADD_CHILD survives
-at **3,663 of 116,365, about 3%**.
+at **3,663 of 117,463, about 3%**.
 
-**Reconcile the ceiling before you use it.** Two independent computations
-disagree: this plan reads 54,780 / 116,365; an independent review read 55,007 /
-117,463 over the same relation. Neither has been root-caused. Task 4 step 4
-requires you to settle it and report which was wrong and why. Do not average
-them and do not pick the one that matches your code.
+**RECONCILED 2026-08-17 by Task 4, and the figures above are the corrected
+ones.** Two independent computations disagreed: this plan read 54,780 / 116,365
+and an independent review read 55,007 / 117,463 over the same relation. Both are
+arithmetically correct and they differ by ONE thing -- the definition of
+"registered". ANY membership row, crossed to the internal namespace by
+`audit.registered_internal`, gives 55,007 / 117,463; dropping the 17
+junction-less assays' registrations gives 54,780 / 116,365. **ANY membership row
+means registered, so the larger pair is right and this plan understated the
+ceiling by 227 and 1,098.**
+
+The proof that the whole block was computed under the wrong definition, rather
+than one figure being mistyped: this plan's own union line read 171,013 rows over
+115,599 samples, which is exactly what the MAPPABLE-only reading produces, while
+its own two components sum to 171,145. Self-loops, duplicate edge pairs and the
+seek/internal id crossing were each measured and ruled out. `lineage.mode2_ceiling`
+now computes it and `lineage.main` prints it, so it can be re-derived in one
+command instead of quoted.
 
 ### Which lineage relation
 
 **Use `DERIVED_FROM` (`edges.parquet`), not `CHILD_OF` (`childof.parquet`).**
 
 ```
-CHILD_OF        742,534 pairs    ceiling  50,508 / 111,039
-DERIVED_FROM    794,592 pairs    ceiling  54,780 / 116,365
+CHILD_OF        742,534 pairs    ceiling  50,508 / 111,039  (MAPPABLE-only)
+DERIVED_FROM    794,592 pairs    ceiling  55,007 / 117,463
 divergence      52,185 DF-only, 126 CO-only
 ```
 
@@ -290,12 +302,35 @@ Three rejection tests:
 
 **Interfaces:**
 
+**SUPERSEDED. These are the BRIEFED signatures and not the ones that shipped;
+`scripts/assay_hygiene/lineage.py` is the source of truth.** What shipped:**
+
+```python
+INTEGRITY_KEYS: tuple[str, ...]     # 11 keys
+
+def lineage_index(edges, samples, membership) -> tuple[dict, dict, dict, dict]
+    """-> (children_of, parents_of, uuid_of, integrity), keyed by sample_id."""
+
+def lineage_supports(sample_id, assay_id, children_of, parents_of, registered) -> tuple[list[int], list[int]]
+    """-> (children registering it, parents registering it), each sorted."""
+
+def neighbour_registers(sample_id, assay_id, children_of, parents_of, uuid_of, registered) -> tuple[str, int | None, str | None]
+    """-> (LIN_CHILD | LIN_PARENT | LIN_NONE, neighbour sample_id, neighbour uuid)."""
+```
+
+`assays` was dropped: the function never reads an assay id, and taking the frame
+would advertise a validation it does not perform. `uuid_of` was added because
+`FINDING_COLUMNS.lineage_neighbour_uuid` is otherwise recovered by a `samples`
+join that is blank for the 243 unresolved endpoints, 182 of which are registered
+and can therefore BE the named neighbour. The two lookup functions were given
+DIFFERENT arities and return shapes on purpose, so a call swapped between them
+raises `TypeError` rather than binding a `list` to a relation.
+
+The briefed signatures, for the record:
+
 ```python
 def lineage_index(edges, samples, membership, assays) -> tuple[dict, dict, dict]
-    """-> (children_of, parents_of, integrity), keyed by sample_id, over DERIVED_FROM."""
-
 def neighbour_registers(sample_id, assay_id, children_of, parents_of, registered) -> tuple[str, int | None]
-    """-> (LIN_CHILD | LIN_PARENT | LIN_NONE, neighbour sample_id or None)."""
 ```
 
 `lineage_index` **takes `membership` and `assays`**, which the first draft's
@@ -330,12 +365,26 @@ grouping of the membership frame.
 
 **Adds ~10 tests.**
 
+**SUPERSEDED. What shipped, in `scripts/assay_hygiene/compatibility.py`:**
+
 ```python
-def co_registration(membership, assays, samples) -> dict[tuple[str, int, int], tuple[float, int]]
-    """(sample_type, registered_assay, proposed_assay) -> (rate, support in SAMPLES of that type)."""
+BAND_ESTABLISHES: dict[str, str]    # band -> class, reported, never enforced
+
+def co_registration(membership, assays, nodes) -> dict[tuple[str, int, int], tuple[float, int]]
+    """(sample_type, registered assay, proposed assay) -> (rate, support in SAMPLES of that type)."""
 
 def compat_band(rate, support) -> str
+def band_establishes(band) -> str
+def best_co_registration(sample_type, registered_assay_ids, proposed_assay_id, table) -> tuple[float, int, int | None]
+    """-> (rate, support, the registered assay that produced them)."""
 ```
+
+The third argument is `nodes` and not `samples`, the same departure
+`gate.type_registration_index` made: `SAMPLE_COLUMNS` carries no type column and
+the uuid prefix is wrong on 5 of the 177,392 nodes. `best_co_registration`
+collapses a sample's several registered assays to one rate and NAMES the winner,
+because `FINDING_COLUMNS` carries one rate per row and two consumers each
+inventing a collapse is how this branch produced three wrong figures.
 
 **What this test does and does not establish.** A high rate means the two assays
 coexist on this type, so absence is the anomaly. A zero rate on a well-supported
@@ -352,12 +401,20 @@ Histopathology. The first draft of this plan called that a contradiction.
   - a uuid that does not parse into a type is counted, not dropped
   - **a zero rate on a reachable pair classifies `CLS_ALT_LABEL`, never an error.** This is the regression test for the second design error.
 - [ ] **Step 2: Implement to green.**
-- [ ] **Step 3: Verify:** `(D.IMG, 127, 145)` = 0.000 over 1,907;
-  `(PAV, 56, 74)` ~ 0.805 over 13,229.
-- [ ] **Step 4: RECONCILE THE MODE 2 CEILING.** Compute it over `DERIVED_FROM`
-  and compare against both published readings (54,780 / 116,365 and 55,007 /
-  117,463). Root-cause the difference and report which is right. Do not proceed
-  with an unexplained gap.
+- [x] **Step 3: Verify.** MEASURED 2026-08-17: `(D.IMG, 127, 145)` = 0.000 over
+  **2,035**; `(PAV, 56, 74)` = 0.805 over **13,220**. The rates hold; the
+  populations quoted here (1,907 / 13,229) type samples by the uuid prefix in
+  `samples.parquet`, and this package types them off `nodes.type`. The gap
+  decomposes exactly: 132 samples registered in 127 and typed D.IMG by the graph
+  have no `samples.parquet` row at all, and 4 (D.IMG) / 9 (PAV) have a mysql row
+  but no node row, so they carry no type here and are reported by
+  `gate.untyped_registration_samples`.
+- [x] **Step 4: RECONCILE THE MODE 2 CEILING.** DONE. The two readings are one
+  number under two definitions of "registered": ANY membership row gives
+  **55,007 / 117,463** and dropping the 17 junction-less assays gives 54,780 /
+  116,365. ANY membership row means registered, so the former is right. See
+  `lineage.mode2_ceiling` and the corrected block under "Measured starting
+  state".
 - [ ] **Step 5: Full suite. Report the delta.**
 
 ---
@@ -405,7 +462,7 @@ peers.** Measured:
 |---|---|---|
 | corroborated by co-registration over the 866 | **88/88, 100%** | 15/263, 5.7% |
 | rules at rate >= 0.95 | 5 | 15 |
-| candidate rows surviving rate >= 0.5 | 79,488 | **3,663** of 116,365 |
+| candidate rows surviving rate >= 0.5 | 79,488 | **3,663** of 117,463 |
 | rows creating a (type, assay) pair existing nowhere | 55.6% | **67.6%** |
 
 The single cleanest datum: `TIS <- PAV` under 56 Patient Visit runs a reverse

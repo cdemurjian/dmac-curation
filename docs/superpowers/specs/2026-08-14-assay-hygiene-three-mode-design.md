@@ -331,6 +331,18 @@ DERIVED_FROM    794,593 edges     ceiling  55,007 ADD_PARENT / 117,463 ADD_CHILD
 divergence      52,185 DF-only, 126 CO-only
 ```
 
+**The DERIVED_FROM ceiling above is CONFIRMED, 2026-08-17.** The companion plan
+published 54,780 / 116,365 for the same relation and neither reading had been
+root-caused. Both are arithmetically correct: they differ only in the definition
+of "registered". ANY membership row, crossed to the internal namespace by
+`audit.registered_internal`, gives 55,007 / 117,463; dropping the 17
+junction-less assays' registrations gives 54,780 / 116,365. ANY membership row
+means registered, so this figure stands and the plan's has been corrected.
+`lineage.mode2_ceiling` computes it, so it need never be quoted again. The
+CHILD_OF line has NOT been re-measured under the corrected definition and is the
+MAPPABLE-only reading; it is quoted here only to show the relation matters, and
+Mode 2 uses DERIVED_FROM for both.
+
 Precedent, the decider, is mined over `DERIVED_FROM`. A lineage test run over
 `CHILD_OF` therefore asks about a different graph than the one its own evidence
 was measured on. **Mode 2 uses `DERIVED_FROM` for both**, and any figure quoted
