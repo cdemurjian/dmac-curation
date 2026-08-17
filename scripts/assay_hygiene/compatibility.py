@@ -299,20 +299,29 @@ def best_co_registration(
     """-> (rate, support, the registered assay that produced them).
 
     THE COLLAPSE LIVES HERE AND NOT IN EACH CONSUMER. `FINDING_COLUMNS` carries
-    ONE `co_reg_rate` / `co_reg_pop` / `compat_band` triple per row and a row is
-    per (sample, proposed assay), while a sample registered in several assays
-    offers one rate per registered assay -- up to 7 on the real extract. Two
-    consumers each inventing a collapse is the same class of defect as two
-    definitions of "registered", which has now produced three wrong figures on
-    this branch.
+    ONE co-registration block per row and a row is per (sample, proposed assay),
+    while a sample registered in several assays offers one rate per registered
+    assay -- up to 7 on the real extract. Two consumers each inventing a collapse
+    is the same class of defect as two definitions of "registered", which has now
+    produced three wrong figures on this branch.
 
     THE BEST RATE WINS, because any registered assay that routinely coexists
     with the proposed one supports the proposal, and a sample's other
-    registrations do not weaken evidence they say nothing about. The winner is
-    returned rather than discarded so `evidence_summary` can name which
-    registration the rate was measured against; without it a finding row states
-    a rate whose denominator's assay appears nowhere on the row, and the
-    operator cannot audit the number they are being asked to approve.
+    registrations do not weaken evidence they say nothing about.
+
+    THE WINNER IS RETURNED AND IT HAS A COLUMN OF ITS OWN,
+    `FINDING_COLUMNS.co_reg_registered_internal_assay_id`, which rides between
+    `co_reg_pop` and `compat_band`. A rate is a statement about an ORDERED PAIR,
+    and a row listing four registrations beside one rate does not say which pair
+    was measured: the operator cannot audit the number they are being asked to
+    approve, nor see that the other candidates were weaker. Returning the winner
+    with nowhere to put it would leave Tasks 5, 6 and 8 to decide separately
+    whether to keep it, and the one that discarded it would ship that row.
+
+    The column is EMPTY exactly when this returns `None` -- no registered assay
+    reached a key at all -- which `compat_band` bands `BAND_NO_SUPPORT` because
+    it tests support before rate. An id beside a support of 0 would name a
+    population nobody measured.
 
     Ties break on the larger support and then on the LOWEST assay id. Both are
     stable under any iteration order; a bare `max` over a set would make the

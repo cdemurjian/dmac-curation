@@ -517,6 +517,14 @@ def test_a_sample_in_three_assays_yields_the_best_rate_and_this_names_the_winner
     assert K.compat_band(*table[("CEL", 21, 24)]) == S.BAND_SOMETIMES, (
         "the losing candidate bands differently, so the choice is material")
 
+    # The winner has somewhere to go on the finding row, and it is one of the
+    # sample's OWN registrations -- so an operator reads it against the
+    # `registered_internal_assay_titles` already on that row instead of guessing
+    # which of several registrations produced 0.90. Returning a winner with no
+    # column to put it in is how it gets discarded by one consumer of three.
+    assert winner in {21, 22, 23}
+    assert "co_reg_registered_internal_assay_id" in S.FINDING_COLUMNS
+
 
 def test_a_collapse_that_reaches_no_population_reads_no_support_never_never():
     """Zero candidates must not read as a well-supported zero rate.

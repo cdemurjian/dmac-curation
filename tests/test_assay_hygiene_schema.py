@@ -76,8 +76,13 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
     itself as `registered_internal_assay_ids`, so there is nothing for a
     tiebreak to recover later and nothing at the end to protect. The successor
     below is strictly stronger than the assertion it replaces: the old test
-    pinned two facts about one column, this one pins all 31 columns, their
+    pinned two facts about one column, this one pins all 32 columns, their
     order, and their uniqueness.
+
+    32 and not 31 since 2026-08-17, when `co_reg_registered_internal_assay_id`
+    was added between `co_reg_pop` and `compat_band`. See
+    `test_a_co_registration_rate_names_the_registration_it_was_measured_against`
+    for why it is there and why an ID.
 
     Pinned against a literal for the reason `VOCAB_COLUMNS` and `CLAIM_COLUMNS`
     are: a test asserting only "the frame matches the constant" stays green
@@ -91,12 +96,76 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
         "claim_tier", "contested", "source_field", "raw_value",
         "vocab_support", "vocab_purity", "vocab_provenance",
         "lineage", "lineage_neighbour_uuid",
-        "co_reg_rate", "co_reg_pop", "compat_band",
+        "co_reg_rate", "co_reg_pop", "co_reg_registered_internal_assay_id",
+        "compat_band",
         "precedent_rate", "precedent_direction",
         "precedent_n_both", "precedent_n_child_only", "precedent_n_parent_only",
         "proposed_by", "evidence_summary", "action",
     ]
     assert len(set(S.FINDING_COLUMNS)) == len(S.FINDING_COLUMNS)
+
+
+def test_a_co_registration_rate_names_the_registration_it_was_measured_against():
+    """The co-registration block is rate, support, and WHICH pair was measured.
+
+    A co-registration rate is a statement about an ORDERED PAIR: across samples
+    of this type registered in R, what share also register X. The row already
+    names X (`proposed_internal_assay_id`) and lists every R the sample holds
+    (`registered_internal_assay_ids`, up to 7 on the real extract), but
+    `compatibility.best_co_registration` collapses those to the ONE R yielding
+    the best rate -- so without this column the row reads
+    `registered 56;74;112;133, rate 0.805` and the operator cannot tell which
+    registration produced 0.805, cannot check it, and cannot see that the others
+    were weaker. That is an unexplainable row in the artifact whose whole
+    premise is that a human approves it.
+
+    ADDED BEFORE ITS FIRST CONSUMER, the same call
+    `registered_internal_assay_titles` was added under. Tasks 5, 6 and 8 would
+    otherwise each decide independently whether to keep the winner the function
+    already returns, and the one that discards it ships the unexplainable row.
+
+    THE ORDER IS THE ARGUMENT. rate, then the support that checks it, then the
+    registration the support counted -- each column is the check on the one
+    before it, which is the same reason `co_reg_pop` rides behind `co_reg_rate`
+    and `n_samples` rides behind `support` in `VOCAB_COLUMNS`. `compat_band` is
+    the LABEL and comes after all three facts it labels.
+
+    AN ID AND NEVER A TITLE. It deliberately has no `_title` partner and the
+    "every title column has its id" sweep in
+    `test_both_sides_of_a_finding_row_are_decoded_and_the_title_is_display_only`
+    is unaffected, because that sweep runs from titles to ids and not back. The
+    assay named here is always a member of `registered_internal_assay_ids`,
+    whose `_titles` column already decodes the whole set in position, so nothing
+    is undecodable for the operator.
+    """
+    rate = S.FINDING_COLUMNS.index("co_reg_rate")
+    pop = S.FINDING_COLUMNS.index("co_reg_pop")
+    against = S.FINDING_COLUMNS.index("co_reg_registered_internal_assay_id")
+    band = S.FINDING_COLUMNS.index("compat_band")
+
+    assert pop == rate + 1
+    assert against == pop + 1, (
+        "the registration the rate was measured against belongs with the rate "
+        "and its support, not adrift from them")
+    assert band == against + 1, (
+        "the band LABELS the three facts before it and must not sit among them")
+
+    # an id, and it takes no title partner
+    assert S.FINDING_COLUMNS[against].endswith("_id")
+    assert "co_reg_registered_internal_assay_title" not in S.FINDING_COLUMNS
+
+    # ...and the assay it names comes from the set the row already carries, so
+    # it is decodable without a second artifact. This is the assertion that
+    # would fail if someone "helpfully" made this column a title.
+    assert "registered_internal_assay_ids" in S.FINDING_COLUMNS
+    assert "registered_internal_assay_titles" in S.FINDING_COLUMNS
+    assert not S.FINDING_COLUMNS[against].endswith("_title")
+
+    # the whole co-registration block, in order, so a reordering fails here too
+    assert S.FINDING_COLUMNS[rate:band + 1] == [
+        "co_reg_rate", "co_reg_pop", "co_reg_registered_internal_assay_id",
+        "compat_band",
+    ]
 
 
 def test_no_per_edge_finding_column_survives_the_grain_change():

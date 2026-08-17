@@ -160,6 +160,37 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 #   It rides immediately behind its rate for the reason `n_samples` rides
 #   behind `support` in VOCAB_COLUMNS: a rate of 0.000 over four samples is
 #   noise, and the check on a number belongs next to the number.
+# `co_reg_registered_internal_assay_id` names WHICH of the sample's existing
+#   registrations the rate was measured against, and it COMPLETES the triple
+#   above rather than decorating it. A co-registration rate is a statement about
+#   an ORDERED PAIR -- across samples of this type registered in R, what share
+#   also register X -- while `registered_internal_assay_ids` lists every R the
+#   sample holds, up to 7 on the real extract.
+#   `compatibility.best_co_registration` picks the R yielding the best rate, so
+#   without this column a row reads `registered 56;74;112;133, rate 0.805` and
+#   the operator cannot tell which registration produced 0.805, cannot check it,
+#   and cannot see that the others were weaker. That makes the finding
+#   unexplainable in the artifact whose whole premise is that a human approves it.
+#
+#   ADDED BEFORE ITS FIRST CONSUMER EXISTS, which is the call
+#   `registered_internal_assay_titles` was added under and the same reason:
+#   Tasks 5, 6 and 8 would otherwise each decide independently whether to keep
+#   the winner `best_co_registration` already returns, and the one that discards
+#   it ships the unexplainable row. A divergence between consumers costs more
+#   than a column, and this is the cheapest this will ever be.
+#
+#   AN ID AND NEVER A TITLE, as everywhere in this module: a title is display
+#   and never identity, and 124 seek ids collide numerically with genuine
+#   internal ids under 122 different titles. It takes no `_title` partner and
+#   needs none -- the assay it names is always a member of
+#   `registered_internal_assay_ids`, whose `_titles` column already decodes the
+#   whole set in position, so the operator can read it without a second lookup.
+#
+#   EMPTY exactly when no population was measured at all:
+#   `best_co_registration` returns `(0.0, 0, None)` when no registered assay
+#   reaches a co-registration key, and `compat_band` bands that BAND_NO_SUPPORT
+#   because it tests support before rate. An id beside a support of 0 would name
+#   a population nobody measured.
 # `precedent_direction` says which of stage B's two rates `precedent_rate`
 #   holds. They differ -- 0.931 against 0.006 on the hop that justified Mode 2
 #   -- so a row carrying a bare rate cannot be audited.
@@ -171,7 +202,8 @@ FINDING_COLUMNS = [
     "claim_tier", "contested", "source_field", "raw_value",
     "vocab_support", "vocab_purity", "vocab_provenance",
     "lineage", "lineage_neighbour_uuid",
-    "co_reg_rate", "co_reg_pop", "compat_band",
+    "co_reg_rate", "co_reg_pop", "co_reg_registered_internal_assay_id",
+    "compat_band",
     "precedent_rate", "precedent_direction",
     "precedent_n_both", "precedent_n_child_only", "precedent_n_parent_only",
     "proposed_by", "evidence_summary", "action",

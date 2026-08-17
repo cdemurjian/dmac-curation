@@ -140,10 +140,12 @@ MIN_VOCAB_SAMPLES = 3
 # MARKS and not stops: those 269 claims still reach their mode and arrive
 # carrying `GATE_LOW_SUPPORT` and the purity that earned it.
 #
-# CALIBRATION IS DEFERRED TO TASK 4, AND UNTIL THEN THIS IS A REPORTING BAND.
+# THIS FLOOR IS UNCALIBRATED, AND IT IS A REPORTING BAND UNTIL IT IS NOT.
 # It does not block. `blocks_mode` excludes `GATE_LOW_SUPPORT`, so a claim under
 # this floor is RECORDED as weak and still reaches its mode, and the number
-# ranks a curator's reading order rather than granting permission.
+# ranks a curator's reading order rather than granting permission. NOTHING IS
+# GATED ON AN UNCALIBRATED NUMBER, which is what makes shipping it uncalibrated
+# survivable.
 #
 # The deferral is not caution, it is a measurement. `evidence-report.md` scores
 # this axis against a PEER-REGISTRATION one -- of every sample carrying a term,
@@ -152,10 +154,20 @@ MIN_VOCAB_SAMPLES = 3
 # would discard `Type: Blood`'s 97 flags at 98.7% peer registration, the
 # cleanest gaps in the set, while keeping `Histopathology`'s 44 at 71.1%. Peer
 # rate is the question a curator is actually asking and it is not computable in
-# this stage; it needs the co-registration layer Task 4 builds. When that
-# exists, THIS FLOOR IS TO BE RE-DERIVED AGAINST IT rather than kept because it
-# was written first, and 0.75 is to be read as the output of that curve and not
-# as a number anyone chose.
+# this stage; it needs the co-registration layer, which now exists in
+# `compatibility.co_registration`.
+#
+# THE RE-DERIVATION IS DEFERRED TO INCREMENT 3 AND HAS NOT HAPPENED. An earlier
+# version of this comment said the co-registration task would do it. It did not,
+# and the commitment is withdrawn here rather than left standing, because code
+# naming an unkept promise is worse than code saying "not yet calibrated".
+#
+# The deferral is now a ruling and not a slip. Under the split above this floor
+# is NON-BLOCKING, so re-deriving it changes only which rows are MARKED weak and
+# never which rows reach a mode -- that makes it a reporting refinement, and its
+# right home is the increment where an operator actually reads the approval
+# surface. Until then: 0.75 IS A NUMBER SOMEONE CHOSE, it is not the output of
+# any curve, and every row it marks says so.
 #
 # Blocking on the two floors would have stopped 641 of the 866 and 30,583 of
 # the 138,007 claims -- purity on an axis measured to be the wrong one --
@@ -189,8 +201,8 @@ MIN_VOCAB_PURITY = 0.75
 # one more fails both blocking tests -- and a single column collapsing to
 # whichever fired first would lose the other. On
 # the real extract that loss runs in the dangerous direction: it would hide a
-# recorded weakness behind a block, so the finding row a Task 4 operator reads
-# would show a clean mapping for a claim whose mapping is not clean.
+# recorded weakness behind a block, so the finding row an operator reads would
+# show a clean mapping for a claim whose mapping is not clean.
 #
 # `gate_failures` is EMPTY for a clean claim rather than holding `GATE_PASS`. A
 # pass is the absence of a failure, and a list of failures containing "passed"
@@ -661,8 +673,8 @@ def gate_claims(
 
         # EVERY failing test is recorded, in the order the tests run, and the
         # loop no longer stops at the first. A claim can be unreachable AND rest
-        # on a thin mapping, and collapsing to the first would tell a Task 4
-        # operator the mapping was clean.
+        # on a thin mapping, and collapsing to the first would tell an operator
+        # reading the finding row that the mapping was clean.
         failures: list[str] = []
         reasons: list[str] = []
         if registrations == 0:
@@ -734,10 +746,15 @@ def vocabulary_defects(
     the artifact the triage happens in. That is the defect class this package
     polices in nine other places, and it is inert today only because `main`
     takes the defaults for both calls.
-    It will not stay inert: `MIN_VOCAB_PURITY` commits Task 4 to re-deriving
-    that floor against peer rate, and the first sweep at a new value is exactly
-    the call that diverges. `main` binds the pair once, in one place, and hands
-    the same two values to both functions.
+    IT IS STILL INERT AND IT IS A DEFERRED MINOR, not a live defect. The
+    re-derivation of `MIN_VOCAB_PURITY` against peer rate is deferred to
+    increment 3, so no caller sweeps a floor yet and none can diverge today. The
+    fix that would make the mistake unrepresentable -- carrying the applied
+    floors on the gate frame -- changes `GATE_COLUMNS`, a shared output contract
+    later tasks are already written against, and changing it mid-increment costs
+    more than the hazard it closes. It belongs to whichever task first sweeps a
+    floor. `main` binds the pair once, in one place, and hands the same two
+    values to both functions, which is what keeps it inert meanwhile.
 
     THE WHOLE FAMILY IS EMITTED, including members no claim rests on. On the
     real vocabulary `flowjo 10.8.1` backs 0 of the 138,007 claims while sitting
@@ -861,9 +878,9 @@ def main(extract_dir: str = "assay-hygiene/extract",
     THE TWO FLOORS ARE BOUND ONCE HERE and handed to both `gate_claims` and
     `vocabulary_defects`, so the number a claim was ruled under and the number
     the curator's file states cannot diverge. They are parameters rather than
-    constants read twice because Task 4 is committed to re-deriving the purity
-    floor, and a sweep is the caller that would otherwise set one and not the
-    other.
+    constants read twice because `MIN_VOCAB_PURITY` is uncalibrated and its
+    re-derivation against peer rate is deferred to increment 3; the sweep that
+    does it is the caller that would otherwise set one and not the other.
     """
     from . import vocabulary as V   # local: keeps the module import-light
 
