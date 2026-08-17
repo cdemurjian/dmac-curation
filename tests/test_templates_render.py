@@ -48,6 +48,9 @@ MINIMAL = {
         "deposits": [], "asks": "ask", "scientist_name": "Charlie",
     },
     "pyproject.toml.j2": {"project_slug": "marie_intravchip", "pi_name": "marie"},
+    "PROTOCOLS.md.j2": {
+        "lab": "she", "stamp": "260807", "generated_date": "2026-08-17",
+    },
     "env.example.j2": {},
     "gitignore.j2": {},
 }
@@ -76,6 +79,17 @@ WITH_VALUES = {
                   "new_rows": [{"sampletype": "RNA", "count": 27, "note": "bulk RNA"}],
                   "questions": "Q1 about timepoints"}],
         "cross_arm_questions": "Q2 about D.REF schema",
+    },
+    "PROTOCOLS.md.j2": {
+        "lab": "she", "stamp": "260807", "version": 2,
+        "generated_date": "2026-08-17",
+        "study_line": "Methods excerpts supporting Oak et al. 2025.",
+        "verified_against": "the 2026-08-17 sample tree",
+        "registered_summary": "all 15 as SOP 647-661, project 4",
+        "provenance": "Verbatim excerpts, nothing added.",
+        "extraction_note": "Reproduced by scripts/extract_methods.py.",
+        "open_items": ["Register three assays on project 4."],
+        "upload_notes": "POST returns 500 while still creating the record.",
     },
     "EMAIL_TO_PI.md.j2": {
         "pi_name": "marie", "subject": "Custom subject", "greeting": "Custom greeting",
@@ -136,12 +150,12 @@ def test_claude_md_defaults_to_pipeline_when_modes_absent():
     assert "/curate-inventory" in _render_claude_md()
 
 
-def test_claude_md_lists_twelve_pipeline_steps():
+def test_claude_md_lists_thirteen_pipeline_steps():
     import re
     out = _render_claude_md(modes=["pipeline"])
     block = out.split("Suggested order:", 1)[1].split("\n\n", 1)[0]
     numbered = re.findall(r"^\s*(\d+)\. ", block, flags=re.M)
-    assert len(numbered) == 12, f"expected 12 steps, got {numbered}"
+    assert len(numbered) == 13, f"expected 13 steps, got {numbered}"
 
 
 def test_claude_md_records_why_both_sheet_formats_exist():
