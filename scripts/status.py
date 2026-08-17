@@ -26,6 +26,10 @@ PIPELINE_ARTIFACTS = [
     (1, "FILE_INDEX.md", "Inventory"),
     (2, "SAMPLE_TREE.md", "Sample tree"),
     (3, "QUESTIONS_FOR_PI.md", "Questions"),
+    # "3b", not 4: phases 4 and 8 are retired numbers and are never reused (see
+    # skills/curation/PHASES.md). A letter suffix is how this pipeline inserts a
+    # phase without renumbering, the same convention /curate-qc uses for 9b.
+    ("3b", "protocols", "Protocols (SOP .docx + COVERAGE.md)"),
     (5, "assay_sheets/4sheet_originals", "Build (4-sheet review artifacts)"),
     (6, "assay_sheets", "Consolidate (flat Arm*-upload.xlsx)"),
     (7, "context/assay_ids_cache.json", "Resolve assays"),
@@ -41,6 +45,7 @@ NEXT_COMMAND = {
     1: "/curate-inventory",
     2: "/curate-sample-tree",
     3: "/curate-questions add",
+    "3b": "/curate-protocols",
     5: "/curate-build <arm>",
     6: "/curate-consolidate",
     7: "/curate-resolve-assays --project-id N",
@@ -99,6 +104,24 @@ def _pipeline_status(root: Path, locked: dict) -> dict:
                 detail = "no HTML viewer"
             artifacts.append({"phase": phase, "name": rel,
                               "present": present, "detail": detail})
+        elif rel == "protocols":
+            # Present means "documents exist", not "the directory exists": an
+            # empty protocols/ is what a half-finished phase leaves behind.
+            docs = sorted(target.glob("P.*.docx")) if target.is_dir() else []
+            cov = target / "COVERAGE.md"
+            detail = f"{len(docs)} protocol .docx"
+            if docs and not cov.is_file():
+                detail += ", no COVERAGE.md (re-run --coverage-only)"
+            elif docs and cov.stat().st_mtime < max(d.stat().st_mtime for d in docs):
+                detail += ", COVERAGE.md stale (re-run --coverage-only)"
+            sops = target / "_sops.json"
+            if sops.is_file():
+                try:
+                    detail += f", {len(json.loads(sops.read_text()))} registered"
+                except (json.JSONDecodeError, OSError):
+                    detail += ", _sops.json unreadable"
+            artifacts.append({"phase": phase, "name": rel,
+                              "present": bool(docs), "detail": detail})
         elif rel == "RETRIEVE.TXT":
             present = target.is_file()
             lines = len(target.read_text().split()) if present else 0
