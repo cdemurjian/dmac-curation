@@ -132,7 +132,7 @@ def test_a_type_never_registered_in_the_claimed_assay_is_unreachable_and_reaches
     assert "DNA" in row.gate_reason.iloc[0]
 
     assert not G.reaches_modes(gated)[row.index[0]]
-    assert S.GATE_UNREACHABLE in S.GATE_REJECTIONS
+    assert G.blocks_mode(S.GATE_UNREACHABLE)
 
     # ...and the term itself is fine: it is the CLAIM that is incredible, not
     # the mapping. D.IMG 100 carries the same value and passes.
@@ -575,6 +575,105 @@ def test_the_gate_frame_matches_its_contract_and_emits_only_closed_outcomes():
     for g, why in zip(gated.gate, gated.gate_reason):
         if g in S.GATE_REJECTIONS:
             assert why, f"{g} with no reason"
+    # `gate` is the FIRST entry of `gate_failures`, and a clean claim lists none
+    for g, failures in zip(gated.gate, gated.gate_failures):
+        listed = [f for f in failures.split(";") if f]
+        assert set(listed) <= set(S.GATE_REJECTIONS)
+        assert (listed[0] if listed else S.GATE_PASS) == g
+        assert (g == S.GATE_PASS) == (not listed)
+
+
+def test_only_the_two_evidence_backed_outcomes_block_a_claim():
+    """The blocking rule, at the predicate, over the whole closed family.
+
+    Reachability and coherence carry no tuned number: either a sample of this
+    type is registered in the claimed assay somewhere or it is not, and either
+    the term family maps coherently or it does not. Neither answer moves if
+    somebody picks a different constant, so they may stop a claim.
+
+    Both floors ARE tuned numbers and neither may. "Nothing decides, everything
+    proposes" is binding and a threshold that blocks is a threshold that
+    decides; the spec also holds a threshold to be the OUTPUT of a backtest
+    curve, and both of these were chosen ahead of one.
+
+    Enumerated over `GATE_OUTCOMES` rather than spot-checked, so an outcome
+    added later has to be classified here rather than defaulting into blocking
+    by being forgotten.
+    """
+    assert set(G.BLOCKING_OUTCOMES) == {S.GATE_UNREACHABLE, S.GATE_INCOHERENT}
+    assert set(G.BLOCKING_OUTCOMES) < set(S.GATE_REJECTIONS)
+    for outcome in S.GATE_OUTCOMES:
+        assert G.blocks_mode(outcome) is (outcome in G.BLOCKING_OUTCOMES)
+    assert not G.blocks_mode(S.GATE_LOW_SUPPORT)
+    assert not G.blocks_mode(S.GATE_PASS)
+    # anything unanticipated defaults to NON-blocking, which fails visibly
+    assert not G.blocks_mode("GATE_SOMETHING_ADDED_LATER")
+
+
+def test_a_tuned_floor_is_recorded_on_the_row_and_does_not_stop_it():
+    """The behaviour change ruled on 2026-08-17. It ranks; it does not decide.
+
+    Both floors fire here -- 1 distinct sample at purity 0.40, under a floor of
+    3 and one of 0.75 -- and the claim still reaches its mode. What must NOT
+    happen alongside that is the weakness going unrecorded: the outcome, both
+    reasons and the two evidence columns are all still on the row, because a
+    Task 4 operator ranks on them and a silently-clean row is worse than a
+    blocked one.
+    """
+    vocab = _vocab(("Type", "thin", 11, "Comet Chip", 132, 1, 0.40, S.P_LEARNED))
+    claims = _claims(_claim(1, "TIS-1", 11, "Comet Chip", "Type", "thin"))
+    gated = G.gate_claims(claims, vocab, {("TIS", 11): 40}, {"TIS-1": "TIS"})
+
+    assert gated.gate.iloc[0] == S.GATE_LOW_SUPPORT
+    assert G.reaches_modes(gated).iloc[0], "a tuned floor must not block"
+    # ...and it is recorded, in both units, with both reasons
+    assert gated.gate_failures.iloc[0] == S.GATE_LOW_SUPPORT
+    assert gated.vocab_n_samples.iloc[0] == 1
+    assert gated.vocab_purity.iloc[0] == 0.40
+    assert "sample" in gated.gate_reason.iloc[0]
+    assert "purity" in gated.gate_reason.iloc[0]
+
+    # the defect is still routed to the curator, marked as having blocked nothing
+    defects = G.vocabulary_defects(gated, vocab)
+    assert list(defects.defect) == [S.GATE_LOW_SUPPORT]
+    assert list(defects.blocks_modes) == [False]
+
+
+def test_a_claim_failing_a_blocking_and_a_tuned_test_carries_both():
+    """One claim, two defects, and neither may hide the other.
+
+    Measured on the real extract, 3,511 of the 138,007 claims are in this state.
+    An earlier revision reported only the most severe, so a blocked claim's
+    finding row showed a clean mapping for a mapping that is not clean -- and a
+    curator fixing the reachability problem would have been handed a term still
+    resting on one sample, with nothing anywhere saying so.
+
+    The negative half is asserted too: the tuned failure must not turn a
+    passing claim's neighbour into a blocked one, so a sibling claim failing
+    ONLY the floor reaches its mode in the same frame.
+    """
+    vocab = _vocab(
+        ("Type", "thin", 99, "Nowhere", 132, 1, 1.0, S.P_LEARNED),
+        ("Instrument", "alsothin", 11, "Comet Chip", 132, 1, 1.0, S.P_LEARNED),
+    )
+    claims = _claims(
+        _claim(1, "TIS-1", 99, "Nowhere", "Type", "thin"),
+        _claim(1, "TIS-1", 11, "Comet Chip", "Instrument", "alsothin"),
+    )
+    gated = G.gate_claims(claims, vocab, {("TIS", 11): 40}, {"TIS-1": "TIS"})
+
+    both = gated.iloc[0]
+    assert both.gate_failures == f"{S.GATE_UNREACHABLE};{S.GATE_LOW_SUPPORT}"
+    assert both.gate == S.GATE_UNREACHABLE          # the most severe
+    assert "not credible" in both.gate_reason and "sample" in both.gate_reason
+    assert list(G.reaches_modes(gated)) == [False, True]
+
+    # both defects reach the curator's file, from the one claim
+    defects = G.vocabulary_defects(gated, vocab)
+    thin = defects[defects.raw_value == "thin"]
+    assert set(thin.defect) == {S.GATE_UNREACHABLE, S.GATE_LOW_SUPPORT}
+    assert set(thin.blocks_modes) == {True, False}
+    assert set(thin.n_claims) == {1}
 
 
 def test_an_unresolvable_claim_raises_rather_than_being_skipped():

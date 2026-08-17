@@ -23,22 +23,58 @@ Three tests, each named for what it establishes, in a fixed order:
                    enough purity?                -> is the MAPPING trustworthy
 
 **Order is a contract.** Reachability first, because an incredible claim must
-never reach a membership proposal, and because a claim failing two tests must
-report the one that names its actual defect. Increment 1 had no reachability
-test at all, which is what produced the 24 above.
+never reach a membership proposal, and because `gate` reports the most severe
+outcome and that must be the test naming the claim's actual defect. Increment 1
+had no reachability test at all, which is what produced the 24 above.
 
-The gate is not a mode. It proposes no membership change, and a claim it rejects
-is excluded from Modes 1 and 2 entirely and routed to `/curate-assay-vocabulary`
-through `vocabulary-defects.csv`. Nothing here writes to the database; it reads
-parquet and csv off disk and writes one csv.
+**ONLY TWO OF THE THREE BLOCK, and the split is the design.** See
+`BLOCKING_OUTCOMES` and `blocks_mode`, which is the single place that rule lives
+and the one every consumer must call:
+
+    BLOCKING      reachability, coherence. Neither has a tuned number in it.
+                  Either a sample of this type is registered in the claimed
+                  assay somewhere or it is not; either the term family maps
+                  coherently or it does not. A claim failing one reaches no mode.
+    NON-BLOCKING  the support and purity floors. These ARE tuned numbers. They
+                  are computed, recorded on the row and carried onto the finding
+                  so an operator sees weak evidence and reads the strongest rows
+                  first. They rank and triage. They do not decide.
+
+The binding constraint is "nothing decides, everything proposes", and a
+threshold that blocks is a threshold that decides. The spec also holds that a
+threshold is an OUTPUT of a backtest curve rather than a number chosen ahead of
+one, and both floors below were chosen ahead of one. The asymmetry of the two
+errors settles it: a weak claim reaching a mode costs an operator a row they
+reject, which is recoverable by reading, while a correct claim silently stopped
+by an uncalibrated number is invisible to them -- and invisible is the failure
+this whole increment is a response to.
+
+So a claim carries a SET of outcomes and not one. `gate` is the most severe,
+`gate_failures` is all of them, and whether the claim proceeds is neither of
+those: it is `reaches_modes`. Comparing `gate` to `GATE_PASS` to decide passage
+is wrong and will silently drop 25,974 claims.
+
+The gate is not a mode. It proposes no membership change, every claim it rules
+on is reported in `vocabulary-defects.csv` and routed to
+`/curate-assay-vocabulary`, and the blocked subset additionally reaches no mode.
+Nothing here writes to the database; it reads parquet and csv off disk and
+writes one csv.
 
     PYTHONPATH=scripts uv run --with pandas --with pyarrow \
         python -m assay_hygiene.gate
 
-Measured over the real extract 2026-08-17, at the defaults below, over all
-138,007 claims: 107,424 PASS, 25,974 GATE_LOW_SUPPORT, 4,554 GATE_UNREACHABLE,
-55 GATE_INCOHERENT. Over the 866 flags increment 1 reported: 225 PASS, 598
-GATE_LOW_SUPPORT, 31 GATE_UNREACHABLE, 12 GATE_INCOHERENT.
+Measured over the real extract 2026-08-17 at the defaults below.
+
+Over all 138,007 claims, by most severe outcome: 107,424 PASS, 25,974
+GATE_LOW_SUPPORT, 4,554 GATE_UNREACHABLE, 55 GATE_INCOHERENT. **4,609 are
+BLOCKED (3.3%) and 133,398 reach a mode, 25,974 of them carrying a recorded
+floor failure.**
+
+Over the 866 flags increment 1 reported: 225 PASS, 598 GATE_LOW_SUPPORT, 31
+GATE_UNREACHABLE, 12 GATE_INCOHERENT. **43 are BLOCKED and 823 reach a mode**,
+598 of those carrying a recorded floor failure. Under an earlier revision where
+the floors blocked, 641 of the 866 were stopped; that is the change this split
+made and it is why it was made.
 """
 from __future__ import annotations
 
@@ -92,25 +128,36 @@ MIN_VOCAB_SAMPLES = 3
 # `MIN_VOCAB_PURITY` is the discriminating floor and it IS anchored on a
 # measurement, the one `run_evidence.purity_band_accuracy` publishes. Held out
 # by sample over 333,717 test edges: terms below 0.75 purity predict at 65.8%,
-# terms in 0.75-0.90 at 88.1%, terms at or above 0.90 at 99.9%. A mapping right
-# two times in three does not get to author a membership proposal; it goes to
-# the curator who can fix it.
+# terms in 0.75-0.90 at 88.1%, terms at or above 0.90 at 99.9%. So a mapping
+# under it is right about two times in three, and a proposal resting on one is
+# marked as such for the operator reading it.
 #
-# It is what catches `Type: Illumina Library` -> 24 DNA Extraction at purity
-# 0.707 over 2,210 samples, which drove 212 of increment 1's 250 ABSENCE_COMPAT
-# flags and 269 of the 866. No support floor in either unit touches that row.
+# It is what MARKS `Type: Illumina Library` -> 24 DNA Extraction at purity 0.707
+# over 2,210 samples, which drove 212 of increment 1's 250 ABSENCE_COMPAT flags
+# and 269 of the 866. No support floor in either unit touches that row. Note
+# MARKS and not stops: those 269 claims still reach their mode and arrive
+# carrying `GATE_LOW_SUPPORT` and the purity that earned it.
 #
-# KNOWN LIMITATION, stated because `evidence-report.md` measured it and this
-# module must not read as though it had not. Against a PEER-REGISTRATION axis --
-# of every sample carrying a term, how many are registered in the assay it names
-# -- a 0.75 purity floor sorts 151 of the 866 the wrong way, most visibly
-# `Type: Blood` at purity 0.693 and peer rate 98.7%, whose 97 flags this gate
-# routes to vocabulary curation. That is the right destination for a mapping at
-# 0.693 even so: the artifact tells a curator to fix `Blood`, which is upstream
-# of and strictly better than proposing 97 memberships on it. Peer rate is not
-# computable here -- it needs the co-registration layer Task 4 builds -- so when
-# it exists this floor should be re-derived against it rather than kept because
-# it was written first.
+# CALIBRATION IS DEFERRED TO TASK 4, AND UNTIL THEN THIS IS A REPORTING BAND.
+# It does not block. `blocks_mode` excludes `GATE_LOW_SUPPORT`, so a claim under
+# this floor is RECORDED as weak and still reaches its mode, and the number
+# ranks a curator's reading order rather than granting permission.
+#
+# The deferral is not caution, it is a measurement. `evidence-report.md` scores
+# this axis against a PEER-REGISTRATION one -- of every sample carrying a term,
+# how many are registered in the assay it names -- and finds they correlate at
+# only 0.43 and that a 0.75 purity floor sorts 151 of the 866 THE WRONG WAY. It
+# would discard `Type: Blood`'s 97 flags at 98.7% peer registration, the
+# cleanest gaps in the set, while keeping `Histopathology`'s 44 at 71.1%. Peer
+# rate is the question a curator is actually asking and it is not computable in
+# this stage; it needs the co-registration layer Task 4 builds. When that
+# exists, THIS FLOOR IS TO BE RE-DERIVED AGAINST IT rather than kept because it
+# was written first, and 0.75 is to be read as the output of that curve and not
+# as a number anyone chose.
+#
+# Blocking on the two floors would have stopped 641 of the 866 and 30,583 of
+# the 138,007 claims -- purity on an axis measured to be the wrong one --
+# silently, ahead of every mode.
 MIN_VOCAB_PURITY = 0.75
 
 
@@ -134,11 +181,27 @@ MIN_VOCAB_PURITY = 0.75
 # `family_internal_assay_ids` holds IDS and not titles. A title is display and
 # never identity here as everywhere: 124 seek assay ids collide numerically with
 # genuine internal ids under 122 different titles.
+# `gate` is the MOST SEVERE outcome and `gate_failures` is ALL of them,
+# `;`-joined in the order the tests run. The pair exists because a claim can
+# fail a blocking test and a tuned one at once -- 3,511 of the 138,007 do, and
+# one more fails both blocking tests -- and a single column collapsing to
+# whichever fired first would lose the other. On
+# the real extract that loss runs in the dangerous direction: it would hide a
+# recorded weakness behind a block, so the finding row a Task 4 operator reads
+# would show a clean mapping for a claim whose mapping is not clean.
+#
+# `gate_failures` is EMPTY for a clean claim rather than holding `GATE_PASS`. A
+# pass is the absence of a failure, and a list of failures containing "passed"
+# is a category error a consumer filtering on membership would trip over.
+#
+# NEITHER COLUMN DECIDES PASSAGE. `reaches_modes` does, through `blocks_mode`.
+# `gate == GATE_PASS` is not that test and using it drops 25,974 claims the
+# design intends to propose on.
 GATE_COLUMNS = [
     "sample_id", "uuid", "sample_type",
     "internal_assay_id", "internal_assay_title",
     "source_field", "raw_value",
-    "gate", "gate_reason",
+    "gate", "gate_failures", "gate_reason",
     "vocab_support", "vocab_n_samples", "vocab_purity", "vocab_provenance",
     "term_family", "family_internal_assay_ids",
     "type_registrations",
@@ -165,8 +228,13 @@ GATE_COLUMNS = [
 # are different numbers under names one column apart, which is this package's
 # signature hazard, so the prefix is doing real work rather than matching a
 # convention.
+#
+# `blocks_modes` is derived from `blocks_mode(defect)` at write time and is the
+# column a curator triages on: a blocking defect stopped claims from reaching a
+# mode and a non-blocking one only annotated them. Both are still defects and
+# both are still theirs to fix, which is why both are in the file.
 DEFECT_COLUMNS = [
-    "defect", "source_field", "raw_value", "sample_type",
+    "defect", "blocks_modes", "source_field", "raw_value", "sample_type",
     "internal_assay_id", "internal_assay_title",
     "vocab_support", "vocab_n_samples", "vocab_purity", "vocab_provenance",
     "term_family", "family_internal_assay_ids",
@@ -378,16 +446,56 @@ def incoherent_families(vocabulary: pd.DataFrame) -> dict[tuple[str, str], list[
 # --- the gate ----------------------------------------------------------------
 
 
+# The two outcomes that STOP a claim. Both rest on evidence with no tuned number
+# in them, which is the whole criterion for membership here: either a sample of
+# this type is registered in the claimed assay somewhere or it is not, and
+# either the term family maps coherently or it does not. Neither answer moves if
+# someone picks a different constant.
+#
+# `GATE_LOW_SUPPORT` is deliberately ABSENT. It is the outcome of two tuned
+# floors, and under "nothing decides, everything proposes" a threshold ranks and
+# triages -- it does not grant permission. See the module docstring for the
+# argument and `MIN_VOCAB_PURITY` for the measurement showing this particular
+# number is not yet calibrated on the right axis.
+#
+# This is a strict subset of `_schema.GATE_REJECTIONS`, which is the set of
+# non-PASS outcomes and NOT the set that stops a claim. The two were the same
+# thing for one revision of this module and are not any more.
+BLOCKING_OUTCOMES = (S.GATE_UNREACHABLE, S.GATE_INCOHERENT)
+
+
+def blocks_mode(outcome: str) -> bool:
+    """Does this outcome stop a claim reaching Mode 1 or Mode 2?
+
+    THE SINGLE PLACE THAT RULE LIVES. Tasks 3 through 9 call this rather than
+    re-deriving which outcomes block; a second copy of the rule is the same class
+    of bug as a second definition of "registered", which produced 13 spurious
+    findings earlier in this increment.
+
+    A MEMBERSHIP test against a closed tuple rather than a comparison against
+    `GATE_PASS`, for the reason `EVIDENCE_PROVENANCES` gives against
+    `p != P_PROPOSED`: a fifth outcome added later is admitted by the tuple
+    rather than by every consumer remembering to extend an inequality, and the
+    default for anything unanticipated is NON-blocking, which is the direction
+    that fails visibly.
+    """
+    return outcome in BLOCKING_OUTCOMES
+
+
 def reaches_modes(gated: pd.DataFrame) -> pd.Series:
     """Which gated rows are allowed to reach Mode 1 or Mode 2.
 
-    A MEMBERSHIP test against `GATE_REJECTIONS` rather than `gate == GATE_PASS`,
-    which is the shape `_schema` argues for and the same argument
-    `EVIDENCE_PROVENANCES` makes against `p != P_PROPOSED`: a fourth rejection
-    kind added later is then admitted by the tuple rather than by every consumer
-    remembering to extend an inequality.
+    Read off `gate_failures`, the COMPLETE set, and never off `gate`, which
+    holds only the most severe. A claim failing a tuned floor and nothing else
+    reaches its mode carrying a recorded weakness; a claim failing reachability
+    or coherence does not, whatever else it also failed.
+
+    Recomputed through `blocks_mode` on every call rather than read from a
+    stored boolean, so there is exactly one definition of blocking in the
+    package and no column that can drift out of agreement with it.
     """
-    return ~gated.gate.isin(S.GATE_REJECTIONS)
+    return ~gated.gate_failures.map(
+        lambda s: any(blocks_mode(o) for o in str(s).split(";") if o))
 
 
 def gate_claims(
@@ -412,13 +520,18 @@ def gate_claims(
     question about the sample's TYPE, and the claims frame cannot answer it. It
     is keyed on uuid for the reason `sample_type_index` gives.
 
-    Precedence, in order, first match winning:
+    Every test runs and every failure is recorded. NOTHING SHORT-CIRCUITS:
 
-      1. reachability   -> GATE_UNREACHABLE
-      2. curator provenance -> GATE_PASS
-      3. term family    -> GATE_INCOHERENT
-      4. either floor   -> GATE_LOW_SUPPORT
-      5.                -> GATE_PASS
+      1. reachability       -> GATE_UNREACHABLE   BLOCKS
+      2. curator provenance -> suppresses 3 and 4
+      3. term family        -> GATE_INCOHERENT    BLOCKS
+      4. either floor       -> GATE_LOW_SUPPORT   recorded, does not block
+
+    `gate` holds the first failure in that order, which is the most severe;
+    `gate_failures` holds all of them; and passage is `reaches_modes`, which is
+    neither. 3,511 of the 138,007 claims fail a blocking test AND a floor, and
+    an earlier revision reported only the first -- so the finding row for a
+    blocked claim showed a clean mapping for a mapping that is not clean.
 
     The curator exemption sits BELOW reachability and above everything else, and
     that placement is the ruling rather than an accident. A human decision
@@ -501,27 +614,41 @@ def gate_claims(
 
         thin = n_samples < min_samples
         impure = purity < min_purity
+
+        # EVERY failing test is recorded, in the order the tests run, and the
+        # loop no longer stops at the first. A claim can be unreachable AND rest
+        # on a thin mapping, and collapsing to the first would tell a Task 4
+        # operator the mapping was clean.
+        failures: list[str] = []
+        reasons: list[str] = []
         if registrations == 0:
-            gate, why = S.GATE_UNREACHABLE, (
+            failures.append(S.GATE_UNREACHABLE)
+            reasons.append(
                 f"no {stype} sample is registered in internal assay {iaid} "
                 "anywhere, so the claim is not credible")
-        elif provenance == S.P_CURATOR and (family or thin or impure):
-            gate, why = S.GATE_PASS, (
+        if provenance == S.P_CURATOR and (family or thin or impure):
+            reasons.append(
                 "a curator ruled on this mapping, which outranks the family "
                 "and both floors")
-        elif family:
-            gate, why = S.GATE_INCOHERENT, (
-                f"the {family_key[0]}/{family_key[1]} term family maps to "
-                f"{len(family)} assays: {';'.join(str(i) for i in family)}")
-        elif thin:
-            gate, why = S.GATE_LOW_SUPPORT, (
-                f"{n_samples} distinct sample(s) back this mapping, under the "
-                f"floor of {min_samples}")
-        elif impure:
-            gate, why = S.GATE_LOW_SUPPORT, (
-                f"purity {purity:.3f} is under the floor of {min_purity}")
         else:
-            gate, why = S.GATE_PASS, ""
+            if family:
+                failures.append(S.GATE_INCOHERENT)
+                reasons.append(
+                    f"the {family_key[0]}/{family_key[1]} term family maps to "
+                    f"{len(family)} assays: {';'.join(str(i) for i in family)}")
+            if thin or impure:
+                failures.append(S.GATE_LOW_SUPPORT)
+            # both floors are reported when both fire: they are one OUTCOME and
+            # two facts, and a curator fixing the mapping needs both.
+            if thin:
+                reasons.append(
+                    f"{n_samples} distinct sample(s) back this mapping, under "
+                    f"the floor of {min_samples}")
+            if impure:
+                reasons.append(
+                    f"purity {purity:.3f} is under the floor of {min_purity}")
+
+        gate = failures[0] if failures else S.GATE_PASS
 
         rows.append({
             "sample_id": int(c.sample_id),
@@ -532,7 +659,8 @@ def gate_claims(
             "source_field": c.source_field,
             "raw_value": c.raw_value,
             "gate": gate,
-            "gate_reason": why,
+            "gate_failures": ";".join(failures),
+            "gate_reason": "; ".join(reasons),
             "vocab_support": support,
             "vocab_n_samples": n_samples,
             "vocab_purity": purity,
@@ -564,6 +692,12 @@ def vocabulary_defects(
     another -- while a family split and a thin mapping are properties of the
     MAPPING.
 
+    BOTH BLOCKING AND NON-BLOCKING DEFECTS ARE HERE, and `blocks_modes` says
+    which is which. A mapping under a tuned floor no longer stops a claim
+    reaching its mode, but it is still a defect and still this curator's to fix;
+    dropping it from the file because it stopped nothing would hide the largest
+    class of vocabulary problem the layer can see -- 107 of the 202 rows today.
+
     Sorted, because this is an artifact a curator diffs between runs and the
     claims frame arrives in whatever order the extractor wrote samples.parquet,
     an order `test_assay_hygiene_stage0.py` already records as unstable across
@@ -578,24 +712,30 @@ def vocabulary_defects(
     incoherent = incoherent_families(vocabulary)
 
     # (defect, field, value, sample_type, assay) -> the claims that landed there
+    #
+    # EVERY failing test lands a claim in its own bucket, read off
+    # `gate_failures` and never off `gate`. A claim that is both unreachable and
+    # thinly supported is two defects for a curator, and keying on the most
+    # severe alone would drop the second from the file that exists to list them.
     buckets: dict[tuple, list] = defaultdict(list)
     for g in gated.itertuples(index=False):
-        if g.gate not in S.GATE_REJECTIONS:
-            continue
         value = S.normalise_value(g.raw_value)
-        if g.gate == S.GATE_UNREACHABLE:
-            key = (g.gate, str(g.source_field), value,
-                   g.sample_type, int(g.internal_assay_id))
-        else:
-            row = vocab_rows[(str(g.source_field), value)]
-            key = (g.gate, str(g.source_field), value, "",
-                   int(row.internal_assay_id))
-        buckets[key].append(g)
+        for defect in str(g.gate_failures).split(";"):
+            if not defect:
+                continue
+            if defect == S.GATE_UNREACHABLE:
+                key = (defect, str(g.source_field), value,
+                       g.sample_type, int(g.internal_assay_id))
+            else:
+                row = vocab_rows[(str(g.source_field), value)]
+                key = (defect, str(g.source_field), value, "",
+                       int(row.internal_assay_id))
+            buckets[key].append(g)
 
     # every member of every family a rejection touched, claims or not
     for key in {(str(g.source_field), term_stem(S.normalise_value(g.raw_value)))
                 for g in gated.itertuples(index=False)
-                if g.gate == S.GATE_INCOHERENT}:
+                if S.GATE_INCOHERENT in str(g.gate_failures).split(";")}:
         for r in families[key]:
             buckets.setdefault(
                 (S.GATE_INCOHERENT, str(r.source_field),
@@ -621,6 +761,7 @@ def vocabulary_defects(
         samples = sorted({int(g.sample_id) for g in hits})
         rows.append({
             "defect": defect,
+            "blocks_modes": blocks_mode(defect),
             "source_field": field,
             "raw_value": value,
             "sample_type": stype,
@@ -674,12 +815,20 @@ def main(extract_dir: str = "assay-hygiene/extract",
     counts = gated.gate.value_counts().to_dict()
     print(f"gated {len(gated):,} claims over {gated.sample_id.nunique():,} "
           f"samples against {len(vocab):,} vocabulary rows")
+    print("by most severe outcome:")
     for outcome in S.GATE_OUTCOMES:
-        print(f"  {outcome:<20} {counts.get(outcome, 0):>8,}")
-    print(f"{int((~reaches_modes(gated)).sum()):,} claims reach no mode and are "
-          f"routed to /curate-assay-vocabulary")
+        mark = "  BLOCKS" if blocks_mode(outcome) else ""
+        print(f"  {outcome:<20} {counts.get(outcome, 0):>8,}{mark}")
+    ok = reaches_modes(gated)
+    blocked = int((~ok).sum())
+    weak = int((ok & (gated.gate_failures != "")).sum())
+    print(f"BLOCKED, reaching no mode:      {blocked:>8,}")
+    print(f"reaching a mode:                {int(ok.sum()):>8,}"
+          f"  ({weak:,} of them carrying a recorded floor failure)")
     print(f"{len(defects):,} vocabulary defects written to "
-          f"{out / 'vocabulary-defects.csv'}")
+          f"{out / 'vocabulary-defects.csv'} "
+          f"({int(defects.blocks_modes.sum())} blocking, "
+          f"{int((~defects.blocks_modes).sum())} reported only)")
     if untyped:
         print(f"NOTE: {len(untyped)} registered sample(s) have no node row and "
               f"so no type; their registrations are absent from the "

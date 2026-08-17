@@ -409,9 +409,25 @@ GATE_UNREACHABLE = "GATE_UNREACHABLE"      # this TYPE is never in this assay
 GATE_INCOHERENT = "GATE_INCOHERENT"        # the term family maps to 2+ assays
 GATE_LOW_SUPPORT = "GATE_LOW_SUPPORT"      # under the support OR purity floor
 GATE_OUTCOMES = (GATE_PASS, GATE_UNREACHABLE, GATE_INCOHERENT, GATE_LOW_SUPPORT)
-# The subset that reaches no mode. Precedence rule 1 is then a membership test
-# rather than three inequalities a later edit can forget to extend -- the same
-# argument EVIDENCE_PROVENANCES makes against `p != P_PROPOSED`.
+# The non-PASS outcomes: every way the gate can find fault with a claim. A
+# membership test rather than three inequalities a later edit can forget to
+# extend -- the same argument EVIDENCE_PROVENANCES makes against
+# `p != P_PROPOSED`.
+#
+# THIS IS NOT THE SET THAT STOPS A CLAIM, and it said it was until 2026-08-17,
+# when it read "the subset that reaches no mode". That is now false, and the
+# correction is recorded here rather than quietly applied, because a stale
+# comment in the shared contract module is exactly how a consumer ends up with a
+# bucket named for what someone assumed was in it. Under the binding constraint
+# -- nothing decides, everything proposes -- a THRESHOLD ranks and triages and
+# does not grant permission, so GATE_LOW_SUPPORT, which is the outcome of two
+# tuned floors, is RECORDED on the row and does not block. GATE_UNREACHABLE and
+# GATE_INCOHERENT rest on evidence with no tuned number in them, and they do.
+#
+# `gate.blocks_mode` is the single place that rule lives and is what every
+# consumer calls. Nothing may re-derive blocking from this tuple: measured
+# 2026-08-17 on the real extract, doing so stops 30,583 of the 138,007 claims
+# where the rule stops 4,609.
 GATE_REJECTIONS = (GATE_UNREACHABLE, GATE_INCOHERENT, GATE_LOW_SUPPORT)
 
 # What a gated claim turns out to be. ABSENCE and CONTRADICTION are not the same
