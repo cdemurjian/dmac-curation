@@ -37,6 +37,16 @@ NOTHING IS DROPPED SILENTLY. Three populations cannot be resolved against the
 duplicate uuids, edge endpoints with no `samples` row, and membership rows whose
 sample has no `samples` row. The tests assert the DOCUMENTED decision for each,
 not whatever the code happens to do.
+
+THE NEIGHBOUR'S UUID IS CARRIED OUT OF THE TRAVERSAL. `FINDING_COLUMNS` needs
+`lineage_neighbour_uuid`, and the `samples` join that looks like the way to get
+it is blank for the 243 unresolved endpoints -- 182 of them registered, so any
+of them can be the neighbour that is named.
+`test_the_neighbour_uuid_comes_off_the_edge_row_and_never_from_a_samples_join`
+is the regression, and it asserts its neighbour is absent from `samples` first
+so a join-based implementation cannot pass it. A fourth population falls out of
+that: 79 edge-endpoint sample_ids carry TWO uuids, so sample_id is not a
+function to uuid here, and those are resolved by `min()` and counted too.
 """
 import re
 import sys
@@ -85,7 +95,7 @@ def _membership(*pairs):
 
 
 def _fixture_world():
-    """(children_of, parents_of, integrity, registered) for `make_fixture()`.
+    """(children_of, parents_of, uuid_of, integrity, registered) for `make_fixture()`.
 
     `registered` comes from `audit.registered_internal`, which is the package's
     single crossing of the seek `assay_assets.assay_id` namespace into the dmac
@@ -93,10 +103,10 @@ def _fixture_world():
     compare a seek id against an internal id and read every claim as an absence.
     """
     fx = S.make_fixture()
-    children_of, parents_of, integrity = L.lineage_index(
+    children_of, parents_of, uuid_of, integrity = L.lineage_index(
         fx["edges"], fx["samples"], fx["membership"])
     registered = A.registered_internal(fx["membership"], fx["assays"])
-    return children_of, parents_of, integrity, registered
+    return children_of, parents_of, uuid_of, integrity, registered
 
 
 # --- the four verdicts -------------------------------------------------------
@@ -111,12 +121,13 @@ def test_a_child_registering_the_assay_makes_the_parent_a_LIN_CHILD_absence():
     it, so a reviewer can check the claim against a specific edge rather than
     against the word of the classifier.
     """
-    children_of, parents_of, _, registered = _fixture_world()
+    children_of, parents_of, uuid_of, _, registered = _fixture_world()
     assert children_of[202] == frozenset({102})
     assert 11 in registered[102] and 11 not in registered[202]
 
     assert L.neighbour_registers(
-        202, 11, children_of, parents_of, registered) == (S.LIN_CHILD, 102)
+        202, 11, children_of, parents_of, uuid_of, registered
+    ) == (S.LIN_CHILD, 102, "D.IMG-3")
 
 
 def test_a_parent_registering_the_assay_makes_the_child_a_LIN_PARENT_absence():
@@ -128,12 +139,13 @@ def test_a_parent_registering_the_assay_makes_the_child_a_LIN_PARENT_absence():
     assay was indistinguishable from a correct one. 203 has no children at all,
     so `LIN_PARENT` here cannot be an accident of tie ordering.
     """
-    children_of, parents_of, _, registered = _fixture_world()
+    children_of, parents_of, uuid_of, _, registered = _fixture_world()
     assert 203 not in children_of, "203 has no children; the tie rule must not decide this"
     assert parents_of[203] == frozenset({500, 700})
 
     assert L.neighbour_registers(
-        203, 13, children_of, parents_of, registered) == (S.LIN_PARENT, 700)
+        203, 13, children_of, parents_of, uuid_of, registered
+    ) == (S.LIN_PARENT, 700, "PAV-1")
 
 
 def test_a_sample_that_already_registers_the_assay_has_no_absence_in_either_direction():
@@ -145,12 +157,13 @@ def test_a_sample_that_already_registers_the_assay_has_no_absence_in_either_dire
     it is already in. The second assertion is what makes the first one mean
     that -- without it the case is indistinguishable from "no neighbour has it".
     """
-    children_of, parents_of, _, registered = _fixture_world()
+    children_of, parents_of, uuid_of, _, registered = _fixture_world()
     assert 11 in registered[200]
     assert 11 in registered[100] and 100 in children_of[200]
 
     assert L.neighbour_registers(
-        200, 11, children_of, parents_of, registered) == (S.LIN_NONE, None)
+        200, 11, children_of, parents_of, uuid_of, registered
+    ) == (S.LIN_NONE, None, None)
 
 
 def test_neither_neighbour_registering_the_assay_is_LIN_NONE():
@@ -159,21 +172,23 @@ def test_neither_neighbour_registering_the_assay_is_LIN_NONE():
     301 is Mode 1's population, and Mode 1 is not this module's business: the
     lineage test establishes nothing about it, which is exactly `LIN_NONE`.
     """
-    children_of, parents_of, _, registered = _fixture_world()
+    children_of, parents_of, uuid_of, _, registered = _fixture_world()
     assert parents_of[301] == frozenset({400})
     assert 301 not in registered and 400 not in registered
 
     assert L.neighbour_registers(
-        301, 11, children_of, parents_of, registered) == (S.LIN_NONE, None)
+        301, 11, children_of, parents_of, uuid_of, registered
+    ) == (S.LIN_NONE, None, None)
 
 
 def test_a_sample_with_no_neighbours_is_LIN_NONE_and_does_not_raise():
     """An id in no edge at all, asked about. A `KeyError` here is a crashed run."""
-    children_of, parents_of, _, registered = _fixture_world()
+    children_of, parents_of, uuid_of, _, registered = _fixture_world()
     assert 999 not in children_of and 999 not in parents_of
 
     assert L.neighbour_registers(
-        999, 11, children_of, parents_of, registered) == (S.LIN_NONE, None)
+        999, 11, children_of, parents_of, uuid_of, registered
+    ) == (S.LIN_NONE, None, None)
 
 
 def test_the_returned_indexes_are_plain_dicts_so_a_lookup_cannot_invent_a_set():
@@ -191,7 +206,7 @@ def test_the_returned_indexes_are_plain_dicts_so_a_lookup_cannot_invent_a_set():
     CONSUMER does with the object it is handed, and a consumer writing
     `children_of[sample_id]` is the natural spelling.
     """
-    children_of, parents_of, _, _ = _fixture_world()
+    children_of, parents_of, _, _, _ = _fixture_world()
 
     with pytest.raises(KeyError):
         children_of[999]
@@ -217,17 +232,19 @@ def test_LIN_CHILD_wins_a_tie_because_ADD_PARENT_is_the_evidenced_direction():
     `LIN_CHILD` because `LIN_PARENT` was unreachable.
     """
     edges = _edges((10, 20), (20, 30))
-    children_of, parents_of, _ = L.lineage_index(
+    children_of, parents_of, uuid_of, _ = L.lineage_index(
         edges, _samples(10, 20, 30), _membership((10, 1), (20, 2), (30, 1)))
     assert children_of[20] == frozenset({10}) and parents_of[20] == frozenset({30})
 
     both = {10: {5}, 20: {6}, 30: {5}}
     assert L.neighbour_registers(
-        20, 5, children_of, parents_of, both) == (S.LIN_CHILD, 10)
+        20, 5, children_of, parents_of, uuid_of, both
+    ) == (S.LIN_CHILD, 10, "S-10")
 
     parent_only = {10: {6}, 20: {6}, 30: {5}}
     assert L.neighbour_registers(
-        20, 5, children_of, parents_of, parent_only) == (S.LIN_PARENT, 30)
+        20, 5, children_of, parents_of, uuid_of, parent_only
+    ) == (S.LIN_PARENT, 30, "S-30")
 
 
 def test_the_lowest_qualifying_neighbour_is_returned_when_several_register_it():
@@ -246,17 +263,18 @@ def test_the_lowest_qualifying_neighbour_is_returned_when_several_register_it():
     and only a sorted pick answers 1.
     """
     edges = _edges((16, 20), (8, 20), (1, 20))
-    children_of, parents_of, _ = L.lineage_index(
+    children_of, parents_of, uuid_of, _ = L.lineage_index(
         edges, _samples(1, 8, 16, 20), _membership((20, 1)))
     assert list(children_of[20]) != sorted(children_of[20]), (
         "the fixture no longer discriminates: this set iterates in sorted order")
     registered = {1: {5}, 8: {5}, 16: {5}}
 
     assert L.neighbour_registers(
-        20, 5, children_of, parents_of, registered) == (S.LIN_CHILD, 1)
+        20, 5, children_of, parents_of, uuid_of, registered
+    ) == (S.LIN_CHILD, 1, "S-1")
 
 
-def test_neighbours_registering_names_every_support_in_both_directions():
+def test_lineage_supports_names_every_support_in_both_directions():
     """Task 6 has to record that a proposal had MULTIPLE supports, and needs them all.
 
     `neighbour_registers` collapses the answer to one relation and one
@@ -266,31 +284,133 @@ def test_neighbours_registering_names_every_support_in_both_directions():
     disagree about which neighbours qualified.
     """
     edges = _edges((10, 20), (11, 20), (20, 30), (20, 31))
-    children_of, parents_of, _ = L.lineage_index(
+    children_of, parents_of, uuid_of, _ = L.lineage_index(
         edges, _samples(10, 11, 20, 30, 31), _membership((20, 1)))
     registered = {10: {5}, 11: {5}, 20: {6}, 30: {5}, 31: {7}}
 
-    assert L.neighbours_registering(
+    assert L.lineage_supports(
         20, 5, children_of, parents_of, registered) == ([10, 11], [30])
     # ...and the collapsed answer is drawn from exactly those lists
     assert L.neighbour_registers(
-        20, 5, children_of, parents_of, registered) == (S.LIN_CHILD, 10)
+        20, 5, children_of, parents_of, uuid_of, registered
+    ) == (S.LIN_CHILD, 10, "S-10")
+
+
+def test_the_neighbour_uuid_comes_off_the_edge_row_and_never_from_a_samples_join():
+    """TIS 500 has NO `samples` row, and its uuid still reaches the caller.
+
+    `FINDING_COLUMNS` requires `lineage_neighbour_uuid`. Handing a consumer only
+    a neighbour sample_id makes the natural way to get that uuid a join through
+    `samples.uuid` -- and that join is blank for the 243 edge endpoints with no
+    `samples` row, 182 of which are registered and can therefore BE the named
+    neighbour. The lossy path would blank the uuid on exactly the population
+    this module fought to keep, in the artifact a curator reads.
+
+    500 is that shape in miniature: registered in 11 Comet Chip, parent of 203,
+    absent from `samples`. The assertion that it IS absent is what makes the
+    rest of this test mean anything -- without it a `samples` join would pass.
+    """
+    children_of, parents_of, uuid_of, _, registered = _fixture_world()
+    fx = S.make_fixture()
+    assert 500 not in set(fx["samples"].sample_id), (
+        "500 gained a samples row; this test no longer excludes the join")
+
+    assert uuid_of[500] == "MUS-1"
+    assert L.neighbour_registers(
+        203, 11, children_of, parents_of, uuid_of, registered
+    ) == (S.LIN_PARENT, 500, "MUS-1")
+
+
+def test_uuid_of_is_total_over_the_index_so_no_neighbour_is_named_without_one():
+    """Every id reachable as a neighbour has a uuid, by construction not by luck.
+
+    `neighbour_registers` subscripts `uuid_of` with the neighbour it chose, so a
+    partial map raises `KeyError` mid-run rather than returning a blank. The
+    invariant making that subscript safe is that both indexes are built from the
+    same edge rows the uuids are read off. Asserted rather than trusted.
+    """
+    children_of, parents_of, uuid_of, _, _ = _fixture_world()
+
+    reachable = {n for ns in children_of.values() for n in ns}
+    reachable |= {n for ns in parents_of.values() for n in ns}
+    reachable |= set(children_of) | set(parents_of)
+    assert reachable and reachable <= set(uuid_of)
+
+
+def test_a_sample_id_carrying_two_uuids_resolves_to_the_lowest_and_is_counted():
+    """sample_id is NOT a function to uuid here, and picking silently is the bug.
+
+    Measured on the 2026-08-14 extract, 79 edge-endpoint sample_ids carry TWO
+    uuids across the edge rows and 38 of them are registered. It is the same
+    86-sample collision `gate.sample_type_index` documents, and it is why THAT
+    index is keyed on uuid rather than on sample_id.
+
+    Resolution is `min()` and never "the last row seen": the extractor's row
+    order is not stable across extracts, so a positional rule would change the
+    uuid printed on a curator's row between two runs over identical data. The
+    frame here presents the HIGHER uuid first, so a last-write-wins
+    implementation returns the other one and fails.
+
+    Neither uuid is more correct than the other -- the graph holds two node rows
+    for one id -- so the COUNT is the point: the operator is told by name which
+    samples were resolved rather than read.
+    """
+    edges = _edges((5, 20), (5, 21))
+    edges.loc[0, "child_uuid"] = "Z-second"
+    edges.loc[1, "child_uuid"] = "A-first"
+
+    children_of, parents_of, uuid_of, integrity = L.lineage_index(
+        edges, _samples(5, 20, 21), _membership((5, 1)))
+
+    assert uuid_of[5] == "A-first"
+    assert integrity["ambiguous_uuid_samples"] == [5]
+    # ...and an unambiguous neighbour is untouched by the rule
+    assert uuid_of[20] == "S-20"
+    assert L.neighbour_registers(
+        20, 9, children_of, parents_of, uuid_of, {5: {9}}
+    ) == (S.LIN_CHILD, 5, "A-first")
+
+
+def test_the_two_lineage_functions_cannot_be_swapped_for_one_another():
+    """Call the wrong one and it must raise, not return a plausible shape.
+
+    `neighbours_registering` and `neighbour_registers` differed by one character
+    and both returned a 2-tuple, so `relation, neighbour = <plural>(...)` bound a
+    LIST to `relation`, `relation == S.LIN_CHILD` was quietly False, and the
+    proposal was dropped with no exception, no warning and no row-count
+    anomaly -- this branch's named failure class, at the interface Tasks 6 and 8
+    dispatch against.
+
+    The names are now distinct AND so are the shapes: 5 arguments returning a
+    2-tuple against 6 returning a 3-tuple. This asserts the SHAPES, because a
+    rename on its own is a convention and a convention is not a test.
+    """
+    children_of, parents_of, uuid_of, _, registered = _fixture_world()
+    plural = (202, 11, children_of, parents_of, registered)
+    singular = (202, 11, children_of, parents_of, uuid_of, registered)
+
+    assert len(L.lineage_supports(*plural)) == 2
+    assert len(L.neighbour_registers(*singular)) == 3
+    with pytest.raises(TypeError):
+        L.lineage_supports(*singular)
+    with pytest.raises(TypeError):
+        L.neighbour_registers(*plural)
 
 
 def test_a_sample_that_already_registers_the_assay_names_no_supports():
     """The self-registration guard lives in ONE place, and this is the proof.
 
-    `neighbour_registers` is a collapse of `neighbours_registering`, so if the
+    `neighbour_registers` is a collapse of `lineage_supports`, so if the
     guard were only in the collapse then Task 6's multiple-support count would
     still be non-zero for a sample with nothing absent, and the row would be
     reported as corroborated by two neighbours while proposing nothing.
     """
     edges = _edges((10, 20))
-    children_of, parents_of, _ = L.lineage_index(
+    children_of, parents_of, uuid_of, _ = L.lineage_index(
         edges, _samples(10, 20), _membership((20, 1)))
     registered = {10: {5}, 20: {5}}
 
-    assert L.neighbours_registering(
+    assert L.lineage_supports(
         20, 5, children_of, parents_of, registered) == ([], [])
 
 
@@ -320,7 +440,7 @@ def test_two_sample_ids_on_one_uuid_are_counted_and_neither_borrows_the_others_l
     """
     samples = _samples((1, "U-1"), (2, "U-1"), (3, "U-3"))
     edges = _edges((2, 3))
-    children_of, parents_of, integrity = L.lineage_index(
+    children_of, parents_of, uuid_of, integrity = L.lineage_index(
         edges, samples, _membership((1, 7), (2, 7)))
 
     assert integrity["dup_uuid_rows"] == 2
@@ -329,7 +449,8 @@ def test_two_sample_ids_on_one_uuid_are_counted_and_neither_borrows_the_others_l
     assert parents_of[2] == frozenset({3})
     assert 1 not in parents_of and 1 not in children_of
     assert L.neighbour_registers(
-        1, 5, children_of, parents_of, {3: {5}}) == (S.LIN_NONE, None)
+        1, 5, children_of, parents_of, uuid_of, {3: {5}}
+    ) == (S.LIN_NONE, None, None)
 
 
 def test_an_edge_endpoint_absent_from_samples_is_counted_and_kept_as_a_neighbour():
@@ -343,7 +464,7 @@ def test_an_edge_endpoint_absent_from_samples_is_counted_and_kept_as_a_neighbour
     So they are RETAINED and counted, which is what "nothing is dropped
     silently" means when the row is still usable.
     """
-    _, parents_of, integrity, _ = _fixture_world()
+    _, parents_of, _, integrity, _ = _fixture_world()
 
     assert integrity["unresolved_edges"] == 3
     assert integrity["unresolved_samples"] == [201, 400, 500]
@@ -364,7 +485,7 @@ def test_unresolved_edges_counts_edge_rows_and_unresolved_samples_counts_endpoin
     On the real extract the two readings are 979 and 243.
     """
     edges = _edges((1, 99), (2, 99), (3, 99))
-    _, _, integrity = L.lineage_index(
+    _, _, _, integrity = L.lineage_index(
         edges, _samples(1, 2, 3), _membership((1, 7)))
 
     assert integrity["unresolved_edges"] == 3
@@ -383,14 +504,15 @@ def test_a_neighbour_in_membership_but_absent_from_samples_still_settles_the_abs
     In `make_fixture`, TIS 500 is exactly this: registered in 11 Comet Chip,
     absent from `samples`, and the parent of TIS 203, which lacks 11.
     """
-    children_of, parents_of, integrity, registered = _fixture_world()
+    children_of, parents_of, uuid_of, integrity, registered = _fixture_world()
 
     assert integrity["membership_without_sample"] == [201, 500]
     assert integrity["membership_without_sample_rows"] == 3
     assert 11 in registered[500]
 
     assert L.neighbour_registers(
-        203, 11, children_of, parents_of, registered) == (S.LIN_PARENT, 500)
+        203, 11, children_of, parents_of, uuid_of, registered
+    ) == (S.LIN_PARENT, 500, "MUS-1")
 
 
 def test_a_self_loop_is_excluded_so_a_sample_cannot_settle_its_own_absence():
@@ -404,7 +526,7 @@ def test_a_self_loop_is_excluded_so_a_sample_cannot_settle_its_own_absence():
     independent and the bug is invisible if only one of them is checked.
     """
     edges = _edges((10, 10), (10, 20))
-    children_of, parents_of, integrity = L.lineage_index(
+    children_of, parents_of, uuid_of, integrity = L.lineage_index(
         edges, _samples(10, 20), _membership((10, 1)))
 
     assert integrity["self_loop_edges"] == 1
@@ -424,7 +546,7 @@ def test_duplicate_edge_rows_are_counted_because_a_set_collapses_them_silently()
     row that entered and did not leave, so it is counted.
     """
     edges = _edges((10, 20), (10, 20), (11, 20))
-    children_of, _, integrity = L.lineage_index(
+    children_of, _, _, integrity = L.lineage_index(
         edges, _samples(10, 11, 20), _membership((20, 1)))
 
     assert integrity["edge_rows"] == 3
@@ -444,7 +566,7 @@ def test_integrity_names_every_population_even_when_all_of_them_are_empty():
     is a sorted list of SAMPLE IDS, and its `len()` is the sample-level figure.
     """
     edges = _edges((10, 20))
-    _, _, integrity = L.lineage_index(
+    _, _, _, integrity = L.lineage_index(
         edges, _samples(10, 20), _membership((10, 1), (20, 1)))
 
     assert set(integrity) == set(L.INTEGRITY_KEYS)
@@ -457,6 +579,7 @@ def test_integrity_names_every_population_even_when_all_of_them_are_empty():
         "unresolved_samples": [],
         "dup_uuid_rows": 0,
         "dup_uuid_samples": [],
+        "ambiguous_uuid_samples": [],
         "membership_without_sample": [],
         "membership_without_sample_rows": 0,
     }
@@ -464,7 +587,7 @@ def test_integrity_names_every_population_even_when_all_of_them_are_empty():
 
 def test_an_empty_edge_frame_yields_two_empty_indexes_and_does_not_raise():
     """The degenerate input, because `main` runs against whatever is on disk."""
-    children_of, parents_of, integrity = L.lineage_index(
+    children_of, parents_of, uuid_of, integrity = L.lineage_index(
         _edges(), _samples(10), _membership((10, 1)))
 
     assert children_of == {} and parents_of == {}
@@ -493,8 +616,11 @@ def test_the_real_extract_reproduces_the_integrity_figures_this_module_documents
     endpoints, and that is the number this module reports.
     """
     edges, samples, membership = _extract()
-    _, _, integrity = L.lineage_index(edges, samples, membership)
+    children_of, parents_of, uuid_of, integrity = L.lineage_index(
+        edges, samples, membership)
 
+    assert (set(children_of) | set(parents_of)) <= set(uuid_of), (
+        "uuid_of is not total over the index on the real extract")
     assert integrity["edge_rows"] == 794_593
     assert integrity["duplicate_edge_pairs"] == 1
     assert integrity["self_loop_edges"] == 1
@@ -503,6 +629,7 @@ def test_the_real_extract_reproduces_the_integrity_figures_this_module_documents
     assert len(integrity["unresolved_samples"]) == 243
     assert integrity["dup_uuid_rows"] == 28
     assert len(set(samples.uuid[samples.uuid.duplicated(keep=False)])) == 14
+    assert len(integrity["ambiguous_uuid_samples"]) == 79
     assert len(integrity["membership_without_sample"]) == 362
     assert integrity["membership_without_sample_rows"] == 368
 
@@ -516,7 +643,7 @@ def test_dropping_the_unresolved_endpoints_would_delete_registered_neighbours():
     neighbours and the loss would be invisible in every artifact.
     """
     edges, samples, membership = _extract()
-    _, _, integrity = L.lineage_index(edges, samples, membership)
+    _, _, _, integrity = L.lineage_index(edges, samples, membership)
 
     registered_ids = set(membership.sample_id.astype(int))
     lost = sorted(set(integrity["unresolved_samples"]) & registered_ids)
@@ -547,14 +674,14 @@ def test_the_two_relations_are_not_interchangeable_on_the_real_extract():
     childof = pd.read_parquet(EXTRACT / "childof.parquet")
     nodes = pd.read_parquet(EXTRACT / "nodes.parquet")
 
-    df_children, df_parents, _ = L.lineage_index(edges, samples, membership)
+    df_children, df_parents, _, _ = L.lineage_index(edges, samples, membership)
 
     ids = dict(zip(nodes.uuid, nodes.sample_id.astype(int)))
     co = pd.DataFrame(
         [(ids[c], ids[p], c, p, "T", "T", None, None, None)
          for c, p in zip(childof.child_uuid, childof.parent_uuid)],
         columns=S.EDGE_COLUMNS)
-    co_children, co_parents, _ = L.lineage_index(co, samples, membership)
+    co_children, co_parents, _, _ = L.lineage_index(co, samples, membership)
 
     everyone = set(df_children) | set(df_parents) | set(co_children) | set(co_parents)
     empty = frozenset()

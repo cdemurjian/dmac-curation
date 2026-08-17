@@ -59,9 +59,15 @@ Collection at 0.931 while the parent's flows down under 56 Patient Visit at
 0.006. The mechanism is that a sample has ONE producing assay and many
 consuming ones, so "the child is in X" pins the parent tightly while "the
 parent is in X" says little about any one child. So when both directions are
-available `neighbour_registers` reports LIN_CHILD, and
-`neighbours_registering` hands the caller both lists so nothing is hidden by
-that choice.
+available `neighbour_registers` reports LIN_CHILD, and `lineage_supports` hands
+the caller both lists so nothing is hidden by that choice.
+
+THE NEIGHBOUR'S UUID COMES OUT OF THE TRAVERSAL, NOT OUT OF A `samples` JOIN.
+`FINDING_COLUMNS` needs `lineage_neighbour_uuid`, and the join that looks like
+the way to get it is blank for the 243 edge endpoints with no `samples` row --
+182 of which are registered and can be the named neighbour. `uuid_of` is
+returned beside the two indexes and `neighbour_registers` hands the uuid back
+directly, so the lossy path is never the convenient one.
 
 NOTHING DECIDES. This module proposes nothing, writes nothing and reads no
 database. It builds two dicts and answers a question about them.
@@ -98,6 +104,7 @@ INTEGRITY_KEYS = (
     "unresolved_samples",
     "dup_uuid_rows",
     "dup_uuid_samples",
+    "ambiguous_uuid_samples",
     "membership_without_sample",
     "membership_without_sample_rows",
 )
@@ -107,11 +114,23 @@ def lineage_index(
     edges: pd.DataFrame,
     samples: pd.DataFrame,
     membership: pd.DataFrame,
-) -> tuple[dict[int, frozenset[int]], dict[int, frozenset[int]], dict]:
-    """-> (children_of, parents_of, integrity), keyed by sample_id, over DERIVED_FROM.
+) -> tuple[dict[int, frozenset[int]], dict[int, frozenset[int]],
+           dict[int, str], dict]:
+    """-> (children_of, parents_of, uuid_of, integrity), keyed by sample_id.
 
-    `children_of[s]` is every sample DERIVED FROM `s`; `parents_of[s]` is every
-    sample `s` was derived from.
+    Over DERIVED_FROM. `children_of[s]` is every sample DERIVED FROM `s`;
+    `parents_of[s]` is every sample `s` was derived from.
+
+    `uuid_of` IS CARRIED OUT OF THIS TRAVERSAL AND IS NOT A `samples` JOIN, and
+    that is the whole reason it exists. `FINDING_COLUMNS` demands
+    `lineage_neighbour_uuid`, so a consumer handed only a neighbour sample_id
+    has to recover the uuid, and the natural spelling is a join through
+    `samples.uuid` -- the exact path this docstring documents below as lossy.
+    It would blank the uuid on the 243 unresolved endpoints, 182 of which are
+    registered and can therefore BE the named neighbour, in the artifact a
+    curator reads. `EDGE_COLUMNS` carries `child_uuid` / `parent_uuid` on every
+    row, so the uuid costs one dict and no join. It is total over every id in
+    `children_of` and `parents_of` by construction, and a test asserts that.
 
     THE SIGNATURE DROPS THE `assays` ARGUMENT THE BRIEF SPECIFIED, and takes
     `samples` and `membership` for one purpose each. `edges.child_id` /
@@ -166,6 +185,23 @@ def lineage_index(
                            `neighbour_registers` reads `registered` and never
                            `samples`, so these register assays like any other
                            sample.
+      ambiguous_uuid_      79 edge-endpoint sample_ids carry TWO uuids across
+      samples              the edge rows, 38 of them registered. SAMPLE_ID IS
+                           NOT A FUNCTION TO UUID ON THIS EXTRACT, which is the
+                           same 86-sample collision `gate.sample_type_index`
+                           documents and is why that index is keyed on uuid.
+                           `uuid_of` therefore resolves to the LEXICOGRAPHICALLY
+                           LOWEST of them, which is stable under any row order,
+                           and names every affected sample rather than picking
+                           silently -- last-write-wins over a frame whose row
+                           order is not stable across extracts is precisely the
+                           silent-wrong-answer bug this package is shaped to
+                           avoid. Neither uuid is more correct than the other;
+                           the graph genuinely holds two node rows for one id.
+                           The neighbour SET stays keyed on sample_id, because
+                           keying it on (id, uuid) would count these 79 as two
+                           neighbours apiece, which is worse than naming one
+                           uuid and saying so.
 
     Two more populations leave the index and are counted:
 
@@ -199,12 +235,21 @@ def lineage_index(
     self_loop_edges = 0
     self_loops: set[int] = set()
     endpoints: set[int] = set()
+    seen_uuids: dict[int, set[str]] = {}
 
-    for raw_child, raw_parent in zip(edges.child_id, edges.parent_id):
+    for raw_child, raw_parent, child_uuid, parent_uuid in zip(
+        edges.child_id, edges.parent_id, edges.child_uuid, edges.parent_uuid
+    ):
         edge_rows += 1
         child, parent = int(raw_child), int(raw_parent)
         endpoints.add(child)
         endpoints.add(parent)
+        # Recorded from EVERY row, including the self-loops and duplicate pairs
+        # the index drops: those rows are still evidence of how an id and a uuid
+        # pair up, and a neighbour reached through a different row would
+        # otherwise have no uuid at all.
+        seen_uuids.setdefault(child, set()).add(str(child_uuid))
+        seen_uuids.setdefault(parent, set()).add(str(parent_uuid))
         if child == parent:
             self_loop_edges += 1
             self_loops.add(child)
@@ -232,6 +277,12 @@ def lineage_index(
     missing_set = set(missing_membership)
     missing_rows = sum(1 for s in membership.sample_id if int(s) in missing_set)
 
+    # min(), never "the last one seen": the extractor's row order is not stable
+    # across extracts, so a positional rule would change the uuid printed on a
+    # curator's row between two runs over identical data.
+    uuid_of = {sid: min(us) for sid, us in seen_uuids.items()}
+    ambiguous = sorted(sid for sid, us in seen_uuids.items() if len(us) > 1)
+
     integrity = {
         "edge_rows": edge_rows,
         "duplicate_edge_pairs": duplicate_pairs,
@@ -241,6 +292,7 @@ def lineage_index(
         "unresolved_samples": unresolved,
         "dup_uuid_rows": len(dup_uuid),
         "dup_uuid_samples": dup_uuid,
+        "ambiguous_uuid_samples": ambiguous,
         "membership_without_sample": missing_membership,
         "membership_without_sample_rows": missing_rows,
     }
@@ -252,11 +304,12 @@ def lineage_index(
     return (
         {s: frozenset(v) for s, v in children.items()},
         {s: frozenset(v) for s, v in parents.items()},
+        uuid_of,
         integrity,
     )
 
 
-def neighbours_registering(
+def lineage_supports(
     sample_id: int,
     assay_id: int,
     children_of: dict[int, frozenset[int]],
@@ -265,13 +318,25 @@ def neighbours_registering(
 ) -> tuple[list[int], list[int]]:
     """-> (children registering it, parents registering it), each sorted ascending.
 
+    NAMED `lineage_supports` AND NOT `neighbours_registering`, which is one
+    character from `neighbour_registers` and returned a 2-tuple exactly as that
+    function did. Calling the wrong one bound a `list` to `relation`,
+    `relation == S.LIN_CHILD` was quietly False, and the proposal vanished with
+    no exception, no warning and no row-count anomaly -- this branch's named
+    failure class, reproduced at the interface two unwritten tasks dispatch
+    against. The names are now structurally distinct AND the shapes are: this
+    returns a 2-tuple from 5 arguments, `neighbour_registers` returns a 3-tuple
+    from 6, so a call swapped in either direction raises `TypeError` on the
+    argument count instead of returning something plausible.
+
     The full evidence behind one lineage verdict. `neighbour_registers` is this
     function collapsed to one relation and one neighbour, which is what a
     classifier keys on; these lists are what a curator reads, and Task 6 counts
     the supports behind a proposal from them -- a `(sample, assay)` pair
     reachable from two neighbours is ONE write and has to record that it had
     two supports. Both readings come from this one scan so they cannot disagree
-    about which neighbours qualified.
+    about which neighbours qualified. Resolve any of these ids to a uuid through
+    `uuid_of`, never through a `samples` join.
 
     RETURNS TWO EMPTY LISTS IF `sample_id` ITSELF REGISTERS `assay_id`, and the
     guard lives here rather than in the collapse. Nothing is absent from a
@@ -307,36 +372,50 @@ def neighbour_registers(
     assay_id: int,
     children_of: dict[int, frozenset[int]],
     parents_of: dict[int, frozenset[int]],
+    uuid_of: dict[int, str],
     registered: dict[int, set[int]],
-) -> tuple[str, int | None]:
-    """-> (LIN_CHILD | LIN_PARENT | LIN_NONE, neighbour sample_id or None).
+) -> tuple[str, int | None, str | None]:
+    """-> (LIN_CHILD | LIN_PARENT | LIN_NONE, neighbour sample_id, neighbour uuid).
 
-    The neighbour is returned so a reviewer can check the verdict against a
-    specific edge rather than against the word of the classifier.
+    The last two are `None` together on `LIN_NONE`, and never `None` otherwise:
+    `uuid_of` is total over every id in the two indexes by construction.
+
+    THE UUID IS RETURNED HERE RATHER THAN LEFT TO THE CALLER because
+    `FINDING_COLUMNS` requires `lineage_neighbour_uuid` and the only other way
+    to get it is a `samples` join, which is blank for the 243 unresolved
+    endpoints -- 182 of them registered, so any of them can be the neighbour
+    this function names. Handing back an id alone made the lossy path the
+    natural one. `uuid_of` comes out of `lineage_index` beside the two indexes.
 
     LIN_CHILD BEATS LIN_PARENT WHEN BOTH ARE AVAILABLE. LIN_CHILD means a child
     carries the assay and the PARENT's registration is missing, which is
     A_ADD_PARENT: corroborated 88 times out of 88 against 15 of 263 for the
     mirror, and 0.931 against 0.006 on the hop that justified Mode 2. Reporting
     the mirror when the strong direction is available would propose the weaker
-    of two writes with no note that a better one existed. `neighbours_
-    registering` returns both lists whole, so the choice hides nothing.
+    of two writes with no note that a better one existed. `lineage_supports`
+    returns both lists whole, so the choice hides nothing.
 
     LIN_NONE MEANS NO ABSENCE IS ESTABLISHED IN EITHER DIRECTION, which covers
     two situations that are the same answer here and different everywhere else:
     no neighbour carries the assay, and `sample_id` already carries it itself.
-    The second is why `LINEAGE_RELATIONS` needs no fourth member -- a sample
-    that already holds the assay has nothing absent to point a direction at.
-    Task 6 still drops a sample already registered in the assay on its own
-    account; the two guards are independent and both are cheap.
+    Both mean PROPOSE NOTHING, which is why they share an outcome and why
+    `LINEAGE_RELATIONS` needs no fourth member -- a sample that already holds
+    the assay has nothing absent to point a direction at. Task 6 still drops a
+    sample already registered in the assay on its own account; the two guards
+    are independent and both are cheap.
+
+    SIX ARGUMENTS AND A 3-TUPLE, against `lineage_supports`' five and a 2-tuple.
+    That is deliberate: a call swapped between the two raises `TypeError` on the
+    argument count rather than returning a plausible shape. See
+    `lineage_supports`.
     """
-    kids, rents = neighbours_registering(
+    kids, rents = lineage_supports(
         sample_id, assay_id, children_of, parents_of, registered)
     if kids:
-        return (S.LIN_CHILD, kids[0])
+        return (S.LIN_CHILD, kids[0], uuid_of[kids[0]])
     if rents:
-        return (S.LIN_PARENT, rents[0])
-    return (S.LIN_NONE, None)
+        return (S.LIN_PARENT, rents[0], uuid_of[rents[0]])
+    return (S.LIN_NONE, None, None)
 
 
 def main(extract_dir: str = "assay-hygiene/extract") -> int:
@@ -352,9 +431,13 @@ def main(extract_dir: str = "assay-hygiene/extract") -> int:
     samples = pd.read_parquet(d / "samples.parquet")
     membership = pd.read_parquet(d / "membership.parquet")
 
-    children_of, parents_of, integrity = lineage_index(edges, samples, membership)
+    children_of, parents_of, uuid_of, integrity = lineage_index(
+        edges, samples, membership)
 
     connected = set(children_of) | set(parents_of)
+    assert connected <= set(uuid_of), (
+        "uuid_of must be total over the index; a neighbour with no uuid would "
+        "reach FINDING_COLUMNS.lineage_neighbour_uuid blank")
     print(f"DERIVED_FROM lineage over {integrity['edge_rows']:,} edge rows: "
           f"{len(connected):,} samples with at least one neighbour "
           f"({len(children_of):,} with a child, {len(parents_of):,} with a parent)")
