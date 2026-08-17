@@ -828,10 +828,19 @@ def _gated(*rows):
 def _census_world():
     """A world where every census outcome is reached by exactly one sample.
 
-        pop(CEN,25) =  55  zero against 33   -> counter-evidence, SMALL
-        pop(CEN,31) = 203  zero against 33   -> counter-evidence, LARGE
-        pop(CEN,26) =  41  10 also in 33     -> 0.244, BAND_SOMETIMES
-        pop(CEN,32) =  44  36 also in 33     -> 0.818, BAND_ROUTINE
+        pop(CEN,25) =  56  zero against 33   -> counter-evidence, SMALL
+        pop(CEN,31) = 204  zero against 33   -> counter-evidence, LARGE
+        pop(CEN,26) =  41  10 of 41 in 33    -> 0.244, BAND_SOMETIMES
+        pop(CEN,32) =  45  36 of 45 in 33    -> 0.800, BAND_ROUTINE
+
+    THESE FOUR MOVED WHEN 9010 WAS ADDED and this block was not swept with them:
+    it read 55 / 203 / 41 / 44 and a rate of 0.818 until 2026-08-17. 9010 is
+    typed CEN and registered in 25, 31 and 32, so it joined three of the four
+    denominators; only 26, which it does not hold, is unchanged. EVERY BAND IS
+    THE SAME, which is exactly why no assertion caught it -- the tests here
+    assert bands and counts, and a docstring is the only place a population is
+    stated. That is the defect class this file spent four review rounds
+    removing, reintroduced by the commit that removed it one docstring over.
 
     THE `BAND_SOMETIMES` WINNER (26) IS WHAT SEPARATES THE TWO CONFLICT SENSES.
     Without it every conflicted row in this world bands ROUTINE, so
@@ -885,7 +894,15 @@ def _census_world():
 
 
 def test_the_census_counts_only_rows_a_finding_could_actually_be_written_for():
-    """Each of the four population rules excludes a sample this world contains.
+    """Every one of the five population rules is reached by a sample here.
+
+    NOT "each of the four rules EXCLUDES a sample", which is what this line said
+    until 2026-08-17 and which is false twice over: there are FIVE rules, and
+    rule 4 is a multiplicity rule that excludes nothing. The body below had
+    already been corrected and contradicted this line in two places. Four of the
+    five rules do exclude something -- 9003 by rule 1, 9009 by rule 2, 9006 by
+    rule 3, 9011 by rule 5 -- and rule 4 is demonstrated by 9010 being counted
+    TWICE instead.
 
     THE MEASUREMENT THAT JUSTIFIED A SCHEMA CHANGE HAS TO BE COMPUTABLE.
     `co_reg_alt_label_internal_assay_id` and `co_reg_alt_label_pop` were added
