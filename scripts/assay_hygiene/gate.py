@@ -676,8 +676,24 @@ def gate_claims(
 def vocabulary_defects(
     gated: pd.DataFrame,
     vocabulary: pd.DataFrame,
+    min_samples: int = MIN_VOCAB_SAMPLES,
+    min_purity: float = MIN_VOCAB_PURITY,
 ) -> pd.DataFrame:
     """The gate's one artifact: what a curator has to fix, never what to write.
+
+    **PASS THE SAME FLOORS `gate_claims` WAS GIVEN.** They default to the module
+    constants, which is right only while the caller took the defaults too. This
+    function states the floors in the `detail` a curator reads, and it cannot
+    see the arguments the ruling was actually made under, so a caller gating at
+    one pair and reporting at another prints two numbers for one concept -- a
+    per-claim reason naming a floor of 0.95 beside a defect row naming 0.75, in
+    the artifact the triage happens in. That is the defect class this package
+    polices in nine other places, and it is inert today only because `main`
+    takes the defaults for both calls.
+    It will not stay inert: `MIN_VOCAB_PURITY` commits Task 4 to re-deriving
+    that floor against peer rate, and the first sweep at a new value is exactly
+    the call that diverges. `main` binds the pair once, in one place, and hands
+    the same two values to both functions.
 
     THE WHOLE FAMILY IS EMITTED, including members no claim rests on. On the
     real vocabulary `flowjo 10.8.1` backs 0 of the 138,007 claims while sitting
@@ -756,8 +772,9 @@ def vocabulary_defects(
         else:
             n = int(row.n_samples) if pd.notna(row.n_samples) else 0
             p = float(row.purity) if pd.notna(row.purity) else 0.0
+            # the floors this run APPLIED, never the module defaults
             detail = (f"{n} distinct sample(s) at purity {p:.3f}, against floors "
-                      f"of {MIN_VOCAB_SAMPLES} samples and {MIN_VOCAB_PURITY}")
+                      f"of {min_samples} samples and {min_purity}")
         samples = sorted({int(g.sample_id) for g in hits})
         rows.append({
             "defect": defect,
@@ -788,12 +805,21 @@ def vocabulary_defects(
 
 
 def main(extract_dir: str = "assay-hygiene/extract",
-         out_dir: str = "assay-hygiene") -> int:
+         out_dir: str = "assay-hygiene",
+         min_samples: int = MIN_VOCAB_SAMPLES,
+         min_purity: float = MIN_VOCAB_PURITY) -> int:
     """Gate every claim on disk and write `vocabulary-defects.csv`.
 
     Read-only. It reads five files and writes one, and the one it writes is
     routed to `/curate-assay-vocabulary` and to no mode. `claims.parquet` and
     `vocabulary.csv` are inputs and are left byte-identical; a test asserts it.
+
+    THE TWO FLOORS ARE BOUND ONCE HERE and handed to both `gate_claims` and
+    `vocabulary_defects`, so the number a claim was ruled under and the number
+    the curator's file states cannot diverge. They are parameters rather than
+    constants read twice because Task 4 is committed to re-deriving the purity
+    floor, and a sweep is the caller that would otherwise set one and not the
+    other.
     """
     from . import vocabulary as V   # local: keeps the module import-light
 
@@ -808,8 +834,10 @@ def main(extract_dir: str = "assay-hygiene/extract",
 
     untyped = untyped_registration_samples(membership, nodes)
     type_reg = type_registration_index(membership, assays, nodes)
-    gated = gate_claims(claims, vocab, type_reg, sample_type_index(nodes))
-    defects = vocabulary_defects(gated, vocab)
+    gated = gate_claims(claims, vocab, type_reg, sample_type_index(nodes),
+                        min_samples=min_samples, min_purity=min_purity)
+    defects = vocabulary_defects(gated, vocab,
+                                 min_samples=min_samples, min_purity=min_purity)
     defects.to_csv(out / "vocabulary-defects.csv", index=False)
 
     counts = gated.gate.value_counts().to_dict()
@@ -840,4 +868,11 @@ def main(extract_dir: str = "assay-hygiene/extract",
 
 
 if __name__ == "__main__":
-    sys.exit(main(*sys.argv[1:]))
+    # argv is text and the last two arguments are numbers, so they are parsed
+    # HERE rather than by `main`, whose parameters are typed. Without this a
+    # sweep invoked as `... extract out 10 0.95` compares an int against the
+    # string "10" and raises inside the ruling loop, one frame from anything
+    # that names the argument.
+    _argv = list(sys.argv[1:])
+    _casts = (str, str, int, float)
+    sys.exit(main(*(cast(a) for cast, a in zip(_casts, _argv))))

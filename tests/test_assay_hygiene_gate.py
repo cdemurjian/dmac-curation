@@ -406,7 +406,7 @@ def test_the_support_floor_counts_distinct_samples_and_not_edges():
     assert G.MIN_VOCAB_SAMPLES == 3
 
 
-def test_the_purity_floor_rejects_the_mapping_behind_212_of_250_compat_flags():
+def test_the_purity_floor_marks_the_mapping_behind_212_of_250_compat_flags():
     """`Type: Illumina Library` -> 24 DNA Extraction, purity 0.707.
 
     Measured on the real extract: support 2,210 edges over 2,210 distinct
@@ -415,11 +415,20 @@ def test_the_purity_floor_rejects_the_mapping_behind_212_of_250_compat_flags():
     flags and 269 of the 866 overall, and an Illumina library is a library --
     those DNA samples are already correctly registered in 115 Library Creation.
 
-    The floor is 0.75 and it is anchored on a measurement this repo already
-    publishes: held out by sample over 333,717 test edges, terms below 0.75
-    purity predict at 65.8%, terms in 0.75-0.90 at 88.1% and terms at or above
-    0.90 at 99.9%. A mapping right two times in three does not get to author a
-    membership proposal unreviewed; it goes to the curator who can fix it.
+    MARKS AND DOES NOT REJECT, which is the whole point of the name. This test
+    was called `..._rejects_...` and said the claim "does not get to author a
+    membership proposal unreviewed", and ruling A made both false while the body
+    -- which only ever asserted the outcome LABEL -- stayed green. So the title
+    promised passage semantics the module contradicts and the test never
+    exercised, which is the self-certifying failure this file has now produced
+    three times. The `reaches_modes` assertion below is what makes the name
+    load-bearing.
+
+    The floor is 0.75, anchored on a measurement this repo publishes: held out
+    by sample over 333,717 test edges, terms below 0.75 purity predict at 65.8%,
+    0.75-0.90 at 88.1%, at or above 0.90 at 99.9%. So a mapping under it is
+    right about two times in three, and the claim reaches its mode carrying that
+    fact for the operator to rank on.
     """
     vocab = _vocab(
         ("Type", "illumina library", 24, "DNA Extraction",
@@ -436,20 +445,73 @@ def test_the_purity_floor_rejects_the_mapping_behind_212_of_250_compat_flags():
 
     assert list(gated.gate) == [S.GATE_LOW_SUPPORT, S.GATE_PASS]
     assert "purity" in gated.gate_reason.iloc[0]
-    # neither support column can explain the rejection, which is the point
+    # neither support column can explain the mark, which is the point
     assert gated.vocab_support.iloc[0] == 2210
     assert gated.vocab_n_samples.iloc[0] == 2210
     assert G.MIN_VOCAB_PURITY == 0.75
+    # MARKED, NOT STOPPED: both claims reach a mode, the first carrying its
+    # purity failure. This is the assertion the old title lacked.
+    assert list(G.reaches_modes(gated)) == [True, True]
+    assert not G.blocks_mode(S.GATE_LOW_SUPPORT)
 
 
-def test_a_curator_row_is_never_gated_out_by_the_floors_whatever_its_support():
+def test_the_defect_file_states_the_floors_the_run_applied_not_the_defaults():
+    """One concept, one number, across the two frames a curator reads together.
+
+    `vocabulary_defects` writes the floors into the `detail` a curator triages
+    on and cannot see the arguments `gate_claims` was ruled under, so before
+    this it interpolated the module constants: gating at 10 and 0.95 produced a
+    per-claim reason naming 10 and 0.95 beside a defect row naming 3 and 0.75.
+    Two numbers for one concept, one function apart, in the artifact the
+    decision is made in.
+
+    It was inert only because `main` took the defaults for both calls, and it
+    was not going to stay inert -- `MIN_VOCAB_PURITY` commits Task 4 to
+    re-deriving that floor, and a sweep at a new value is exactly the caller
+    that sets one and not the other. So the floors are parameters here too, and
+    `main` binds the pair once and hands the same two values to both.
+
+    Asserted at NON-DEFAULT values, which is the only setting that can tell the
+    passed number from the constant.
+    """
+    vocab = _vocab(("Type", "midling", 11, "Comet Chip", 800, 8, 0.90,
+                    S.P_LEARNED))
+    claims = _claims(_claim(1, "TIS-1", 11, "Comet Chip", "Type", "midling"))
+
+    # clears both defaults, fails both of these
+    gated = G.gate_claims(claims, vocab, {("TIS", 11): 40}, {"TIS-1": "TIS"},
+                          min_samples=10, min_purity=0.95)
+    assert gated.gate.iloc[0] == S.GATE_LOW_SUPPORT
+    assert "floor of 10" in gated.gate_reason.iloc[0]
+    assert "floor of 0.95" in gated.gate_reason.iloc[0]
+
+    defects = G.vocabulary_defects(gated, vocab, min_samples=10, min_purity=0.95)
+    assert "10 samples and 0.95" in defects.detail.iloc[0]
+    for stale in ("3 samples", "0.75"):
+        assert stale not in defects.detail.iloc[0], (
+            f"the defect row states {stale!r}, which is a module default and not"
+            " the floor this run applied")
+
+    # ...and at the defaults the two agree the other way, so the assertion above
+    # is about the passed value rather than about the literal 10
+    plain = G.gate_claims(claims, vocab, {("TIS", 11): 40}, {"TIS-1": "TIS"})
+    assert plain.gate.iloc[0] == S.GATE_PASS
+    assert G.vocabulary_defects(plain, vocab).empty
+
+
+def test_a_curator_row_is_never_marked_low_support_whatever_its_support():
     """A human decision outranks the data, and the data outranks a guess.
 
+    RENAMED from `..._never_gated_out_by_the_floors_...`, which overstated after
+    ruling A: the floors gate nobody out any more, so what this exemption
+    changes is the LABEL and nothing else. The body was always about the label
+    and is unchanged; only the promise on the front of it was wrong.
+
     The fixture's `Instrument: curator call` sits at support 0, n_samples 0 and
-    purity 0.0 -- below every floor there is, in either unit -- and must pass.
-    `vocabulary.merge_vocabulary` already ranks curator above learned above
-    proposed; a floor that overrode it would reverse that ranking in the one
-    stage that can suppress a curator's ruling silently.
+    purity 0.0 -- below every floor there is, in either unit -- and must not be
+    marked. `vocabulary.merge_vocabulary` already ranks curator above learned
+    above proposed; a floor that marked it anyway would print "weak evidence"
+    beside the one kind of row whose evidence is a person.
 
     The gate says so in the reason, because a PASS earned by provenance and a
     PASS earned by evidence are different facts and the artifact is read by the
@@ -483,6 +545,63 @@ def test_a_curator_row_is_never_gated_out_by_the_floors_whatever_its_support():
         G.sample_type_index(nodes),
     )
     assert again.gate.iloc[0] == S.GATE_LOW_SUPPORT
+
+
+def test_a_curator_row_inside_a_split_family_still_reaches_its_mode():
+    """The only curator branch that still changes PASSAGE, and it had no test.
+
+    After ruling A the floors block nobody, so exempting a curator row from them
+    moves a label. The exemption from the FAMILY test is different in kind:
+    `GATE_INCOHERENT` blocks, so this branch is the one deciding whether a
+    curator's own claim reaches a mode at all. It was untested. The existing
+    curator case uses `Instrument: curator call`, which belongs to no family,
+    and the shared fixture's one incoherent family carries no curator row, so an
+    edit reordering the curator check below the family test would have started
+    silently blocking curator claims with the whole suite green.
+
+    Built by appending one row to the fixture's vocabulary rather than by
+    editing `make_fixture`, whose contents are pinned by
+    `tests/test_assay_hygiene_schema.py`. Two properties keep the case honest:
+
+    * the split is carried by the two pre-existing LEARNED members, so the
+      family is incoherent with or without the curator row. Otherwise the test
+      could pass because there was no family left rather than because the
+      exemption works.
+    * the curator row names an assay TIS samples ARE registered in. A first
+      draft pointed it at 13 Patient Visit, which no TIS holds, and the claim
+      came back `GATE_UNREACHABLE` -- correct behaviour, and it would have
+      tested reachability while claiming to test the family exemption.
+    """
+    fx = S.make_fixture()
+    nodes = _nodes(fx)
+    vocab = pd.concat(
+        [fx["vocabulary"],
+         _vocab(("Software", "cometchip v3", 11, "Comet Chip",
+                 0, 0, 0.0, S.P_CURATOR))],
+        ignore_index=True,
+    )
+    # the family is split by the learned members alone, and the curator row
+    # joins that same family
+    assert G.incoherent_families(fx["vocabulary"]) == {
+        ("Software", "cometchip"): [11, 12]}
+    assert G.incoherent_families(vocab) == {("Software", "cometchip"): [11, 12]}
+    assert G.term_stem("cometchip v3") == "cometchip"
+
+    claims = _claims(
+        _claim(202, "TIS-3", 11, "Comet Chip", "Software", "cometchip v3",
+               provenance=S.P_CURATOR),
+        # the learned member of the SAME family, which must still be blocked
+        _claim(202, "TIS-3", 11, "Comet Chip", "Software", "cometchip"),
+    )
+    gated = G.gate_claims(
+        claims, vocab,
+        G.type_registration_index(fx["membership"], fx["assays"], nodes),
+        G.sample_type_index(nodes),
+    )
+    assert list(gated.gate) == [S.GATE_PASS, S.GATE_INCOHERENT]
+    assert list(gated.gate_failures) == ["", S.GATE_INCOHERENT]
+    assert list(G.reaches_modes(gated)) == [True, False]
+    assert "curator" in gated.gate_reason.iloc[0]
 
 
 def test_a_curator_row_is_still_subject_to_reachability():
@@ -740,6 +859,21 @@ def test_main_writes_one_artifact_and_leaves_its_inputs_byte_identical(tmp_path,
         fx[name].to_parquet(extract / f"{name}.parquet", index=False)
     _nodes(fx).to_parquet(extract / "nodes.parquet", index=False)
     claims, vocab, _, _ = _world(fx)
+    # A BOUNDARY TERM, appended here and not to the shared fixture: n_samples 8
+    # at purity 0.90 clears (3, 0.75) and fails (10, 0.95). Without one, every
+    # term in this world is ruled the same way at both settings, so `main`
+    # threading the floors to only ONE of its two callees is invisible -- which
+    # it was, until this row existed.
+    vocab = pd.concat(
+        [vocab, _vocab(("Type", "midling", 11, "Comet Chip",
+                        800, 8, 0.90, S.P_LEARNED))],
+        ignore_index=True,
+    )
+    claims = pd.concat(
+        [claims, _claims(_claim(202, "TIS-3", 11, "Comet Chip",
+                                "Type", "midling"))],
+        ignore_index=True,
+    )
     claims.to_parquet(out / "claims.parquet", index=False)
     V.save_vocabulary(vocab, out / "vocabulary.csv")
 
@@ -756,6 +890,24 @@ def test_main_writes_one_artifact_and_leaves_its_inputs_byte_identical(tmp_path,
         "claims.parquet", "vocabulary-defects.csv", "vocabulary.csv"]
     for p, digest in digests.items():
         assert hashlib.sha256(p.read_bytes()).hexdigest() == digest, f"{p} changed"
+
+    # at the defaults the boundary term is clean and reaches no defect row
+    assert "midling" not in set(pd.read_csv(defects).raw_value)
+
+    # ...and the same run at NON-DEFAULT floors both RULES and REPORTS at them.
+    # `main` binds the pair once and hands it to both `gate_claims` and
+    # `vocabulary_defects`; threading it to either one alone passes every
+    # assertion above, because at the defaults the two agree.
+    assert G.main(str(extract), str(out), 10, 0.95) == 0
+    tightened = pd.read_csv(defects)
+    detail = " ".join(tightened.detail.astype(str))
+    assert "10 samples and 0.95" in detail
+    assert "3 samples and 0.75" not in detail, (
+        "the file states the module defaults, not the floors this run applied")
+    # the ruling moved too, not only the text describing it
+    assert "midling" in set(tightened.raw_value), (
+        "gate_claims ruled at the defaults while the file reports the tightened"
+        " floors")
 
 
 def test_the_defect_file_routes_to_vocabulary_curation_and_never_to_a_mode():
