@@ -463,6 +463,107 @@ def neighbour_registers(
     return (S.LIN_NONE, None, None)
 
 
+# Every key `mode2_ceiling` returns, in report order, and declared for the same
+# reason `INTEGRITY_KEYS` is: the report prints them all, and a key that stops
+# being produced must break rather than stop being printed.
+#
+# THE SUFFIX IS THE UNIT AGAIN. `_rows` counts (sample, assay) PROPOSALS and
+# `_samples` counts distinct samples; the two differ by a factor of about 1.3 on
+# the real extract and quoting either without its unit is this project's
+# signature defect. `both_directions` counts (sample, assay) pairs reachable in
+# BOTH directions, which is why `union_rows` is smaller than the two row counts
+# added together.
+CEILING_KEYS = (
+    "add_parent_rows", "add_parent_samples",
+    "add_child_rows", "add_child_samples",
+    "union_rows", "union_samples", "both_directions",
+)
+
+
+def mode2_ceiling(
+    children_of: dict[int, frozenset[int]],
+    parents_of: dict[int, frozenset[int]],
+    registered: dict[int, set[int]],
+) -> dict[str, int]:
+    """How many membership proposals Mode 2 could make before precedent cuts it.
+
+    A CEILING, and the word must accompany the numbers everywhere. Nothing here
+    consults precedent, the vocabulary or the gate; it counts every (sample,
+    assay) pair where a lineage neighbour registers an assay the sample lacks.
+    Precedent cuts it down hard -- at `rate >= 0.5` the ADD_CHILD direction
+    survives at about 3% -- so a ceiling quoted as an expected output is wrong by
+    more than an order of magnitude in the weak direction.
+
+    THIS FUNCTION EXISTS BECAUSE TWO PUBLISHED READINGS OF THIS NUMBER DISAGREED
+    AND NEITHER WAS REPRODUCIBLE. The spec read 55,007 ADD_PARENT / 117,463
+    ADD_CHILD over DERIVED_FROM; the plan read 54,780 / 116,365 over the same
+    relation. Measured 2026-08-17, both are arithmetically correct and they
+    differ by ONE THING: the definition of "registered".
+
+        registered = audit.registered_internal(membership, assays)
+            -> 55,007 / 117,463, union 172,338 rows over 115,626 samples
+        the same, minus the 17 junction-less assays' registrations
+            -> 54,780 / 116,365, union 171,013 rows over 115,599 samples
+
+    ANY MEMBERSHIP ROW MEANS REGISTERED, so 55,007 / 117,463 is the correct
+    reading and the plan's understated the ceiling by 227 and 1,098. The
+    MAPPABLE-only set is 82 samples smaller, this is the THIRD time the two have
+    been confused on this branch, and the direction of the error is worth
+    naming: dropping a registration shrinks `have` AND `want` at once, so the
+    damage is not one-directional and cannot be reasoned about without measuring.
+    Build `registered` with `audit.registered_internal` and nothing else.
+
+    Self-loops and duplicate edge pairs change no answer here and that is a
+    property rather than luck: a sample is its own neighbour under a self-loop,
+    so its gap is `registered[s] - registered[s]`, which is empty, and the
+    neighbour sets are sets so a repeated pair is one neighbour. Measured, the
+    raw edge frame and `lineage_index`'s deduplicated one give identical counts
+    to the row. Reading `membership.assay_id` without crossing the junction gives
+    55,057 / 118,141 and matches neither published figure, so that was never the
+    cause.
+
+    ONE ROW PER (SAMPLE, ASSAY), never per edge and never per neighbour. Mode 2's
+    proposal is a membership row, which is per (sample, assay) however many
+    neighbours support it; `lineage_supports` is what counts the supports behind
+    one proposal. An edge-grained count would report the fan-out of the lineage
+    graph rather than the size of the proposal set.
+
+    `registered` is read with `.get`, so a sample registered nowhere contributes
+    a full gap in the direction its neighbour supports -- which is right: it is
+    exactly the sample Mode 2 has something to say about. Mode 1's population is
+    a sample registered nowhere with no neighbour carrying anything.
+    """
+    add_parent: set[tuple[int, int]] = set()
+    add_child: set[tuple[int, int]] = set()
+    empty: set[int] = set()
+
+    for parent, kids in children_of.items():
+        have = registered.get(parent, empty)
+        for kid in kids:
+            for assay_id in registered.get(kid, empty):
+                if assay_id not in have:
+                    add_parent.add((parent, assay_id))
+    for child, rents in parents_of.items():
+        have = registered.get(child, empty)
+        for rent in rents:
+            for assay_id in registered.get(rent, empty):
+                if assay_id not in have:
+                    add_child.add((child, assay_id))
+
+    union = add_parent | add_child
+    out = {
+        "add_parent_rows": len(add_parent),
+        "add_parent_samples": len({s for s, _ in add_parent}),
+        "add_child_rows": len(add_child),
+        "add_child_samples": len({s for s, _ in add_child}),
+        "union_rows": len(union),
+        "union_samples": len({s for s, _ in union}),
+        "both_directions": len(add_parent & add_child),
+    }
+    assert set(out) == set(CEILING_KEYS), "CEILING_KEYS is out of date"
+    return out
+
+
 def main(extract_dir: str = "assay-hygiene/extract") -> int:
     """Build the index off the extract on disk and print its integrity report.
 
@@ -471,10 +572,13 @@ def main(extract_dir: str = "assay-hygiene/extract") -> int:
     this module's docstring states can be re-derived by anyone in one command,
     and so the excluded populations are printed EVEN AT ZERO.
     """
+    from .audit import registered_internal   # local: keeps the import light
+
     d = Path(extract_dir)
     edges = pd.read_parquet(d / "edges.parquet")
     samples = pd.read_parquet(d / "samples.parquet")
     membership = pd.read_parquet(d / "membership.parquet")
+    assays = pd.read_parquet(d / "assays.parquet")
 
     children_of, parents_of, uuid_of, integrity = lineage_index(
         edges, samples, membership)
@@ -495,6 +599,15 @@ def main(extract_dir: str = "assay-hygiene/extract") -> int:
             print(f"  {key:<32} {len(value):>8,}  [{head}{more}]")
         else:
             print(f"  {key:<32} {value:>8,}")
+    ceiling = mode2_ceiling(children_of, parents_of,
+                            registered_internal(membership, assays))
+    print("MODE 2 CEILING, unfiltered by precedent -- a ceiling, not a forecast:")
+    for key in CEILING_KEYS:
+        print(f"  {key:<32} {ceiling[key]:>8,}")
+    print("  \"registered\" here is ANY membership row, crossed to the internal "
+          "namespace by audit.registered_internal. The MAPPABLE-only definition "
+          "reads 54,780 / 116,365 and is the only difference between the two "
+          "published figures for this number.")
     print("no row here was dropped: the unresolved endpoints, the duplicate "
           "uuids and the membership rows without a sample all stay in play, "
           "because a sample with no `samples` row can still be registered and "

@@ -840,5 +840,127 @@ def test_the_module_opens_three_parquet_files_and_no_relation_but_DERIVED_FROM()
     src = (REPO / "scripts" / "assay_hygiene" / "lineage.py").read_text()
 
     assert set(re.findall(r"[\w.-]+\.parquet", src)) == {
-        "edges.parquet", "samples.parquet", "membership.parquet"}
+        "edges.parquet", "samples.parquet", "membership.parquet",
+        # named, per this docstring's own requirement, when `mode2_ceiling` was
+        # added 2026-08-17. `main` hands it to `audit.registered_internal`,
+        # which is the package's single crossing of the seek
+        # `assay_assets.assay_id` junction, and the ceiling is exactly the
+        # figure the two published readings disagreed on BECAUSE one of them
+        # skipped that crossing for 17 assays. Reading it is the fix, not a
+        # widening of what this module may touch: it is still read-only, and
+        # `childof.parquet` is still absent, which is what this equality
+        # exists to keep true.
+        "assays.parquet"}
     assert "stage0_apply" not in src and "driver_stage0" not in src
+
+
+# --- the Mode 2 ceiling -------------------------------------------------------
+
+
+def test_the_mode_2_ceiling_counts_one_row_per_sample_and_assay_in_each_direction():
+    """Hand-traced off `make_fixture()`, which reaches both directions.
+
+    `registered_internal` over the fixture:
+
+        100 {11}   101 {11}   102 {11}   200 {11,12}  201 {11,12}
+        202 {12}   203 {12}   500 {11}   700 {12,13}  (300, 301, 400 nowhere)
+
+    ADD_PARENT -- a parent lacking an assay one of its children holds:
+        202 has {12}, child 102 holds {11}          -> (202, 11)
+        500 has {11}, child 203 holds {12}          -> (500, 12)
+        200, 201 and 700 already hold everything their children do; 400's only
+        child is registered nowhere.                   2 rows over 2 samples
+
+    ADD_CHILD -- a child lacking an assay one of its parents holds:
+        100 -> (100,12)   101 -> (101,12)   102 -> (102,12)
+        203 has {12}, parents 500 {11} and 700 {12,13} -> (203,11), (203,13)
+        300 is registered nowhere, parent 200 {11,12}  -> (300,11), (300,12)
+        301's parent 400 is registered nowhere.        7 rows over 5 samples
+
+    THE GUARD IS THAT THE TWO DIRECTIONS DISAGREE ON BOTH NUMBERS. 2 against 7
+    rows and 2 against 5 samples, so a swap of the two directions -- the defect
+    `lineage_supports` and `neighbour_registers` were renamed to prevent -- reads
+    differently rather than identically. 203 also contributes TWO rows from ONE
+    scan, which is what proves the count is per (sample, assay) and not per
+    neighbour: it has two parents and gains two proposals from three neighbour
+    assays, and a per-neighbour count would read 3.
+    """
+    children_of, parents_of, _, _, registered = _fixture_world()
+    ceiling = L.mode2_ceiling(children_of, parents_of, registered)
+
+    assert set(ceiling) == set(L.CEILING_KEYS)
+    assert ceiling["add_parent_rows"] == 2
+    assert ceiling["add_parent_samples"] == 2
+    assert ceiling["add_child_rows"] == 7
+    assert ceiling["add_child_samples"] == 5
+    assert ceiling["add_parent_rows"] != ceiling["add_child_rows"]
+    assert ceiling["add_parent_samples"] != ceiling["add_child_samples"]
+
+    # no (sample, assay) pair is reachable in both directions in this world, so
+    # the union is the sum here and the real extract is what exercises the
+    # overlap. Stated rather than left implicit: a fixture reading 0 for a key
+    # cannot prove that key is computed at all.
+    assert ceiling["both_directions"] == 0
+    assert ceiling["union_rows"] == 9
+    assert ceiling["union_samples"] == 7
+
+
+@pytest.mark.skipif(not (EXTRACT / "edges.parquet").exists(),
+                    reason="the extract is gitignored and is not always present")
+def test_the_two_published_ceilings_differ_only_by_the_definition_of_registered():
+    """55,007 / 117,463 is right. 54,780 / 116,365 dropped 17 assays' rows.
+
+    Two independent computations of this number were published over the same
+    relation and neither had been root-caused: the spec read 55,007 ADD_PARENT /
+    117,463 ADD_CHILD and the plan read 54,780 / 116,365. Both are
+    arithmetically correct. They differ by ONE thing, and this test derives BOTH
+    from the same index so the claim is checkable rather than asserted:
+    `audit.registered_internal` counts ANY membership row, and the other reading
+    silently dropped the registrations of the 17 junction-less assays.
+
+    ANY MEMBERSHIP ROW MEANS REGISTERED, so the larger pair is the correct one
+    and the plan understated the ceiling by 227 and 1,098. `union_rows` closes
+    it beyond doubt: the plan's own union line reads 171,013 over 115,599, which
+    is what the MAPPABLE-only reading produces here to the row and the sample,
+    while its two components sum to 171,145 -- so the whole block was computed
+    that way rather than one figure being mistyped.
+
+    A CEILING. Precedent cuts the weak direction to about 3% of it.
+    """
+    edges = pd.read_parquet(EXTRACT / "edges.parquet")
+    samples = pd.read_parquet(EXTRACT / "samples.parquet")
+    membership = pd.read_parquet(EXTRACT / "membership.parquet")
+    assays = pd.read_parquet(EXTRACT / "assays.parquet")
+
+    children_of, parents_of, _, _ = L.lineage_index(edges, samples, membership)
+    any_membership = A.registered_internal(membership, assays)
+
+    from assay_hygiene.precedent import fallback_assay_ids
+    junctionless = fallback_assay_ids(assays)
+    assert len(junctionless) == 17
+    mappable_only = {s: v - junctionless for s, v in any_membership.items()}
+    assert sum(1 for v in any_membership.values() if v) - sum(
+        1 for v in mappable_only.values() if v) == 82, (
+        "the two definitions must differ by the 82 samples this package "
+        "documents, or this test is comparing something else")
+
+    published = L.mode2_ceiling(children_of, parents_of, any_membership)
+    dropped = L.mode2_ceiling(children_of, parents_of, mappable_only)
+
+    assert (published["add_parent_rows"], published["add_child_rows"]) == (
+        55_007, 117_463)
+    assert (dropped["add_parent_rows"], dropped["add_child_rows"]) == (
+        54_780, 116_365)
+    assert published["union_rows"] == 172_338
+    assert dropped["union_rows"] == 171_013      # the plan's own union line
+    assert dropped["union_samples"] == 115_599   # ...and its own sample line
+    assert published["both_directions"] == dropped["both_directions"] == 132
+
+    # ...and neither self-loops nor duplicate edge pairs are the cause: a sample
+    # that is its own neighbour has an empty gap by construction, so the raw
+    # edge frame reads identically to the deduplicated index.
+    raw_children, raw_parents = {}, {}
+    for c, p in zip(edges.child_id, edges.parent_id):
+        raw_children.setdefault(int(p), set()).add(int(c))
+        raw_parents.setdefault(int(c), set()).add(int(p))
+    assert L.mode2_ceiling(raw_children, raw_parents, any_membership) == published
