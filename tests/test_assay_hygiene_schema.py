@@ -363,6 +363,13 @@ def test_frozen_fixture_arithmetic_is_unaffected_by_the_new_column():
     fx = S.make_fixture()
     assert len(fx["edges"]) == 7
     assert len(fx["membership"]) == 12
+    # `samples` is pinned here too, and it was the frame this world grew MOST
+    # (5 rows -> 9) while being the only one with no count. That gap was not
+    # theoretical: tests/test_assay_hygiene_claims.py derives claims from this
+    # frame against its own vocabulary, so `_fixture_claims()` silently gained
+    # two rows -- DNA-2 and PAV-1 -- and nothing in the tree measured it. A row
+    # added here changes another file's arithmetic, so it fails here first.
+    assert len(fx["samples"]) == 9
 
 
 def test_stage0_fixture_covers_every_drop_reason_and_one_keeper():
@@ -507,6 +514,20 @@ def test_fixture_samples_exercise_every_tier():
     assert by_uuid["TIS-1"]["Type"] == "CometChip"        # -> conflict
     assert by_uuid["TIS-1"]["Instrument"] == "tissue scope"
     assert "Type" not in by_uuid["DNA-1"]                 # -> none
+
+    # The four rows added 2026-08-17 for the gate, pinned by uuid beside the
+    # original five. Each names the ONE term whose rejection it exists to
+    # exercise, so retyping a raw value here fails at its source rather than as
+    # a gate case that quietly stopped firing.
+    assert by_uuid["DNA-2"]["Type"] == "CometChip"          # -> GATE_UNREACHABLE
+    assert by_uuid["TIS-3"]["Software"] == "cometchip"      # -> GATE_INCOHERENT
+    assert by_uuid["TIS-3"]["Instrument"] == "curator call"  # -> passes anyway
+    assert by_uuid["TIS-4"]["Type"] == "rare term"          # -> low support
+    assert by_uuid["TIS-4"]["DataType"] == "illumina library"  # -> low purity
+    assert by_uuid["PAV-1"]["Instrument"] == "tissue scope"  # -> already held
+    # ...and the pairing that makes TIS-3 the per-CLAIM case: one rejected and
+    # one passing claim on ONE sample. Two keys, not one.
+    assert set(by_uuid["TIS-3"]) == {"Software", "Instrument"}
 
 
 def test_fixture_membership_content_pins_the_propagation_arithmetic():
@@ -678,18 +699,40 @@ def test_mode_3_is_named_but_has_no_detector_so_it_is_never_emitted():
 
 
 def test_the_two_reporting_numbers_gate_nothing():
-    """Both are reporting bands with no backtest behind them.
+    """Nothing in the package reads either number, which is the whole claim.
 
-    Under "nothing decides, everything proposes" a threshold cannot gate a
-    write, because there is no autonomous write to gate. These two order what an
-    operator reads. The behavioural half of that claim is `BAND_NO_SUPPORT`:
-    a population under the floor is reported as UNMEASURED, never as
-    `BAND_NEVER`, so a rate of 0.000 over four samples cannot be read as
-    evidence that two assays do not coexist.
+    An earlier version of this test asserted the two values, their types and a
+    band distinctness `test_every_stage_c_family_is_closed` already covers, and
+    then called itself "gate nothing". None of that is evidence about gating:
+    the title certified a property the body never exercised, which is the
+    self-certifying-test failure increment 1 shipped five of.
+
+    The checkable form at this increment is that NO module under
+    `scripts/assay_hygiene/` references either name. `_schema.py` declares them
+    and nothing consumes them, so a `>=` cannot exist anywhere -- which is
+    exactly what "they gate nothing" means today. When Task 4 does read them for
+    banding, this test fails and the reader has to say in its message which
+    module reads them and that it bands rather than gates. That is the intended
+    cost: the claim stops being free the moment it stops being structural.
     """
+    package = REPO / "scripts" / "assay_hygiene"
+    readers = sorted(
+        p.name for p in package.glob("*.py")
+        if p.name != "_schema.py"
+        and ("MIN_CO_REG_SUPPORT" in p.read_text()
+             or "CO_OCCUR_BAND" in p.read_text())
+    )
+    assert not readers, (
+        f"{readers} read a reporting number. Both are declared bands with no "
+        "backtest behind them: under universal approval there is no autonomous "
+        "write for a threshold to gate, so a reader may BAND on them and must "
+        "never decide whether a row is PROPOSED. Confirm that, then name the "
+        "reader here.")
+
+    # ...and the declarations themselves, so the values cannot drift silently
     assert S.MIN_CO_REG_SUPPORT == 30
     assert S.CO_OCCUR_BAND == 0.5
-    assert isinstance(S.MIN_CO_REG_SUPPORT, int)   # a count of samples
+    assert isinstance(S.MIN_CO_REG_SUPPORT, int)   # a count of samples of a type
     assert 0.0 < S.CO_OCCUR_BAND < 1.0             # a rate
     assert S.BAND_NO_SUPPORT != S.BAND_NEVER
     assert {S.BAND_NO_SUPPORT, S.BAND_NEVER} <= set(S.COMPAT_BANDS)
@@ -859,12 +902,33 @@ def _incoherent_families(fx):
     return {k for k, v in families.items() if len(v) > 1}
 
 
+# Floors used ONLY by the helper below, to show the fixture can reach each
+# rejection kind. NEITHER IS A SHIPPED THRESHOLD and neither is imported from
+# `_schema`. Task 2 owns the real ones and takes them as `min_support` and
+# `min_purity` parameters.
+#
+# `_TEST_MIN_SUPPORT` is deliberately NOT `S.MIN_CO_REG_SUPPORT`, which an
+# earlier version of this file borrowed. That was a units mismatch and it is
+# this branch's signature defect one level down: `MIN_CO_REG_SUPPORT` counts
+# SAMPLES OF A TYPE and sizes the co-registration population, while
+# `VOCAB_COLUMNS.support` counts EDGES -- `_schema.py` warns about exactly that
+# gap and records that 50 of the 736 learned terms rest on a single sample. The
+# two numbers happen to share the value 30 and mean different things, so the
+# comparison read plausibly and was wrong. Borrowing it here also made this file
+# the only gate-shaped use of a reporting number in the tree, in the same file
+# as a test asserting those numbers gate nothing.
+_TEST_MIN_SUPPORT = 30      # a floor on the EDGE count in VOCAB_COLUMNS.support
+_TEST_MIN_PURITY = 0.8
+
+
 def _gate_kinds(fx):
     """claim -> the set of rejection KINDS that fire on it, ANY-membership based.
 
     Kinds, not outcomes: the support and purity floors are both
     GATE_LOW_SUPPORT, so they count as one. A curator mapping is exempt from the
     floors and from the family check, because a human ruling outranks the data.
+
+    The floors are the test-local ones above, never the shipped constants.
     """
     reg = _registered_internal(fx)
     types = _types(fx)
@@ -880,7 +944,7 @@ def _gate_kinds(fx):
         if row.provenance != S.P_CURATOR:
             if (row.source_field, row.raw_value.split()[0]) in incoherent:
                 kinds.add(S.GATE_INCOHERENT)
-            if row.support < S.MIN_CO_REG_SUPPORT or row.purity < 0.8:
+            if row.support < _TEST_MIN_SUPPORT or row.purity < _TEST_MIN_PURITY:
                 kinds.add(S.GATE_LOW_SUPPORT)
         out[claim] = kinds
     return out
@@ -927,8 +991,8 @@ def test_fixture_vocabulary_reaches_every_gate_rejection():
 
     # Both floors are reached separately, or GATE_LOW_SUPPORT is only half tested
     floored = [c for c, ks in kinds.items() if S.GATE_LOW_SUPPORT in ks]
-    assert any(c[3].support < S.MIN_CO_REG_SUPPORT for c in floored)
-    assert any(c[3].purity < 0.8 for c in floored)
+    assert any(c[3].support < _TEST_MIN_SUPPORT for c in floored)
+    assert any(c[3].purity < _TEST_MIN_PURITY for c in floored)
 
     # The whole incoherent family is reportable, not just its minority member.
     incoherent = _incoherent_families(fx)
@@ -956,7 +1020,7 @@ def test_fixture_vocabulary_reaches_every_gate_rejection():
     curator = [c for c in kinds if c[3].provenance == S.P_CURATOR]
     assert curator, "no curator-provenance claim"
     for c in curator:
-        assert c[3].support < S.MIN_CO_REG_SUPPORT and c[3].purity < 0.8, (
+        assert c[3].support < _TEST_MIN_SUPPORT and c[3].purity < _TEST_MIN_PURITY, (
             "the curator claim clears the floors, so it cannot show that "
             "provenance overrides them")
         assert not kinds[c]
