@@ -335,13 +335,22 @@ def test_a_sample_registered_in_nothing_with_no_claim_is_counted_not_dropped():
     real 6,242 -- and reporting a mode's coverage without them would quote the
     numerator as the population.
     """
-    _, _, _, attached, population, findings = _pipeline()
+    _, claims, _, attached, population, findings = _pipeline()
 
     census = X.mode1_census(attached, population, findings)
-    silent = set(population) - set(attached.sample_id) - set(findings.sample_id)
+    # read off the CLAIMS frame, one stage upstream of anything this module
+    # builds, so the bucket is defined by the absence of a claim and not by
+    # subtracting whatever the classifier happened to emit
+    silent = set(population) - set(claims.sample_id)
     assert silent == {103, 111, 112}
     assert census["population_no_claim"] == len(silent) == 3
-    assert not (silent & set(findings.sample_id))
+
+    # ...and the OTHER two samples that reach no row are not in this bucket.
+    # 104 and 109 claim loudly and are stopped by the gate, which is a different
+    # fact about a curator's data and is counted separately.
+    assert not ({104, 109} & silent)
+    assert census["population_all_claims_blocked"] == 2
+    assert census["population_no_claim"] != census["population_all_claims_blocked"]
 
 
 # --- the gate runs first -----------------------------------------------------
@@ -721,6 +730,22 @@ def test_nothing_proposes_by_a_source_this_mode_did_not_use():
     assert set(findings["mode"]) == {S.MODE_1}
     assert S.MODE_1 in S.EMITTED_MODES
 
+    # NO VALUE COLLIDES WITH ANOTHER CLOSED FAMILY. `_schema`'s own families are
+    # checked against each other by
+    # `test_stage_c_vocabulary_does_not_collide_with_the_verdict_action_or_tier_families`,
+    # and this one lives in `classify.py` where that test cannot see it. A value
+    # equal to a mode, a gate outcome, a class, a lineage relation, a band, a
+    # tier, an action or a provenance would be readable in the wrong column
+    # without erroring, which is the failure this package is shaped around.
+    others = (set(S.MODES) | set(S.GATE_OUTCOMES) | set(S.CLASSES)
+              | set(S.LINEAGE_RELATIONS) | set(S.COMPAT_BANDS)
+              | set(S.PROVENANCES)
+              | {S.T_STRONG, S.T_WEAK, S.T_CORROBORATED, S.T_CONFLICT,
+                 S.T_NONE}
+              | {S.A_NONE, S.A_ADD_PARENT, S.A_ADD_CHILD, S.A_ADD_TO_ASSAY,
+                 S.A_FLAG_ONLY})
+    assert not (set(X.PROPOSAL_SOURCES) & others)
+
 
 def test_the_module_is_read_only_and_names_every_file_it_opens():
     """No write path, and no function whose name says it decides.
@@ -728,7 +753,9 @@ def test_the_module_is_read_only_and_names_every_file_it_opens():
     `stage0_apply` and `driver_stage0` carry live production Cypher. An import is
     the only way a read-only module acquires a write path by accident, so their
     absence is asserted rather than assumed. The filenames are extracted from the
-    source, so a sixth file added later fails here and has to be named.
+    source rather than searched for one at a time, so a further file added later
+    fails here and has to be named; searching for the absence of one known name
+    passes the moment someone spells it differently.
     """
     src = (REPO / "scripts" / "assay_hygiene" / "classify.py").read_text()
 
