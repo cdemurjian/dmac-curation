@@ -860,13 +860,25 @@ def _census_world():
         ("CEN", 1, [33]),              # 9006 already holds the claim
         ("CEN", 1, [25, 26]),          # 9007 conflict at SOMETIMES, NOT ROUTINE
     ], start=9001)
-    # 9009 is registered NOWHERE, so it needs a node row and no membership row.
     # `_population` hands ids out in ONE ascending run and consumed 9001-9007
-    # above, so the next free id is 9008; 9009 is used to leave an obvious gap
-    # rather than to abut the block.
-    extra_nodes = pd.concat(
-        [extra_nodes, pd.DataFrame([("CEN-9009", 9009, "CEN")],
-                                   columns=S.NODES_COLUMNS)], ignore_index=True)
+    # above, so the next free id is 9008; the three below start at 9009 to leave
+    # an obvious gap rather than to abut the block.
+    #
+    #   9009  registered NOWHERE          -> a node row and no membership row
+    #   9010  TWO node rows, TWO types    -> rule 4, by MULTIPLICITY: it must
+    #                                        contribute TWO census rows
+    #   9011  registered, NO node row     -> rule 5, by ABSENCE: it satisfies
+    #                                        rules 1-3 and contributes ZERO rows
+    #                                        because it carries no type
+    extra_nodes = pd.concat([extra_nodes, pd.DataFrame(
+        [("CEN-9009", 9009, "CEN"),
+         ("CEN-9010", 9010, "CEN"),
+         ("CN2-9010", 9010, "CEN2")],
+        columns=S.NODES_COLUMNS)], ignore_index=True)
+    extra_membership = pd.concat([extra_membership, pd.DataFrame(
+        [(9010, a + SEEK_OFFSET) for a in (25, 31, 32)]
+        + [(9011, a + SEEK_OFFSET) for a in (25, 31, 32)],
+        columns=S.MEMBERSHIP_COLUMNS)], ignore_index=True)
     return (pd.concat([nodes, extra_nodes], ignore_index=True),
             pd.concat([membership, extra_membership], ignore_index=True),
             _assays(25, 26, 31, 32, 33))
@@ -900,17 +912,29 @@ def test_the_census_counts_only_rows_a_finding_could_actually_be_written_for():
                                                   only -- the row that makes the
                                                   two conflict counts differ
         9009  registered nowhere (Mode 1)         excluded, rule 2
+        9010  TWO node rows, TWO types            counted TWICE, rule 4
+        9011  registered, NO node row, no type    excluded, rule 5
 
-    A rule that admitted 9003, 9006 or 9009, or dropped 9002 or 9007, moves a
-    count that no other row can restore.
+    A rule that admitted 9003, 9006, 9009 or 9011, or dropped 9002 or 9007, or
+    counted 9010 once, moves a count that no other row can restore.
 
-    THREE OF THE FOUR POPULATION RULES EXCLUDE A SAMPLE HERE; the fourth cannot.
-    Rule 4 -- one row per (claim, TYPE) -- is a MULTIPLICITY rule and excludes
-    nothing by construction, so no sample can demonstrate it by absence. It is
-    exercised instead by
-    `test_a_sample_typed_under_two_nodes_counts_under_both_types`, which shows a
-    dual-typed sample counting under both. An earlier version of this docstring
-    said all four rules exclude a sample, which overstated by one.
+    EVERY ONE OF THE FIVE POPULATION RULES IS REACHED BY A SAMPLE HERE, and two
+    of them were not until 2026-08-17. 9010 and 9011 close that:
+
+      rule 4 is a MULTIPLICITY rule, so it is demonstrated by a sample counted
+        TWICE rather than by one excluded. Until 9010 existed every sample in
+        this world carried exactly one node row, so a mutant reading only the
+        FIRST type was byte-identical here and died only in the skipif-guarded
+        real-extract test. An earlier version of this docstring pointed at
+        `test_a_sample_typed_under_two_nodes_counts_under_both_types` as the
+        cover, which is false for the census: that test calls `co_registration`
+        and `type_registration_index` and never calls `counter_evidence_census`,
+        so it pins the TABLE's typing rule and not this loop.
+      rule 5 IS an exclusion, and its existence corrects this docstring too. It
+        once said rule 4 "excludes nothing by construction". That is false at
+        the edge: a registered sample with no node row carries no type and so
+        contributes no rows despite satisfying rules 1-3. 9011 is that sample,
+        and 194 of them exist on the real extract.
     """
     nodes, membership, assays = _census_world()
     table = K.co_registration(membership, assays, nodes)
@@ -918,6 +942,8 @@ def test_the_census_counts_only_rows_a_finding_could_actually_be_written_for():
     types = G.sample_type_sets(nodes)
 
     gated = _gated(
+        (9010, 33, ""),
+        (9011, 33, ""),
         (9001, 33, ""),
         (9002, 33, S.GATE_LOW_SUPPORT),
         (9003, 33, S.GATE_UNREACHABLE),
@@ -931,10 +957,11 @@ def test_the_census_counts_only_rows_a_finding_could_actually_be_written_for():
         gated, table, registered, types)
 
     assert set(counts) == set(K.CENSUS_KEYS)
-    assert counts["rows"] == 5                        # 9001 9002 9004 9005 9007
-    assert counts["rows_with_counter_evidence"] == 4  # ...minus 9005
-    assert counts["conflicts_any_band"] == 3          # 9001 9002 9007
-    assert counts["conflicts_at_band_routine"] == 2   # ...minus 9007, SOMETIMES
+    # 9010 contributes TWO of these seven, one per type
+    assert counts["rows"] == 7           # 9001 9002 9004 9005 9007 9010 x2
+    assert counts["rows_with_counter_evidence"] == 5  # ...minus 9005 and 9010's
+    assert counts["conflicts_any_band"] == 4          # ...CEN2 row, which has
+    assert counts["conflicts_at_band_routine"] == 3   # no population at all
     assert counts["self_consistent_alt_labels"] == 1  # 9004
     assert len(set(counts.values())) == 5, (
         "ALL FIVE counts must differ, or a rule could move one unseen. An "
@@ -956,9 +983,30 @@ def test_the_census_counts_only_rows_a_finding_could_actually_be_written_for():
         "GATE_LOW_SUPPORT marks and must not block; GATE_UNREACHABLE blocks")
 
     # the patterns name the winner AND the opponent, and they differ
-    assert conflicts == [(2, ("CEN", 33, 32, 31))]
+    assert conflicts == [(3, ("CEN", 33, 32, 31))]
     assert alt_labels == [(1, ("CEN", 33, 25))]
     assert conflicts[0][1][2] != conflicts[0][1][3]
+
+    # RULE 4, by multiplicity: 9010 alone contributes two rows, so a loop
+    # reading only the first of its two types reads 6 where this reads 7.
+    assert types[9010] == frozenset({"CEN", "CEN2"})
+    solo = K.counter_evidence_census(_gated((9010, 33, "")), table,
+                                     registered, types)[0]
+    assert solo["rows"] == 2, (
+        "a dual-typed sample is TWO census rows, matching "
+        "type_registration_index, which counts it under both types")
+
+    # RULE 5, by absence: 9011 satisfies rules 1-3 and still contributes
+    # nothing, because it has no node row and so no type. `rows` is 0 and not 1.
+    assert 9011 not in types
+    assert registered[9011] and 33 not in registered[9011]
+    typeless = K.counter_evidence_census(_gated((9011, 33, "")), table,
+                                         registered, types)[0]
+    assert typeless["rows"] == 0, (
+        "a registered sample with no type contributes no rows, which is the "
+        "fifth population rule and was missing from the stated definition")
+    assert 9011 in G.untyped_registration_samples(membership, nodes), (
+        "...and it is reported BY NAME rather than dropped silently")
 
 
 @pytest.mark.skipif(not (EXTRACT / "membership.parquet").exists()

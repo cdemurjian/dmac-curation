@@ -518,6 +518,25 @@ def counter_evidence_census(
       4. one row per (claim, TYPE): a sample carrying two node rows that
          disagree on type contributes TWO rows, matching
          `gate.type_registration_index`, which counts such a sample under both.
+         This is a MULTIPLICITY rule and it excludes nothing FOR A SAMPLE
+         CARRYING AT LEAST ONE TYPE -- the typeless case is rule 5, and the two
+         were stated as one until 2026-08-17;
+      5. the sample carries AT LEAST ONE TYPE. A registered sample with no
+         `nodes` row has none, so `types.get(sample_id, ())` is empty and it
+         contributes ZERO rows however completely it satisfies 1 through 3.
+         194 such samples exist on the real extract over 210 of the 214,296
+         membership rows, and `gate.untyped_registration_samples` names every
+         one. This rule is not a choice: a per-TYPE measurement cannot place a
+         sample that has no type, and `co_registration` drops the same samples
+         from its cells for the same reason, so the census and the table agree
+         about who is missing.
+
+    RULE 5 WAS MISSING FROM THIS STATEMENT UNTIL 2026-08-17, and its absence
+    defeated the purpose of writing the statement down: a reader reproducing
+    7,831 from four rules would count 194 samples this function excludes. The
+    whole point of computing the census rather than quoting it was that the
+    number be re-derivable, and a definition that omits an exclusion is a
+    number that cannot be re-derived.
 
     Mode 1's population cannot appear here: rule 2 excludes it by construction,
     because a sample registered nowhere has no registration to carry
