@@ -382,13 +382,24 @@ def test_an_ambiguous_uuid_resolves_to_the_one_the_samples_frame_carries():
     fixture where the preferred uuid is also the lowest cannot tell the two
     rules apart, which is exactly how the previous version of this test passed
     while the rule it named was untested.
+
+    THIS FIXTURE COVERS `min()`-ALONE AND NOTHING ELSE. Two rows cannot separate
+    the positional rules -- see the sibling fallback test, which carries three
+    uuids for that reason. The guard below reads its values OFF THE FRAME rather
+    than repeating them as literals: a guard that restates the fixture's strings
+    stays green when the fixture is edited, which is precisely the rot it exists
+    to prevent.
     """
     edges = _edges((5, 20), (5, 21))
     edges.loc[0, "child_uuid"] = "Z-known"
     edges.loc[1, "child_uuid"] = "A-orphan"
     samples = _samples((5, "Z-known"), 20, 21)
-    assert min({"Z-known", "A-orphan"}) == "A-orphan", (
-        "the fixture no longer discriminates: min() must disagree here")
+
+    own = samples.loc[samples.sample_id == 5, "uuid"].iloc[0]
+    candidates = set(edges.loc[edges.child_id == 5, "child_uuid"])
+    assert own in candidates and min(candidates) != own, (
+        "the fixture no longer discriminates: the samples uuid must not also be "
+        f"the lowest, got own={own!r} candidates={sorted(candidates)}")
 
     children_of, parents_of, uuid_of, integrity = L.lineage_index(
         edges, samples, _membership((5, 1)))
@@ -412,23 +423,44 @@ def test_an_ambiguous_uuid_with_no_samples_row_falls_back_to_the_lowest():
     Measured, 0 of the 79 ambiguous ids lack a `samples` row today, so this
     branch is unexercised on the real extract and is covered only here.
 
-    THE LOWER UUID IS ON THE FIRST ROW, deliberately. Last-write-wins would then
-    answer `Z-second` where `min()` answers `A-first`, so the two rules
-    disagree. The previous version of this fixture put the HIGHER uuid first,
-    under which `min()` and last-write-wins give the SAME answer and the test
-    could not bite -- the inference in its docstring was simply inverted.
+    THREE UUIDS ON ONE SAMPLE_ID, ORDERED MIDDLE / LOWEST / HIGHEST, AND THE
+    ORDERING IS THE ENTIRE POINT. A TWO-row fixture cannot separate both
+    positional rules: killing last-row-wins needs `min == first`, killing
+    first-row-wins needs `min != first`, and one frame cannot satisfy both. Two
+    revisions of this test each picked one and silently left the other
+    uncovered -- the first ordering caught first-row-wins and missed
+    last-row-wins, the second did the reverse.
+
+    With three, `min != first`, `min != last` and `min != max` all hold at once,
+    so this single frame discriminates `min()` from first-row-wins,
+    last-row-wins, `max()`, prefer-own-else-max and prefer-own-else-None
+    together. Only `min()`-alone survives here, and the sibling preference test
+    is what kills that.
+
+    Verified by SIMULATING all seven candidate rules against this frame, not by
+    watching this test pass -- a passing test is not evidence that a fixture
+    discriminates, which is the whole lesson of the round that produced it.
+
+    Nothing on the real extract backs this up: 0 of the 79 ambiguous ids lack a
+    `samples` row, so the fallback branch is unexercised there, and last-row-wins
+    happens to agree with the preferred uuid for 79 of 79 anyway. Fixture-level
+    coverage is the ONLY coverage either positional rule has.
     """
-    edges = _edges((5, 20), (5, 21))
-    edges.loc[0, "child_uuid"] = "A-first"
-    edges.loc[1, "child_uuid"] = "Z-second"
+    edges = _edges((5, 20), (5, 21), (5, 22))
+    edges.loc[0, "child_uuid"] = "M-middle"
+    edges.loc[1, "child_uuid"] = "A-lowest"
+    edges.loc[2, "child_uuid"] = "Z-highest"
+
     rows = list(edges.child_uuid)
-    assert min(rows) != rows[-1], (
-        "the fixture no longer discriminates min() from last-write-wins")
+    assert len(set(rows)) == 3, "three distinct uuids or this frame proves less"
+    assert min(rows) != rows[0], "would not discriminate first-row-wins"
+    assert min(rows) != rows[-1], "would not discriminate last-row-wins"
+    assert min(rows) != max(rows), "would not discriminate max()"
 
     _, _, uuid_of, integrity = L.lineage_index(
-        edges, _samples(20, 21), _membership((5, 1)))
+        edges, _samples(20, 21, 22), _membership((5, 1)))
 
-    assert uuid_of[5] == "A-first"
+    assert uuid_of[5] == min(rows) == "A-lowest"
     assert integrity["ambiguous_uuid_samples"] == [5]
 
 
