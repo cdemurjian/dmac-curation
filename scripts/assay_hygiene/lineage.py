@@ -190,14 +190,52 @@ def lineage_index(
                            NOT A FUNCTION TO UUID ON THIS EXTRACT, which is the
                            same 86-sample collision `gate.sample_type_index`
                            documents and is why that index is keyed on uuid.
-                           `uuid_of` therefore resolves to the LEXICOGRAPHICALLY
-                           LOWEST of them, which is stable under any row order,
-                           and names every affected sample rather than picking
-                           silently -- last-write-wins over a frame whose row
-                           order is not stable across extracts is precisely the
+                           44 of the 79 pairs disagree on node TYPE (`OOC` vs
+                           `D.SPC`, `D.IMG` vs `D.SPC`) and all 79 carry edges
+                           under both uuids, so the id-keyed neighbour set is
+                           genuinely merging two nodes' lineage before any uuid
+                           is chosen.
+
+                           RESOLUTION: THE UUID THE `samples` FRAME CARRIES FOR
+                           THAT SAMPLE_ID, ELSE THE LEXICOGRAPHICALLY LOWEST.
+                           An earlier revision resolved by `min()` alone on the
+                           stated ground that "neither uuid is more correct than
+                           the other". That is a checkable claim and the check
+                           goes the other way. Measured: `samples` holds exactly
+                           one row per sample_id, and for 79 of 79 ambiguous ids
+                           exactly ONE of the two uuids is that id's own
+                           `samples.uuid` while the other appears NOWHERE in
+                           `samples.uuid` at all -- not merely on a different
+                           row, nowhere. `min()` alone picked the one absent
+                           from `samples` for 74 of 79, and for 38 of 38 of the
+                           REGISTERED ones, which are precisely the ambiguous
+                           samples that can be named as a qualifying lineage
+                           neighbour. So every ambiguous neighbour a curator
+                           could actually be shown carried a uuid they cannot
+                           look up, in the artifact they read.
+
+                           This is a PREFERENCE, not a join, and the difference
+                           is what keeps the 182-registered hole closed: both
+                           candidates already came out of the edge frame, and a
+                           sample with no `samples` row falls through to `min()`
+                           rather than to a blank. `uuid_of` stays total. It is
+                           also a no-op for the 161,451 unambiguous endpoints,
+                           whose single edge uuid is used whatever `samples`
+                           says -- which is what keeps the one NBSP-suffixed
+                           mysql uuid (sample 243066) from displacing the
+                           graph's own.
+
+                           `min()` remains the tiebreak because it is stable
+                           under any row order; last-write-wins over a frame
+                           whose row order is not stable across extracts is the
                            silent-wrong-answer bug this package is shaped to
-                           avoid. Neither uuid is more correct than the other;
-                           the graph genuinely holds two node rows for one id.
+                           avoid.
+
+                           WHICH OF THE TWO NODES HOLDS THE REGISTRATION IS
+                           UNKNOWABLE FROM THESE FRAMES. `membership` is keyed
+                           on sample_id, so it names the id and not the node.
+                           This rule picks the uuid a curator can find; it does
+                           not and cannot establish which node was registered.
                            The neighbour SET stays keyed on sample_id, because
                            keying it on (id, uuid) would count these 79 as two
                            neighbours apiece, which is worse than naming one
@@ -277,10 +315,17 @@ def lineage_index(
     missing_set = set(missing_membership)
     missing_rows = sum(1 for s in membership.sample_id if int(s) in missing_set)
 
-    # min(), never "the last one seen": the extractor's row order is not stable
-    # across extracts, so a positional rule would change the uuid printed on a
-    # curator's row between two runs over identical data.
-    uuid_of = {sid: min(us) for sid, us in seen_uuids.items()}
+    # Prefer the uuid `samples` carries for this id, else min(). Never "the last
+    # one seen": the extractor's row order is not stable across extracts, so a
+    # positional rule would change the uuid printed on a curator's row between
+    # two runs over identical data. `own` is absent from `us` for every
+    # unambiguous endpoint whose graph uuid differs from its mysql one, and for
+    # every sample with no `samples` row, and both fall through to min().
+    own_uuid = dict(zip((int(s) for s in samples.sample_id), samples.uuid))
+    uuid_of = {}
+    for sid, us in seen_uuids.items():
+        own = own_uuid.get(sid)
+        uuid_of[sid] = own if own in us else min(us)
     ambiguous = sorted(sid for sid, us in seen_uuids.items() if len(us) > 1)
 
     integrity = {

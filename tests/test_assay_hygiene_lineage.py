@@ -44,9 +44,17 @@ it is blank for the 243 unresolved endpoints -- 182 of them registered, so any
 of them can be the neighbour that is named.
 `test_the_neighbour_uuid_comes_off_the_edge_row_and_never_from_a_samples_join`
 is the regression, and it asserts its neighbour is absent from `samples` first
-so a join-based implementation cannot pass it. A fourth population falls out of
-that: 79 edge-endpoint sample_ids carry TWO uuids, so sample_id is not a
-function to uuid here, and those are resolved by `min()` and counted too.
+so a join-based implementation cannot pass it.
+
+A fourth population falls out of that: 79 edge-endpoint sample_ids carry TWO
+uuids, so sample_id is not a function to uuid here. Those resolve to THE UUID
+`samples` CARRIES FOR THAT ID, falling back to `min()` when there is no such
+row. A first revision used `min()` alone on the ground that neither uuid is more
+correct; measured, `min()` alone named a uuid appearing nowhere in
+`samples.uuid` for 38 of the 38 REGISTERED ambiguous ids, which are exactly the
+ones a curator can be shown. The fixtures for both branches are built so the
+rule they name DISAGREES with the alternative -- an earlier one was not, and
+passed under the bug it was written to catch.
 """
 import re
 import sys
@@ -71,9 +79,15 @@ EXTRACT = REPO / "assay-hygiene" / "extract"
 def _edges(*pairs):
     """An EDGE_COLUMNS frame from (child_id, parent_id) pairs.
 
-    uuids and types are synthesised, because no property under test reads
-    either: the index joins ids to ids. A test that needs a uuid says so by
-    building its own frame.
+    uuids are synthesised as `S-<id>` and are LOAD-BEARING: `uuid_of` is read
+    off these columns and five tests assert against `S-10`, `S-30`, `S-1` and
+    the like. An earlier version of this docstring said no property under test
+    read them, which was true before the neighbour uuid was routed through the
+    traversal and is false now. Types are still synthesised and still unread --
+    lineage is a per-sample question.
+
+    A test needing a uuid that is NOT `S-<id>` -- the ambiguity cases, which
+    need two uuids on one id -- overwrites the column on the frame this returns.
     """
     return pd.DataFrame(
         [(c, p, f"S-{c}", f"S-{p}", "T", "T", None, None, None) for c, p in pairs],
@@ -297,7 +311,7 @@ def test_lineage_supports_names_every_support_in_both_directions():
 
 
 def test_the_neighbour_uuid_comes_off_the_edge_row_and_never_from_a_samples_join():
-    """TIS 500 has NO `samples` row, and its uuid still reaches the caller.
+    """MUS 500 has NO `samples` row, and its uuid still reaches the caller.
 
     `FINDING_COLUMNS` requires `lineage_neighbour_uuid`. Handing a consumer only
     a neighbour sample_id makes the natural way to get that uuid a join through
@@ -306,9 +320,10 @@ def test_the_neighbour_uuid_comes_off_the_edge_row_and_never_from_a_samples_join
     neighbour. The lossy path would blank the uuid on exactly the population
     this module fought to keep, in the artifact a curator reads.
 
-    500 is that shape in miniature: registered in 11 Comet Chip, parent of 203,
-    absent from `samples`. The assertion that it IS absent is what makes the
-    rest of this test mean anything -- without it a `samples` join would pass.
+    500 is that shape in miniature: uuid `MUS-1`, the MUS parent of TIS 203 on
+    `make_fixture`'s TIS -> MUS hop, registered in 11 Comet Chip and absent from
+    `samples`. The assertion that it IS absent is what makes the rest of this
+    test mean anything -- without it a `samples` join would pass.
     """
     children_of, parents_of, uuid_of, _, registered = _fixture_world()
     fx = S.make_fixture()
@@ -328,6 +343,12 @@ def test_uuid_of_is_total_over_the_index_so_no_neighbour_is_named_without_one():
     partial map raises `KeyError` mid-run rather than returning a blank. The
     invariant making that subscript safe is that both indexes are built from the
     same edge rows the uuids are read off. Asserted rather than trusted.
+
+    THE VALUES ARE ASSERTED, NOT ONLY THE KEYS. A resolution rule that reached
+    for `samples` and fell back to `None` rather than to `min()` would leave
+    every key in place and every value blank, so a key-only check would pass it
+    -- and a blank `lineage_neighbour_uuid` is the exact outcome the whole uuid
+    routing exists to prevent.
     """
     children_of, parents_of, uuid_of, _, _ = _fixture_world()
 
@@ -335,40 +356,80 @@ def test_uuid_of_is_total_over_the_index_so_no_neighbour_is_named_without_one():
     reachable |= {n for ns in parents_of.values() for n in ns}
     reachable |= set(children_of) | set(parents_of)
     assert reachable and reachable <= set(uuid_of)
+    assert all(isinstance(uuid_of[s], str) and uuid_of[s] for s in reachable)
 
 
-def test_a_sample_id_carrying_two_uuids_resolves_to_the_lowest_and_is_counted():
-    """sample_id is NOT a function to uuid here, and picking silently is the bug.
+def test_an_ambiguous_uuid_resolves_to_the_one_the_samples_frame_carries():
+    """Of two uuids on one sample_id, name the one a curator can look up.
 
-    Measured on the 2026-08-14 extract, 79 edge-endpoint sample_ids carry TWO
-    uuids across the edge rows and 38 of them are registered. It is the same
-    86-sample collision `gate.sample_type_index` documents, and it is why THAT
-    index is keyed on uuid rather than on sample_id.
+    sample_id is NOT a function to uuid here: 79 edge-endpoint sample_ids carry
+    TWO uuids across the edge rows, 38 of them registered, 44 of the 79 pairs
+    disagreeing on node type. Same 86-sample collision `gate.sample_type_index`
+    documents, and why THAT index is keyed on uuid rather than sample_id.
 
-    Resolution is `min()` and never "the last row seen": the extractor's row
-    order is not stable across extracts, so a positional rule would change the
-    uuid printed on a curator's row between two runs over identical data. The
-    frame here presents the HIGHER uuid first, so a last-write-wins
-    implementation returns the other one and fails.
+    An earlier revision resolved by `min()` alone, on the stated ground that
+    "neither uuid is more correct than the other". That is a checkable claim and
+    the check goes the other way: `samples` holds one row per sample_id, and for
+    79 of 79 ambiguous ids exactly one of the two uuids IS that id's own
+    `samples.uuid` while the other appears nowhere in `samples.uuid` at all.
+    `min()` alone picked the absent one for 38 of the 38 REGISTERED ambiguous
+    ids -- the only ones that can be named as a qualifying neighbour -- so every
+    such neighbour carried a uuid the curator could not find.
 
-    Neither uuid is more correct than the other -- the graph holds two node rows
-    for one id -- so the COUNT is the point: the operator is told by name which
-    samples were resolved rather than read.
+    THE FRAME IS BUILT SO `min()` WOULD GET IT WRONG. `samples` carries
+    `Z-known` for sample 5 and the other edge row says `A-orphan`, so
+    `min()` answers `A-orphan` and only the preference answers `Z-known`. A
+    fixture where the preferred uuid is also the lowest cannot tell the two
+    rules apart, which is exactly how the previous version of this test passed
+    while the rule it named was untested.
     """
     edges = _edges((5, 20), (5, 21))
-    edges.loc[0, "child_uuid"] = "Z-second"
-    edges.loc[1, "child_uuid"] = "A-first"
+    edges.loc[0, "child_uuid"] = "Z-known"
+    edges.loc[1, "child_uuid"] = "A-orphan"
+    samples = _samples((5, "Z-known"), 20, 21)
+    assert min({"Z-known", "A-orphan"}) == "A-orphan", (
+        "the fixture no longer discriminates: min() must disagree here")
 
     children_of, parents_of, uuid_of, integrity = L.lineage_index(
-        edges, _samples(5, 20, 21), _membership((5, 1)))
+        edges, samples, _membership((5, 1)))
 
-    assert uuid_of[5] == "A-first"
+    assert uuid_of[5] == "Z-known"
     assert integrity["ambiguous_uuid_samples"] == [5]
     # ...and an unambiguous neighbour is untouched by the rule
     assert uuid_of[20] == "S-20"
     assert L.neighbour_registers(
         20, 9, children_of, parents_of, uuid_of, {5: {9}}
-    ) == (S.LIN_CHILD, 5, "A-first")
+    ) == (S.LIN_CHILD, 5, "Z-known")
+
+
+def test_an_ambiguous_uuid_with_no_samples_row_falls_back_to_the_lowest():
+    """The preference is a PREFERENCE, not a join, and this is what that means.
+
+    A sample with no `samples` row has no preferred uuid, and it must still get
+    one: `neighbour_registers` subscripts `uuid_of`, and the 243 unresolved
+    endpoints -- 182 of them registered -- are exactly the population a join
+    would blank. So the rule falls through to `min()` and `uuid_of` stays total.
+    Measured, 0 of the 79 ambiguous ids lack a `samples` row today, so this
+    branch is unexercised on the real extract and is covered only here.
+
+    THE LOWER UUID IS ON THE FIRST ROW, deliberately. Last-write-wins would then
+    answer `Z-second` where `min()` answers `A-first`, so the two rules
+    disagree. The previous version of this fixture put the HIGHER uuid first,
+    under which `min()` and last-write-wins give the SAME answer and the test
+    could not bite -- the inference in its docstring was simply inverted.
+    """
+    edges = _edges((5, 20), (5, 21))
+    edges.loc[0, "child_uuid"] = "A-first"
+    edges.loc[1, "child_uuid"] = "Z-second"
+    rows = list(edges.child_uuid)
+    assert min(rows) != rows[-1], (
+        "the fixture no longer discriminates min() from last-write-wins")
+
+    _, _, uuid_of, integrity = L.lineage_index(
+        edges, _samples(20, 21), _membership((5, 1)))
+
+    assert uuid_of[5] == "A-first"
+    assert integrity["ambiguous_uuid_samples"] == [5]
 
 
 def test_the_two_lineage_functions_cannot_be_swapped_for_one_another():
@@ -501,7 +562,7 @@ def test_a_neighbour_in_membership_but_absent_from_samples_still_settles_the_abs
     `neighbour_registers` reads `registered` and never `samples`. Excluding them
     would silently convert real absences into `LIN_NONE`.
 
-    In `make_fixture`, TIS 500 is exactly this: registered in 11 Comet Chip,
+    In `make_fixture`, MUS 500 is exactly this: registered in 11 Comet Chip,
     absent from `samples`, and the parent of TIS 203, which lacks 11.
     """
     children_of, parents_of, uuid_of, integrity, registered = _fixture_world()
@@ -632,6 +693,45 @@ def test_the_real_extract_reproduces_the_integrity_figures_this_module_documents
     assert len(integrity["ambiguous_uuid_samples"]) == 79
     assert len(integrity["membership_without_sample"]) == 362
     assert integrity["membership_without_sample_rows"] == 368
+
+
+def test_every_ambiguous_neighbour_is_named_by_a_uuid_the_samples_frame_carries():
+    """The measurement that overturned `min()`, re-derived rather than restated.
+
+    For all 79 ambiguous sample_ids exactly ONE of the two uuids is that id's own
+    `samples.uuid`, and the other appears nowhere in `samples.uuid` at all. The
+    second assertion is the one that matters: `min()` alone would have named the
+    nowhere-uuid for 38 of the 38 REGISTERED ambiguous ids, and a registered
+    ambiguous id is precisely one that can be returned as a qualifying lineage
+    neighbour and printed in `lineage_neighbour_uuid`.
+
+    The `min()` counts are asserted too, so this test fails if the population
+    stops being one where the two rules disagree -- at which point the rule is
+    no longer evidenced and someone has to re-measure rather than inherit it.
+    """
+    edges, samples, membership = _extract()
+    _, _, uuid_of, integrity = L.lineage_index(edges, samples, membership)
+
+    own = dict(zip((int(s) for s in samples.sample_id), samples.uuid))
+    everywhere = set(samples.uuid)
+    seen = {}
+    for i, u in zip(edges.child_id, edges.child_uuid):
+        seen.setdefault(int(i), set()).add(u)
+    for i, u in zip(edges.parent_id, edges.parent_uuid):
+        seen.setdefault(int(i), set()).add(u)
+
+    amb = integrity["ambiguous_uuid_samples"]
+    assert len(amb) == 79
+    assert all(len({u for u in seen[s] if u == own.get(s)}) == 1 for s in amb)
+    assert not any(u in everywhere for s in amb for u in seen[s] if u != own.get(s))
+
+    # every one of them is named by the uuid a curator can find...
+    assert all(uuid_of[s] == own[s] for s in amb)
+    # ...and min() alone would have named the other for the ones that matter
+    registered_amb = [s for s in amb if s in set(membership.sample_id.astype(int))]
+    assert len(registered_amb) == 38
+    assert sum(1 for s in registered_amb if min(seen[s]) != own[s]) == 38
+    assert sum(1 for s in amb if min(seen[s]) != own[s]) == 74
 
 
 def test_dropping_the_unresolved_endpoints_would_delete_registered_neighbours():
