@@ -464,8 +464,16 @@ def best_co_registration(
 # THE TWO CONFLICT KEYS ARE DIFFERENT NUMBERS AND BOTH ARE NAMED. An earlier
 # write-up of this measurement used "conflicted" in two senses one paragraph
 # apart -- the loose any-band sense and the strict banded-ROUTINE one -- and
-# quoted 12,360 for one population against 428 for the other. They differ by a
-# factor of 29 on the Mode 2 ceiling. Two names, so the ambiguity cannot recur.
+# quoted the LOOSE count for one population beside the STRICT count for another,
+# as though they were one measurement. Measured, each population separately:
+#
+#   claim-side rows      625 loose      428 strict     1.5x apart
+#   Mode 2 ceiling    12,360 loose       14 strict     883x apart
+#
+# The first version of THIS comment repeated the very pairing it was added to
+# stop, setting 12,360 against 428 -- a loose ceiling count against a strict
+# claim-side one -- and called them 29x apart, which is neither ratio. Two keys
+# and two names, so the ambiguity has to be spelled to recur.
 CENSUS_KEYS = (
     "rows",
     "rows_with_counter_evidence",
@@ -530,9 +538,11 @@ def counter_evidence_census(
                                   the row already reads `CLS_ALT_LABEL` and the
                                   column names WHAT the proposal duplicates
 
-    The two conflict counts are separate keys because they are separate numbers:
-    over the Mode 2 ceiling they read 12,360 and 14, a factor of 29 apart, and a
-    single name for both is how one gets quoted for the other.
+    The two conflict counts are separate keys because they are separate numbers,
+    and the gap is population-dependent: over the claim-side rows above they read
+    625 and 428, and over the Mode 2 ceiling 12,360 and 14 -- 1.5x apart in one
+    population and 883x in the other. A single name for both is how one gets
+    quoted for the other, which is what happened here before they were split.
 
     Read-only, like everything here. It counts; it proposes nothing.
     """

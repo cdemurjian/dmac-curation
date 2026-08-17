@@ -707,6 +707,19 @@ def test_a_well_supported_zero_survives_the_best_of_and_names_what_it_opposes():
     assert got.support != got.alt_label_support
     assert got.rate != table[("CON", got.alt_label_assay_id, 33)][0]
 
+    # THE CLASSIFICATION IS NOT CHANGED BY THIS TASK, asserted here so the change
+    # is visible when Tasks 5/6 make it. An edit on 2026-08-17 left these four
+    # lines attached to the NEXT test in the file while this docstring went on
+    # claiming them -- no coverage was lost, but the guard Tasks 5 and 6 have to
+    # find lived in a world named for something else.
+    band = K.compat_band(got.rate, got.support)
+    assert band == S.BAND_ROUTINE
+    assert K.band_establishes(band) == S.CLS_ABSENCE_COMPAT
+
+    # the row has somewhere to put both halves
+    assert "co_reg_alt_label_internal_assay_id" in S.FINDING_COLUMNS
+    assert "co_reg_alt_label_pop" in S.FINDING_COLUMNS
+
 
 def test_two_equally_supported_zeros_break_to_the_lowest_assay_id():
     """The counter-evidence tie-break, which had no test at all.
@@ -752,16 +765,6 @@ def test_two_equally_supported_zeros_break_to_the_lowest_assay_id():
     assert max(zeros) == 40 != got.alt_label_assay_id, (
         "a highest-id-on-tie rule would answer 40")
     assert got.alt_label_assay_id == min(zeros)
-
-    # the classification is NOT changed by this task, and that is asserted so
-    # the change is visible when Tasks 5/6 make it
-    band = K.compat_band(got.rate, got.support)
-    assert band == S.BAND_ROUTINE
-    assert K.band_establishes(band) == S.CLS_ABSENCE_COMPAT
-
-    # the row has somewhere to put both halves
-    assert "co_reg_alt_label_internal_assay_id" in S.FINDING_COLUMNS
-    assert "co_reg_alt_label_pop" in S.FINDING_COLUMNS
 
 
 def test_a_thinly_supported_zero_is_not_counter_evidence():
@@ -823,37 +826,50 @@ def _gated(*rows):
 
 
 def _census_world():
-    """A world where every census rule excludes or admits exactly one sample.
+    """A world where every census outcome is reached by exactly one sample.
 
-        pop(CEN,25) =  54  zero against 33   -> counter-evidence, SMALL
+        pop(CEN,25) =  55  zero against 33   -> counter-evidence, SMALL
         pop(CEN,31) = 203  zero against 33   -> counter-evidence, LARGE
-        pop(CEN,32) =  44  36 also in 33     -> 0.818, BAND_ROUTINE, the winner
+        pop(CEN,26) =  41  10 also in 33     -> 0.244, BAND_SOMETIMES
+        pop(CEN,32) =  44  36 also in 33     -> 0.818, BAND_ROUTINE
 
-    Samples 9001-9006 each exercise one rule, and no two land in the same set of
-    counts.
+    THE `BAND_SOMETIMES` WINNER (26) IS WHAT SEPARATES THE TWO CONFLICT SENSES.
+    Without it every conflicted row in this world bands ROUTINE, so
+    `conflicts_any_band` and `conflicts_at_band_routine` are forced equal and
+    the collapse mutant -- computing the loose count with the strict test -- is
+    invisible. Measured: with 26 absent the mutant produced byte-identical
+    counts. That is the exact distinction `CENSUS_KEYS` was split to preserve,
+    and only the skipif-guarded real-extract test killed it, so it went
+    unguarded on any clone without the gitignored extract.
     """
     nodes, membership = _population([
         ("CEN", 50, [25]),
         ("CEN", 200, [31]),
+        ("CEN", 10, [26, 33]),         # 10 of 41 -> a BAND_SOMETIMES winner
+        ("CEN", 30, [26]),
         ("CEN", 36, [32, 33]),
         ("CEN", 4, [32]),
         ("CEN", 40, [33]),
     ])
     extra_nodes, extra_membership = _population([
-        ("CEN", 1, [25, 31, 32]),      # 9001 conflict, reaches a mode
-        ("CEN", 1, [25, 31, 32]),      # 9002 conflict, carries a FLOOR failure
+        ("CEN", 1, [25, 31, 32]),      # 9001 conflict at ROUTINE, clean gate
+        ("CEN", 1, [25, 31, 32]),      # 9002 conflict at ROUTINE, FLOOR failure
         ("CEN", 1, [25, 31, 32]),      # 9003 BLOCKED, must not be counted
         ("CEN", 1, [25]),              # 9004 winner is itself a zero
         ("CEN", 1, [32]),              # 9005 no counter-evidence at all
         ("CEN", 1, [33]),              # 9006 already holds the claim
+        ("CEN", 1, [25, 26]),          # 9007 conflict at SOMETIMES, NOT ROUTINE
     ], start=9001)
-    # 9007 is registered NOWHERE, so it needs a node row and no membership
+    # 9009 is registered NOWHERE, so it needs a node row and no membership row.
+    # `_population` hands ids out in ONE ascending run and consumed 9001-9007
+    # above, so the next free id is 9008; 9009 is used to leave an obvious gap
+    # rather than to abut the block.
     extra_nodes = pd.concat(
-        [extra_nodes, pd.DataFrame([("CEN-9007", 9007, "CEN")],
+        [extra_nodes, pd.DataFrame([("CEN-9009", 9009, "CEN")],
                                    columns=S.NODES_COLUMNS)], ignore_index=True)
     return (pd.concat([nodes, extra_nodes], ignore_index=True),
             pd.concat([membership, extra_membership], ignore_index=True),
-            _assays(25, 31, 32, 33))
+            _assays(25, 26, 31, 32, 33))
 
 
 def test_the_census_counts_only_rows_a_finding_could_actually_be_written_for():
@@ -869,21 +885,32 @@ def test_the_census_counts_only_rows_a_finding_could_actually_be_written_for():
     THE GUARD IS THAT ALL FIVE COUNTS DIFFER, and that each excluded sample is
     excluded by a DIFFERENT rule:
 
-        9001  conflict, clean gate                 counted
-        9002  conflict, GATE_LOW_SUPPORT           counted -- a tuned floor
-                                                   MARKS and does not block, so
-                                                   dropping it would silently
-                                                   apply the blocking rule this
-                                                   package spent a task removing
-        9003  GATE_UNREACHABLE                     excluded, rule 1
-        9004  winner is itself a well-supported    counted, and it is the
-              zero                                 self-consistent bucket
-        9005  no zero among its registrations      counted in `rows` only
-        9006  already registered in the claim      excluded, rule 3
-        9007  registered nowhere (Mode 1)          excluded, rule 2
+        9001  conflict, winner bands ROUTINE      counted in BOTH conflict senses
+        9002  the same, plus GATE_LOW_SUPPORT     counted -- a tuned floor MARKS
+                                                  and does not block, so dropping
+                                                  it would silently apply the
+                                                  blocking rule this package
+                                                  spent a task removing
+        9003  GATE_UNREACHABLE                    excluded, rule 1
+        9004  winner is itself a well-supported   counted, and it is the
+              zero                                self-consistent bucket
+        9005  no zero among its registrations     counted in `rows` only
+        9006  already registered in the claim     excluded, rule 3
+        9007  conflict, winner bands SOMETIMES    counted in the LOOSE sense
+                                                  only -- the row that makes the
+                                                  two conflict counts differ
+        9009  registered nowhere (Mode 1)         excluded, rule 2
 
-    A rule that admitted 9003, 9006 or 9007, or dropped 9002, moves a count that
-    no other row can restore.
+    A rule that admitted 9003, 9006 or 9009, or dropped 9002 or 9007, moves a
+    count that no other row can restore.
+
+    THREE OF THE FOUR POPULATION RULES EXCLUDE A SAMPLE HERE; the fourth cannot.
+    Rule 4 -- one row per (claim, TYPE) -- is a MULTIPLICITY rule and excludes
+    nothing by construction, so no sample can demonstrate it by absence. It is
+    exercised instead by
+    `test_a_sample_typed_under_two_nodes_counts_under_both_types`, which shows a
+    dual-typed sample counting under both. An earlier version of this docstring
+    said all four rules exclude a sample, which overstated by one.
     """
     nodes, membership, assays = _census_world()
     table = K.co_registration(membership, assays, nodes)
@@ -898,18 +925,26 @@ def test_the_census_counts_only_rows_a_finding_could_actually_be_written_for():
         (9005, 33, ""),
         (9006, 33, ""),
         (9007, 33, ""),
+        (9009, 33, ""),
     )
     counts, conflicts, alt_labels = K.counter_evidence_census(
         gated, table, registered, types)
 
     assert set(counts) == set(K.CENSUS_KEYS)
-    assert counts["rows"] == 4                       # 9001 9002 9004 9005
-    assert counts["rows_with_counter_evidence"] == 3  # ...minus 9005
-    assert counts["conflicts_any_band"] == 2          # 9001 9002
-    assert counts["conflicts_at_band_routine"] == 2
+    assert counts["rows"] == 5                        # 9001 9002 9004 9005 9007
+    assert counts["rows_with_counter_evidence"] == 4  # ...minus 9005
+    assert counts["conflicts_any_band"] == 3          # 9001 9002 9007
+    assert counts["conflicts_at_band_routine"] == 2   # ...minus 9007, SOMETIMES
     assert counts["self_consistent_alt_labels"] == 1  # 9004
-    assert len(set(counts.values())) == 4, (
-        "the counts must not coincide, or a rule could move one unseen")
+    assert len(set(counts.values())) == 5, (
+        "ALL FIVE counts must differ, or a rule could move one unseen. An "
+        "earlier version of this world conceded 4 here while the docstring "
+        "claimed 5, and the count it could not separate was exactly the pair "
+        "CENSUS_KEYS was split to preserve.")
+    assert counts["conflicts_any_band"] != counts["conflicts_at_band_routine"], (
+        "9007's winner bands SOMETIMES, so it is a conflict in the loose sense "
+        "and not in the strict one; without it the collapse mutant -- computing "
+        "the loose count with the strict test -- is invisible")
 
     # the blocked row is the one a `gate == GATE_PASS` test would ALSO have
     # dropped 9002 for; this asserts the correct rule, not the convenient one
