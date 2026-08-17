@@ -1,507 +1,569 @@
-# Assay Hygiene Increment 2: Mode 1 and Mode 2 detection, read-only
+# Assay Hygiene Increment 2: the vocabulary gate, Mode 1 and Mode 2 detection
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build stage C, the classifier, for all three modes. Decide what WOULD
-change and why, write it to `findings.csv`, and re-scope increment 1's Mode 3
-output by subtraction. Nothing in this increment writes to production, and no
-curator workbook is produced.
+**Goal:** Gate every metadata claim on whether the term that produced it is
+credible, then decide what the pipeline would PROPOSE for Modes 1 and 2, and
+write it to `findings.csv`. Nothing writes to production. Nothing is decided;
+everything is proposed for the operator to approve later.
 
-**Architecture:** Two new deterministic corroboration tests join the evidence
-layer increment 1 already shipped. The LINEAGE test asks whether a parent or
-child already registers a claimed assay; the COMPATIBILITY test asks whether two
-assays routinely coexist on a sample type. Stage C runs Mode 1 (no registration
-at all, metadata decides), Mode 2 (a neighbour carries an assay this sample
-lacks, precedent decides, in both directions), and Mode 3 (the residue after
-both tests). A backtest produces Mode 2's threshold curve rather than a
-threshold being chosen in advance.
+**Architecture:** A vocabulary gate runs before any mode and rejects claims
+whose term is incoherent, unsupported, or names an assay the sample's type has
+never been registered in. Surviving claims meet three deterministic tests
+(reachability, lineage, co-registration) whose ORDER is a contract. Mode 1
+proposes an assay for samples registered in nothing. Mode 2 proposes adding a
+sample to an assay a lineage neighbour already holds, in two directions of very
+unequal strength. Mode 3 proposes nothing, because it has no working detector.
 
 **Tech Stack:** Python 3.11+, pandas, pyarrow, pytest. PEP 723 inline dependency
 blocks, matching every other script in `scripts/`.
 
 **Spec:** `docs/superpowers/specs/2026-08-14-assay-hygiene-three-mode-design.md`,
-**as amended 2026-08-17**. Read the section "Amendment: absence is not
-contradiction" before Task 1. The unamended mode table is the artifact that
-produced the defect this increment exists to fix.
+**as amended 2026-08-17 (the SECOND amendment, "what the three modes actually
+are")**. Read it before Task 1. An earlier amendment the same day is superseded
+and planning from it reproduces a known defect.
 
-**This is increment 2 of 3.** Increment 1 built the evidence layer and a
-mis-scoped Mode 3. Increment 3 is stages D, E and F: adjudication, the curator
-workbook, and the write path behind the addition probe. **This increment writes
-nothing to production and produces no APPROVE column,** because an APPROVE
-column exists to gate a write and there is no write here to gate.
+**This is increment 2 of 3.** Increment 1 built the evidence layer and a Mode 3
+whose output is known bad. Increment 3 is adjudication, the two approval
+surfaces, and the write path.
+
+## The binding constraint
+
+**Nothing decides. Everything proposes.** No mode writes on its own authority,
+in any mode, ever. Thresholds rank and triage so the operator reads the
+strongest evidence first; they do not grant permission. If you find yourself
+writing a code path where a number authorises a change, you have misread the
+spec.
+
+In this increment nothing writes at all, so the constraint shows up as
+vocabulary: `decided_by` is a provenance field naming which evidence produced a
+PROPOSAL, and no function is named `decide_*`.
 
 ## Global Constraints
 
-- **P1 sentinel:** scripts must never create, modify, or delete anything inside the plugin checkout. All project paths resolve from the current working directory. `tests/conftest.py::plugin_sentinel` enforces this and will fail the suite otherwise.
+- **P1 sentinel:** scripts must never create, modify, or delete anything inside the plugin checkout. All project paths resolve from the current working directory. `tests/conftest.py::plugin_sentinel` enforces this.
 - **Output root** is `assay-hygiene/` under the current working directory.
 - **PEP 723 header** on every script: `requires-python = ">=3.11"` plus explicit dependencies.
 - **Test command:** `uv run --with pytest --with pandas --with pyarrow --with openpyxl --with requests pytest tests/<file> -v`
 
-  **`--with requests` is required and increment 1's plan omitted it.** Without it the suite does not run at all: `tests/test_nextseek_api_detect.py` imports `scripts/nextseek_api.py`, which imports `requests`, and collection dies with `ModuleNotFoundError` before a single test executes. Verified 2026-08-17.
-- **Full suite must stay green, measured as a DELTA.** Run the full suite yourself before you start and record the number. Increment 1 recorded an absolute that turned out not to be reproducible. Every task below states how many tests it adds. Never weaken an existing assertion; a zero-deletion diff on an existing test file is the thing to verify.
-
-  For reference only, the reading on 2026-08-17 at `8a7376b` plus this plan's two documents and the reproducer script was **901 passed, 13 skipped**. Treat that as a sanity check on your environment, not as a target: if you measure something wildly different, your environment differs from the one this plan was written against and that is worth resolving first.
-- **Stale bytecode silently invalidates mutation testing on this machine.** `PYTHONPYCACHEPREFIX` is set to a shared cache. If you verify a test by breaking the implementation and the test still passes, suspect the cache before you conclude the test is weak.
-- **Read-only, and harder than last time.** Increment 1 could say "no write path in this increment". This one classifies things that WILL be written in increment 3, so the temptation to "just add the writer while I'm here" is real. There is no writer in this increment. `stage0_apply.py` and `driver_stage0.py` exist in this package and carry live Cypher; nothing you build may import them.
-- **Rule key is `(project_id, child_type, parent_type, internal_assay_id)`.** NOT `assays.title`, NOT `assays.id`.
-- **`internal_assay_id` is NULLABLE and is a RULE_KEY component.** A pandas `groupby(RULE_KEY)` defaults to `dropna=True` and silently discards the 17 assay records with no junction row. Pass `dropna=False`, or apply the `(assay_id, assays.title)` fallback first.
-- **Count ROWS, not edges.** A write is one `(sample, assay)` pair. Every population figure in this plan is a row count or a sample count and says which. An edge count overstates write volume by up to 146x on this data.
+  **`--with requests` is required and increment 1's plan omitted it.** Without it collection dies on `tests/test_nextseek_api_detect.py` before a single test runs. Verified 2026-08-17.
+- **Full suite must stay green, measured as a DELTA.** Measure the baseline yourself first. Reading on 2026-08-17: **901 passed, 13 skipped**. Treat it as an environment sanity check, not a target.
+- **Stale bytecode silently invalidates mutation testing here.** `PYTHONPYCACHEPREFIX` points at a shared cache. If you break an implementation and its test still passes, suspect the cache before concluding the test is weak.
+- **Read-only.** Nothing here touches MySQL, Neo4j, or the API. `stage0_apply.py` and `driver_stage0.py` carry live Cypher; nothing you build may import them. Verify by grep before you finish.
+- **Rule key is `(project_id, child_type, parent_type, internal_assay_id)`.**
+- **`internal_assay_id` is NULLABLE and is a RULE_KEY component.** `groupby(RULE_KEY)` defaults to `dropna=True` and silently discards the 17 junction-less assays.
+- **Count ROWS, not edges.** A write is one `(sample, assay)` pair.
 - **Every measured figure carries its scope in the sentence that states it.**
-- **Percentages and counts quoted in this plan are justification, not fixtures.** Re-derive any figure before you assert it in a test or a report. If a re-derived number disagrees with this document by more than a point, STOP and report it rather than adjusting the assertion. This happened on every task of increment 1 and the implementers were right every time.
+- **Re-derive every figure in this plan before asserting it in a test.** If a re-derived number disagrees by more than a point, STOP and report. This plan already shipped one set of wrong numbers; see below.
 - **Commit style:** end messages with `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`.
+
+### Two definitions of "registered", and the one you must use
+
+**This plan's first draft got this wrong and its verification targets certified
+the bug.** There are two populations and they differ by 82 samples:
+
+```
+samples with ANY membership row              157,151   -> 6,242 unregistered
+samples with a MAPPABLE membership row       157,069   -> 6,324 unregistered
+registered ONLY via a junction-less assay         82
+```
+
+**Use the ANY-membership definition. Mode 1's population is 6,242.** A sample
+registered only under one of the 17 junction-less assays IS registered; its
+assay's internal identity is merely unknown. Calling it unregistered proposes a
+first assay for a sample that already has one. `audit.py`'s docstring argues
+exactly this for the audit and Task 5 below inherits it.
+
+This is the branch's signature defect in its purest form: one word, two
+meanings, one frame apart.
 
 ### A note on this plan's code blocks
 
-Increment 1's retrospective was blunt about it: every one of its 8 tasks had at
-least one defect in a code block the planner wrote, five planner-written tests
-certified properties in their own titles without testing them, one failed
-against the planner's own implementation, and one planner fix created a
-data-loss bug.
+Increment 1's retrospective: a defect in a planner-written code block in every
+one of its 8 tasks, five planner-written tests that certified properties in
+their own titles without testing them, one planner fix that created a data-loss
+bug. This plan therefore specifies **interfaces, contracts, invariants and the
+cases that must be tested**, and supplies no implementation bodies.
 
-So this plan deliberately specifies **interfaces, contracts, invariants and the
-cases that must be tested**, and does not supply implementation bodies. Write
-the code test-first. Where this plan does show code it is a signature or a data
-shape, not a body to paste.
-
-If you disagree with something here, measure it and say so. Every implementer on
-increment 1 disagreed with something in their brief, proved it by measurement,
-and was right.
+Adversarial review of this plan's first draft found six further defects in it,
+including the population error above. Assume more remain. Measure, disagree, and
+say so; every implementer on increment 1 who disagreed with their brief was
+right.
 
 ## Measured starting state
 
-All against `assay-hygiene/extract/`, taken after the stage 0 production write,
-and `assay-hygiene/claims.parquet` as increment 1 produced it. Reproduce the
-disposition figures with `scripts/measure_absence_vs_contradiction.py`.
+Against `assay-hygiene/extract/` post-stage-0, and `claims.parquet` /
+`vocabulary.csv` as increment 1 produced them.
 
 ```
-samples in extract                       163,393
-  registered in >=1 internal assay       157,069
-  registered in NOTHING                    6,324   <- Mode 1 population
+samples                                  163,393
+  registered (ANY membership row)        157,151
+  registered in NOTHING                    6,242   <- Mode 1 population
 
-MODE 1, unregistered samples that carry a metadata claim
-  samples                                  1,883
-  (sample, assay) rows                     2,977
-  at strong/corroborated tier only    719 samples / 723 rows
+MODE 1
+  unregistered samples carrying a claim    1,827
+  (sample, assay) rows                     2,912
+  at strong+corroborated tier                671 samples / 671 rows
 
-MODE 2 ceiling, unfiltered by precedent, both directions
-  ADD_PARENT rows (child has it, parent does not)    50,508 over  39,773 samples
-  ADD_CHILD  rows (parent has it, child does not)   111,039 over  97,635 samples
-  union, distinct (sample, assay)                   161,420 over 110,170 samples
+MODE 2 CEILING, unfiltered by precedent, over DERIVED_FROM
+  ADD_PARENT      54,780 rows over  42,611 samples
+  ADD_CHILD      116,365 rows over 102,556 samples
+  union          171,013 rows over 115,599 samples
 
-MODE 3, increment 1's 866 flags re-scoped by both tests
-  ABSENCE_LINEAGE   351   40.5%
-  ABSENCE_COMPAT    250   28.9%
-  UNRESOLVED        214   24.7%
-  CONTRADICTION      51    5.9%   <- what stays Mode 3
+VOCABULARY, the largest single defect source
+  learned terms                                736  (0 curator-corrected, ever)
+  unresolved tail                              266
+  claims whose assay is unreachable for the type, of 866 flags     31
+  ABSENCE_COMPAT flags from ONE mapping     212 of 250
 ```
 
-The Mode 2 ceiling is **unfiltered**: it is every candidate before precedent
-says anything, and it is the largest number this project will ever print. It is
-not a plan to write 161,420 rows. Precedent thresholds cut it down and Task 6
-produces the curve that decides by how much. State it this way in the report;
-an unqualified 161,420 will read as an intent to write.
+**The Mode 2 numbers are a CEILING** and the word must accompany them
+everywhere. Precedent cuts them down hard: at `rate >= 0.5`, ADD_CHILD survives
+at **3,663 of 116,365, about 3%**.
 
-### Four extract defects you must handle explicitly
+**Reconcile the ceiling before you use it.** Two independent computations
+disagree: this plan reads 54,780 / 116,365; an independent review read 55,007 /
+117,463 over the same relation. Neither has been root-caused. Task 4 step 4
+requires you to settle it and report which was wrong and why. Do not average
+them and do not pick the one that matches your code.
 
-Increment 1's rule is that nothing is dropped silently. All four of these are
-silent drops in the natural pandas spelling.
+### Which lineage relation
+
+**Use `DERIVED_FROM` (`edges.parquet`), not `CHILD_OF` (`childof.parquet`).**
+
+```
+CHILD_OF        742,534 pairs    ceiling  50,508 / 111,039
+DERIVED_FROM    794,592 pairs    ceiling  54,780 / 116,365
+divergence      52,185 DF-only, 126 CO-only
+```
+
+Precedent, the decider, is mined over `DERIVED_FROM`. A lineage test over
+`CHILD_OF` asks about a different graph than its own evidence was measured on.
+The first draft of this plan used `CHILD_OF` without saying so, which moved
+every Mode 2 figure by roughly 9%.
+
+### Four extract defects, each a silent drop in the natural pandas spelling
 
 | Defect | Size | Where it bites |
 |---|---|---|
-| `sample_id` in `membership` but absent from `samples.parquet` | **362** samples, all registered | any `samples`-driven loop that assumes membership resolves |
-| duplicate `uuid` across `sample_id`s | 14 uuids, 28 rows | `set_index("uuid")` raises `InvalidIndexError`; `.map()` fans out |
-| `childof` rows not resolvable to a sample on both ends | 755 of 742,534 | the lineage index |
-| `membership` rows whose assay has no junction row | 279 | the internal-id crossing, already handled by `assay_index` |
-
-The 362 are new and were found while writing this plan. They are registered in
-an internal assay but have no row in the samples extract, so they cannot carry a
-claim, cannot be typed from a uuid, and will not appear in any Mode 1 or Mode 3
-population. They CAN appear as a neighbour in the lineage test. Decide
-deliberately whether a neighbour you cannot type is usable evidence, document
-the decision, and count them in the report either way.
+| `sample_id` in `membership` but absent from `samples.parquet` | **362**, all registered | any `samples`-driven loop |
+| duplicate `uuid` across `sample_id`s | 14 uuids, 28 rows | `set_index("uuid")` RAISES; `.map()` fans out |
+| edge rows not resolvable to a sample on both ends | 755 over CHILD_OF | the lineage index |
+| `membership` rows whose assay has no junction row | 279 over 17 assays | the internal-id crossing |
 
 ## File Structure
 
 | File | Responsibility |
 |---|---|
-| `scripts/assay_hygiene/_schema.py` | MODIFY. Stage C column contracts, mode and disposition vocabulary, corroboration bands, fixture extension. |
-| `scripts/assay_hygiene/lineage.py` | CREATE. Test 1. Parent/child indexes and `neighbour_registers`, with the integrity guards. |
-| `scripts/assay_hygiene/compatibility.py` | CREATE. Test 2. Co-registration rate per `(sample_type, registered, claimed)` with support. |
-| `scripts/assay_hygiene/classify.py` | CREATE. Stage C. Modes 1, 2 and 3 over one pass, emitting `FINDING_COLUMNS`. |
-| `scripts/assay_hygiene/backtest.py` | CREATE. Mode 2's held-out recovery curve. |
+| `scripts/assay_hygiene/_schema.py` | MODIFY. Stage C contracts, mode/class vocabulary, gate outcomes, bands. |
+| `scripts/assay_hygiene/gate.py` | CREATE. The vocabulary gate. Runs before every mode. |
+| `scripts/assay_hygiene/lineage.py` | CREATE. Neighbour indexes over DERIVED_FROM, with integrity guards. |
+| `scripts/assay_hygiene/compatibility.py` | CREATE. Co-registration rate and support. |
+| `scripts/assay_hygiene/classify.py` | CREATE. Stage C. Modes 1 and 2, one pass. |
+| `scripts/assay_hygiene/backtest.py` | CREATE. Mode 2's recovery curve, both directions. |
 | `scripts/assay_hygiene/run_detect.py` | CREATE. The wired read-only run and the operator report. |
-| `scripts/measure_absence_vs_contradiction.py` | EXISTS. The spec's reproducer. Task 7 must agree with it. |
+| `scripts/measure_absence_vs_contradiction.py` | EXISTS, and is TEST-LESS. Treat as a cross-check, never as an oracle. |
+| `tests/test_assay_hygiene_gate.py` | CREATE. |
 | `tests/test_assay_hygiene_lineage.py` | CREATE. |
 | `tests/test_assay_hygiene_compatibility.py` | CREATE. |
 | `tests/test_assay_hygiene_classify.py` | CREATE. |
 | `tests/test_assay_hygiene_backtest.py` | CREATE. |
 
-`lineage.py` and `compatibility.py` are separate modules on purpose, for the
-same reason `precedent.py` and `claims.py` are: they answer different questions
-against different populations and fail in unrelated ways. When a disposition
-looks wrong you need to know which test to distrust. Neither imports the other.
-
 ---
 
 ### Task 1: Stage C schema contracts
 
-**Files:**
-- Modify: `scripts/assay_hygiene/_schema.py`
-- Test: extend `tests/test_assay_hygiene_schema.py` (or the existing schema test file; find it, do not create a second)
+**Files:** modify `scripts/assay_hygiene/_schema.py`; extend the existing schema test file (find it; do not create a second).
 
-**Adds ~6 tests.**
+**Adds ~7 tests.**
 
-`FINDING_COLUMNS` currently describes a per-EDGE finding, left over from the
-2026-08-12 design. Stage C emits one row per `(sample, claimed_assay)`, because
-that is the unit of a write. Replacing it is a contract change: grep for every
-reader before you touch it.
+`FINDING_COLUMNS` currently describes a per-EDGE finding and **has no consumer
+anywhere in the package**. Neither do `A_ADD_PARENT`, `A_ADD_CHILD`,
+`A_ADD_TO_ASSAY`, `A_FLAG_ONLY`, `A_NONE`, or `RULE_COLUMNS`. They are dead
+vocabulary, not anticipation. You are their first consumer, so you may reshape
+them freely, but say in the commit message which you checked.
 
-**This is the branch's signature defect, so read this twice.** Increment 1
-shipped the same bug four times: a column keeps its name while its meaning
-changes one frame away, and the fourth instance was caught only by a
-whole-branch review. `FINDING_COLUMNS` changing from per-edge to per-sample is
-exactly that shape. Either rename it, or verify every existing reference and say
-in the commit message what you checked.
-
-- [ ] **Step 1: Write the failing tests** covering: every new constant is
-  distinct from every existing one; the disposition vocabulary is closed;
-  `FINDING_COLUMNS` has no duplicate names; the fixture round-trips through the
-  new columns.
+- [ ] **Step 1: Write the failing tests.** New constants distinct from existing
+  `V_*` / `A_*` / `T_*` families; the class vocabulary is closed; no duplicate
+  column names; the fixture round-trips.
 - [ ] **Step 2: Add the vocabulary.**
 
-Required constants, values are yours to choose but must not collide with the
-existing `V_*` / `A_*` / `T_*` families:
-
 ```
-MODE_1, MODE_2, MODE_3                  which mode claimed this row
-DISP_ABSENCE_LINEAGE                    a neighbour already registers the claim
-DISP_ABSENCE_COMPAT                     no neighbour, but the pair coexists
-DISP_UNRESOLVED                         neither test settles it
-DISP_CONTRADICTION                      no neighbour, and the pair never coexists
-LIN_CHILD, LIN_PARENT, LIN_NONE         lineage test outcome
+MODE_1, MODE_2                      which mode proposes this row
+MODE_3 exists but is never emitted  no detector; assert this in a test
+GATE_PASS, GATE_UNREACHABLE, GATE_INCOHERENT, GATE_LOW_SUPPORT
+CLS_ABSENCE_LINEAGE, CLS_ABSENCE_COMPAT, CLS_ALT_LABEL, CLS_UNRESOLVED
+LIN_CHILD, LIN_PARENT, LIN_NONE
 BAND_NEVER, BAND_SOMETIMES, BAND_ROUTINE, BAND_NO_SUPPORT
-MIN_CO_REG_SUPPORT = 30                 reporting floor, NOT a tuned threshold
-CO_OCCUR_BAND = 0.5                     reporting band, NOT a tuned threshold
+MIN_CO_REG_SUPPORT = 30             reporting floor, NOT a tuned threshold
+CO_OCCUR_BAND = 0.5                 reporting band, NOT a tuned threshold
 ```
 
 Both numbers carry a comment saying they are reporting bands with no backtest
-behind them, and that the spec's position is that thresholds are an OUTPUT of a
-curve. Do not let a later reader mistake them for validated cutoffs.
+behind them and that they gate nothing.
 
-- [ ] **Step 3: Redefine `FINDING_COLUMNS`**, one row per `(sample, claimed
-  assay)`, carrying at minimum: `sample_id`, `uuid`, `sample_type`, `project_id`,
-  `registered_internal_assay_ids`, `claimed_internal_assay_id`,
-  `claimed_internal_assay_title`, `mode`, `disposition`, `claim_tier`,
-  `source_field`, `raw_value`, `lineage`, `lineage_neighbour_uuid`,
+- [ ] **Step 3: Redefine `FINDING_COLUMNS`**, one row per `(sample, proposed
+  assay)`: `sample_id`, `uuid`, `sample_type`, `project_id`,
+  `registered_internal_assay_ids`, `proposed_internal_assay_id`,
+  `proposed_internal_assay_title`, `mode`, `classification`, `gate`,
+  `claim_tier`, `contested`, `source_field`, `raw_value`, `vocab_support`,
+  `vocab_purity`, `vocab_provenance`, `lineage`, `lineage_neighbour_uuid`,
   `co_reg_rate`, `co_reg_pop`, `compat_band`, `precedent_rate`,
-  `precedent_n_both`, `precedent_n_child_only`, `decided_by`, `action`.
-- [ ] **Step 4: Extend `make_fixture()`** so it can produce all four
-  dispositions and both Mode 2 directions. The existing fixture cannot express a
-  sample legitimately holding two assays, which is the domain rule this whole
-  increment encodes, so it cannot currently express the case that matters.
-- [ ] **Step 5: Run the full suite. Report the delta.**
+  `precedent_direction`, `precedent_n_both`, `precedent_n_child_only`,
+  `precedent_n_parent_only`, `evidence_summary`, `action`.
+
+  Name the assay column `proposed_*`, not `claimed_*` or `target_*`. Under the
+  binding constraint the row is a proposal, and the column name should make a
+  later reader unable to mistake it for a decision.
+- [ ] **Step 4: Extend `make_fixture()`** to express: a sample legitimately in
+  two assays; both Mode 2 directions; a gate rejection of each kind; a hop whose
+  `propagation_rate` and `reverse_rate` DIFFER.
+- [ ] **Step 5: Full suite. Report the delta.**
 
 ---
 
-### Task 2: The lineage test, and the extract integrity guards
+### Task 2: The vocabulary gate
 
-**Files:**
-- Create: `scripts/assay_hygiene/lineage.py`
-- Test: `tests/test_assay_hygiene_lineage.py`
+**Files:** create `scripts/assay_hygiene/gate.py`, `tests/test_assay_hygiene_gate.py`
+
+**Adds ~14 tests.**
+
+**This task exists because of a measured failure.** Lineage-first precedence
+launders vocabulary defects into membership write proposals. On today's data
+that is at least 24 rows mislabelled `ABSENCE_LINEAGE` (11 A.FLOW registered in
+31 Flow Cytometry **Analysis** claiming 30 Flow Cytometry via `Software:
+FlowJo`; 13 A.SPC registered in 47 claiming 130 Mass Spectrometry via `Type:
+High resolution mass spectra`), plus 212 of 250 `ABSENCE_COMPAT` rows arising
+from one mapping.
+
+**Interface:**
+
+```python
+def type_registration_index(membership, assays, samples) -> dict[tuple[str, int], int]
+    """(sample_type, internal_assay_id) -> how many samples of that type are registered there."""
+
+def gate_claims(claims, vocabulary, type_reg, min_support, min_purity) -> pd.DataFrame
+    """One row per claim with a GATE_* outcome and the reason."""
+```
+
+Three rejection tests:
+
+1. **Unreachable.** The claimed assay has ZERO registered samples of this
+   sample type, anywhere. The claim is not credible. 31 of the 866 fail this.
+2. **Incoherent term family.** Normalised terms sharing a stem map to different
+   assays: `flowjo` -> 30, `flowjo v10.8.1` -> 31, `flowjo version 10` -> 31,
+   `flowjo 10.3` -> 153. Report the family; do not auto-resolve it.
+3. **Low support or purity.** Below thresholds you REPORT rather than choose.
+   `illumina library` -> 24 sits at purity 0.707 over 2,210 samples and drives
+   212 flags, so purity alone is discriminating here.
+
+- [ ] **Step 1: Write the failing tests.** Required cases:
+  - a claim whose type is never registered in the claimed assay is `GATE_UNREACHABLE` and reaches NO mode
+  - a claim whose type IS registered there passes reachability even when this particular sample's registered assay never co-occurs with it
+  - a term family mapping to two assays is `GATE_INCOHERENT`, and the test asserts the whole family is reported, not just the minority member
+  - stem extraction does not collapse genuinely different products; include a negative case
+  - a curator-provenance vocabulary row is NEVER gated out, whatever its support. A human decision outranks the data.
+  - gate outcomes are computed per CLAIM, not per sample; a sample with one good and one bad claim keeps the good one
+  - the gate never mutates `claims.parquet` or `vocabulary.csv`
+- [ ] **Step 2: Implement to green.**
+- [ ] **Step 3: Verify against the real extract.** Report how many of the 138,007
+  claims fail each test, and confirm the 24 FlowJo/mass-spectra rows and the 31
+  unreachable rows are among the rejects. **If the FlowJo rows still pass the
+  gate, the gate does not work**, whatever the aggregate numbers say.
+- [ ] **Step 4: OPTIONAL, high value.** Extend stage A with a `sample_types`
+  extract (id -> code, title) so `assays.sample_type_id` resolves. Today only
+  the OBSERVED type-to-assay mapping is knowable, from precedent; the DECLARED
+  one is not. If you do this, the gate can compare them, which is strictly
+  better evidence than reachability alone. One SQL query. Do it in its own
+  commit so it can be reverted independently.
+- [ ] **Step 5: Emit `assay-hygiene/vocabulary-defects.csv`**, routed to
+  `/curate-assay-vocabulary`, never to a mode.
+- [ ] **Step 6: Full suite. Report the delta.**
+
+---
+
+### Task 3: The lineage test
+
+**Files:** create `scripts/assay_hygiene/lineage.py`, `tests/test_assay_hygiene_lineage.py`
 
 **Adds ~12 tests.**
 
 **Interfaces:**
 
 ```python
-def lineage_index(childof, samples) -> tuple[dict[int, list[int]], dict[int, list[int]], dict]
-    """-> (children_of, parents_of, integrity) keyed by sample_id."""
+def lineage_index(edges, samples, membership, assays) -> tuple[dict, dict, dict]
+    """-> (children_of, parents_of, integrity), keyed by sample_id, over DERIVED_FROM."""
 
-def neighbour_registers(sample_id, claimed_assay, children_of, parents_of, registered) -> tuple[str, int | None]
-    """-> (LIN_CHILD | LIN_PARENT | LIN_NONE, the neighbour's sample_id or None)."""
+def neighbour_registers(sample_id, assay_id, children_of, parents_of, registered) -> tuple[str, int | None]
+    """-> (LIN_CHILD | LIN_PARENT | LIN_NONE, neighbour sample_id or None)."""
 ```
 
-`registered` is `audit.registered_internal(membership, assays)`. Do not build a
-third grouping of the membership frame; that function already crosses the
-junction and raises on an unknown assay.
+`lineage_index` **takes `membership` and `assays`**, which the first draft's
+signature omitted while requiring it to report `membership_without_sample`. It
+cannot count what it cannot see.
 
-**Contracts that must be tested:**
+`registered` comes from `audit.registered_internal`. Do not build a third
+grouping of the membership frame.
 
 - [ ] **Step 1: Write the failing tests.** Required cases:
-  - a child registers the claim, the parent does not, so the parent's finding is `LIN_CHILD`
-  - the mirror: a parent registers it, the child does not, so the child's finding is `LIN_PARENT`
-  - both register it, so no finding is produced at all (there is nothing absent)
-  - neither registers it, so `LIN_NONE`
-  - a sample with no neighbours at all returns `LIN_NONE` and does not raise
-  - **duplicate uuid:** two `sample_id`s sharing a uuid resolve deterministically to the lowest, and the count is reported. A `set_index("uuid")` here raises `InvalidIndexError` on the real extract; a test that never sees a duplicate will not catch it.
-  - **unresolvable `childof`:** a row naming a uuid with no sample is counted into `integrity`, not dropped silently and not crashed on
-  - **the 362:** a neighbour `sample_id` present in `membership` but absent from `samples` is handled per your documented decision, and the test asserts that decision explicitly rather than asserting whatever the code happens to do
-  - `LIN_CHILD` takes precedence over `LIN_PARENT` when both hold, and the test names why the tie is broken that way
+  - child registers it, parent does not -> parent's row is `LIN_CHILD`
+  - parent registers it, child does not -> child's row is `LIN_PARENT`
+  - both register it -> NO row at all, nothing is absent
+  - neither -> `LIN_NONE`
+  - a sample with no neighbours returns `LIN_NONE` and does not raise
+  - **duplicate uuid:** two `sample_id`s on one uuid resolve to the lowest, deterministically, and the count is reported. `set_index("uuid")` RAISES on the real extract; a fixture without a duplicate will not catch it.
+  - **unresolvable edge rows** are counted into `integrity`, not dropped and not crashed on
+  - **the 362:** a neighbour in `membership` but absent from `samples` is handled per your documented decision, and the test asserts THAT decision rather than whatever the code does
+  - `LIN_CHILD` wins ties over `LIN_PARENT`, and the test names why
 - [ ] **Step 2: Implement to green.**
-- [ ] **Step 3:** `integrity` must carry, by name and count: `dup_uuid_rows`,
-  `unresolved_childof`, `membership_without_sample`. The report prints them. A
-  silently clean run on a dirty extract is the failure mode.
-- [ ] **Step 4: Verify against the real extract.** `lineage_index` over
-  `assay-hygiene/extract/` must report 28 duplicate-uuid rows across 14 uuids,
-  755 unresolvable `childof` rows, and 362 membership-without-sample. If your
-  numbers differ, STOP: either the extract changed or one of us is wrong, and
-  both are worth knowing before you build on it.
-- [ ] **Step 5: Run the full suite. Report the delta.**
+- [ ] **Step 3:** `integrity` carries `dup_uuid_rows`, `unresolved_edges`,
+  `membership_without_sample` by name. The report prints them even at zero.
+- [ ] **Step 4: Verify against the real extract:** 28 duplicate-uuid rows over
+  14 uuids, 362 membership-without-sample. If your numbers differ, STOP.
+- [ ] **Step 5: Full suite. Report the delta.**
 
 ---
 
-### Task 3: The compatibility test
+### Task 4: The co-registration test
 
-**Files:**
-- Create: `scripts/assay_hygiene/compatibility.py`
-- Test: `tests/test_assay_hygiene_compatibility.py`
+**Files:** create `scripts/assay_hygiene/compatibility.py`, `tests/test_assay_hygiene_compatibility.py`
 
 **Adds ~10 tests.**
-
-**Interface:**
 
 ```python
 def co_registration(membership, assays, samples) -> dict[tuple[str, int, int], tuple[float, int]]
-    """(sample_type, registered_assay, claimed_assay) -> (rate, support)."""
+    """(sample_type, registered_assay, proposed_assay) -> (rate, support in SAMPLES of that type)."""
 
-def compat_band(rate: float | None, support: int) -> str
-    """-> BAND_NEVER | BAND_SOMETIMES | BAND_ROUTINE | BAND_NO_SUPPORT."""
+def compat_band(rate, support) -> str
 ```
 
-Rate is: of all samples of `sample_type` registered in `registered_assay`, the
-share that are ALSO registered in `claimed_assay`. Support is the size of the
-denominator, **in samples of that type**, and it is not an edge count.
-
-**Contracts that must be tested:**
+**What this test does and does not establish.** A high rate means the two assays
+coexist on this type, so absence is the anomaly. A zero rate on a well-supported
+population means they do not coexist, which after the gate means **alternative
+labels**, not contradiction: D.IMG images sit in 127 Tissue Imaging or 145
+Histopathology, never both, and 145 D.IMG samples are registered in
+Histopathology. The first draft of this plan called that a contradiction.
 
 - [ ] **Step 1: Write the failing tests.** Required cases:
-  - a pair that always coexists rates 1.0
-  - a pair that never coexists rates 0.0
-  - **support below the floor is `BAND_NO_SUPPORT` and is NEVER `BAND_NEVER`,** even at rate 0.0. This is the test that stops the pipeline calling four samples a contradiction.
-  - the rate is directional: `rate(T, R, X)` and `rate(T, X, R)` differ when the populations differ, and the test asserts a case where they do
-  - sample type comes from the uuid prefix and a sample whose uuid does not parse is counted, not dropped
-  - a sample registered in three assays yields the BEST rate over its registered set, and the test pins which one won
+  - always coexists -> 1.0; never -> 0.0
+  - **support below the floor is `BAND_NO_SUPPORT`, never `BAND_NEVER`,** even at rate 0.0
+  - the rate is directional; assert a case where `(T,R,X)` and `(T,X,R)` differ
+  - a sample registered in three assays yields the BEST rate, and the test pins which won
+  - a uuid that does not parse into a type is counted, not dropped
+  - **a zero rate on a reachable pair classifies `CLS_ALT_LABEL`, never an error.** This is the regression test for the second design error.
 - [ ] **Step 2: Implement to green.**
-- [ ] **Step 3: Verify against the real extract** on the pattern the spec names:
-  `(D.IMG, 127, 145)` must read rate 0.000 over a support of 1,907, and
-  `(PAV, 56, 74)` must read approximately 0.805 over 13,229. Re-derive rather
-  than trusting these; if they disagree, report before proceeding.
-- [ ] **Step 4: Run the full suite. Report the delta.**
+- [ ] **Step 3: Verify:** `(D.IMG, 127, 145)` = 0.000 over 1,907;
+  `(PAV, 56, 74)` ~ 0.805 over 13,229.
+- [ ] **Step 4: RECONCILE THE MODE 2 CEILING.** Compute it over `DERIVED_FROM`
+  and compare against both published readings (54,780 / 116,365 and 55,007 /
+  117,463). Root-cause the difference and report which is right. Do not proceed
+  with an unexplained gap.
+- [ ] **Step 5: Full suite. Report the delta.**
 
 ---
 
-### Task 4: Mode 1, samples registered in nothing
+### Task 5: Mode 1
 
-**Files:**
-- Create the Mode 1 half of `scripts/assay_hygiene/classify.py`
-- Test: `tests/test_assay_hygiene_classify.py`
+**Files:** extend `scripts/assay_hygiene/classify.py`, `tests/test_assay_hygiene_classify.py`
 
 **Adds ~10 tests.**
 
-Mode 1's population is the 6,324 samples with no internal-assay registration at
-all. Metadata decides, because the question metadata answers ("what is this
-sample") is exactly the question being asked.
-
-**Contracts:**
+Population is the **6,242** samples with NO membership row. Metadata proposes,
+after the gate.
 
 - [ ] **Step 1: Write the failing tests.** Required cases:
-  - a sample registered in NOTHING with a strong claim yields a Mode 1 finding with `action = A_ADD_TO_ASSAY`
-  - a sample registered in SOMETHING is never Mode 1, whatever it claims. That is Mode 2 or 3.
-  - a sample registered in nothing with NO claim yields no finding, and is counted in the report as unreachable rather than omitted
-  - a sample with two conflicting claims produces the `T_CONFLICT` tier and is NOT silently resolved to one of them
-  - tier is carried onto the finding, so a `weak` Mode 1 row is distinguishable downstream from a `strong` one
-  - a sample whose only registration is an UNMAPPABLE id is NOT Mode 1: its internal identity is unknown, not known to be absent. `audit_contradictions` already reasons this way; match it and cite it.
+  - registered in nothing, gate-passing strong claim -> Mode 1 row, `action = A_ADD_TO_ASSAY`
+  - **registered ONLY via a junction-less assay -> NOT Mode 1.** The 82-sample case. Its assay's identity is unknown, not absent.
+  - registered in something -> never Mode 1
+  - registered in nothing with no claim -> no row, counted in the report as unreachable rather than omitted
+  - a gate-rejected claim produces no Mode 1 row even when the sample is registered in nothing
+  - two claims disagreeing: the `contested` COLUMN carries it and BOTH rows are emitted. **Do not require or emit `T_CONFLICT`** — it is retired (`_schema.py:137-141`) and `tests/test_assay_hygiene_claims.py:76` pins its absence. The first draft of this plan mandated it and would have forced an implementer to break that test.
+  - tier is carried onto the row, so a weak proposal is distinguishable from a strong one
 - [ ] **Step 2: Implement to green.**
-- [ ] **Step 3: Verify against the real extract.** Expect approximately 1,883
-  samples and 2,977 `(sample, assay)` rows at all tiers, and 719 samples / 723
-  rows at strong plus corroborated. Re-derive; report disagreement.
-- [ ] **Step 4: Run the full suite. Report the delta.**
+- [ ] **Step 3: Verify:** approximately 1,827 samples / 2,912 rows at all tiers,
+  671 / 671 at strong plus corroborated, BEFORE the gate. Report the after-gate
+  numbers too; nobody has measured those.
+- [ ] **Step 4: Full suite. Report the delta.**
 
 ---
 
-### Task 5: Mode 2, both directions, precedent-decided
+### Task 6: Mode 2, two directions of unequal strength
 
-**Files:**
-- Extend `scripts/assay_hygiene/classify.py`
-- Test: extend `tests/test_assay_hygiene_classify.py`
+**Files:** extend `classify.py` and its test.
 
-**Adds ~14 tests.**
-
-**This is the task the increment exists for.** Mode 2 fires when a lineage
-neighbour registers an assay this sample lacks. Precedent on the hop decides
-whether to propose it; metadata disambiguates WHICH assay when the hop carries
-several; neither authorises a write, because there is no write here.
-
-Both directions, and they are not symmetric:
+**Adds ~15 tests.**
 
 | Direction | Trigger | Action | Precedent column |
 |---|---|---|---|
 | child has it, parent lacks it | `LIN_CHILD` | `A_ADD_PARENT` | `propagation_rate` |
 | parent has it, child lacks it | `LIN_PARENT` | `A_ADD_CHILD` | `reverse_rate` |
 
-`mine_precedent` already computes both rates and its docstring defines them:
-`propagation_rate = n_both / (n_both + n_child_only)` asks "given the child is
-in this assay, how often is the parent". **Using `propagation_rate` for the
-`A_ADD_CHILD` direction is a wrong-column bug that produces plausible numbers
-and no error.** Assert the pairing in a test.
+**`A_ADD_CHILD` is the weak direction and the plan must not treat the two as
+peers.** Measured:
 
-**Contracts:**
+| | ADD_PARENT | ADD_CHILD |
+|---|---|---|
+| corroborated by co-registration over the 866 | **88/88, 100%** | 15/263, 5.7% |
+| rules at rate >= 0.95 | 5 | 15 |
+| candidate rows surviving rate >= 0.5 | 79,488 | **3,663** of 116,365 |
+| rows creating a (type, assay) pair existing nowhere | 55.6% | **67.6%** |
+
+The single cleanest datum: `TIS <- PAV` under 56 Patient Visit runs a reverse
+rate of **0.006**, while the same hop under 74 Tissue Collection runs a
+propagation rate of **0.931**. On the hop that justified Mode 2, the parent's
+assay does not flow down while the child's flows up.
+
+An earlier draft argued for symmetry from volume ("263 against 88"). That is
+backwards: the 263 are the weakly corroborated direction.
 
 - [ ] **Step 1: Write the failing tests.** Required cases:
-  - `A_ADD_PARENT` is keyed on `propagation_rate`; `A_ADD_CHILD` on `reverse_rate`. Two separate tests, each failing if the columns are swapped. Build the fixture so the two rates DIFFER, otherwise the test passes under the bug.
-  - a hop with no precedent row yields a finding marked as having no measured basis, and does NOT default to rate 0.0. Absent evidence and evidence of absence are different, and the spec is explicit that they are unmeasurable by construction.
-  - a hop carrying several candidate assays uses the metadata claim to pick, and the finding records `decided_by` as the disambiguator
-  - a sample already registered in the assay produces NO finding
-  - the rule key is the full `(project_id, child_type, parent_type, internal_assay_id)` and a match on three of four does not count
-  - a `(sample, assay)` pair reachable from two different neighbours is emitted ONCE, because it is one write, and the finding records that it had multiple supports
+  - `A_ADD_PARENT` keys on `propagation_rate`; `A_ADD_CHILD` on `reverse_rate`. **Build the fixture so the two rates DIFFER**, or the test passes under the swap it exists to catch.
+  - a hop with no precedent row yields a row marked as having no measured basis, and does NOT default to 0.0. Absent evidence and evidence of absence differ.
+  - a hop carrying several candidate assays uses the gated metadata claim to disambiguate, and `decided_by` records that
+  - a sample already registered in the assay yields no row
+  - the rule key is all four components; three of four does not match
+  - a `(sample, assay)` pair reachable from two neighbours is emitted ONCE, because it is one write, and records that it had multiple supports
+  - **an ADD_CHILD row creating a (type, assay) pair existing nowhere in the database is flagged as such on the row.** 67.6% of them do.
 - [ ] **Step 2: Implement to green.**
-- [ ] **Step 3: Verify against the real extract.** The unfiltered ceiling should
-  land near 50,508 `A_ADD_PARENT` rows over 39,773 samples and 111,039
-  `A_ADD_CHILD` rows over 97,635 samples, union 161,420 over 110,170. These are
-  pre-precedent candidates. Report them as a ceiling with that word attached.
-- [ ] **Step 4: Run the full suite. Report the delta.**
+- [ ] **Step 3: Verify the ceiling** as reconciled in Task 4, and report ADD_PARENT
+  and ADD_CHILD separately at every threshold. Never print a combined figure.
+- [ ] **Step 4: Full suite. Report the delta.**
 
 ---
 
-### Task 6: Mode 2's backtest and the threshold curve
+### Task 7: Mode 2's backtest
 
-**Files:**
-- Create: `scripts/assay_hygiene/backtest.py`
-- Test: `tests/test_assay_hygiene_backtest.py`
+**Files:** create `scripts/assay_hygiene/backtest.py` and its test.
 
-**Adds ~9 tests.**
+**Adds ~10 tests.**
 
-Hide the membership of one endpoint on a held-out slice of edges where BOTH are
-registered, run Mode 2 cold, and measure how often it recovers the assay a
-curator actually assigned.
+Hide one endpoint's membership on a held-out slice where both are registered,
+run cold, measure recovery of the curator's assay.
 
-**Split by SAMPLE, never by edge.** A sample fans out to many edges and an
-edge-level split scores memorised answers. Increment 1's metadata measurement
-made this mistake explicit and the spec records it; do not reintroduce it.
+**Split by SAMPLE, never by edge.** A sample fans out to many edges; an
+edge-level split scores memorised answers.
 
-**Thresholds are an OUTPUT.** Emit the full precision-versus-rate curve. Do not
-pick a cutoff, do not put a default in the code, and do not let the report imply
-one has been validated.
-
-**Contracts:**
+**Thresholds are an OUTPUT.** Emit the full curve. Under the binding constraint
+they set the operator's reading order, not permission, so there is no cutoff to
+choose in code at all.
 
 - [ ] **Step 1: Write the failing tests.** Required cases:
-  - a sample appearing on both sides of the split fails the test, so the guard is real
-  - hiding a membership and restoring it leaves the input frames byte-identical, so the backtest cannot leak into the live classification
-  - recovery is measured against the CURATOR's assay, not against whether any assay was proposed
-  - the curve reports support per band, and a band with no observations is reported as empty rather than as 0.0 precision
-  - both directions are backtested separately and reported separately
+  - a sample on both sides of the split fails the test, so the guard is real
+  - hiding and restoring leaves the input frames byte-identical
+  - recovery is measured against the CURATOR's assay, not against whether any proposal was made
+  - the curve reports support per band; an empty band reports empty, not 0.0 precision
+  - **the two directions are backtested and reported separately**, never pooled
 - [ ] **Step 2: Implement to green.**
-- [ ] **Step 3: Run it over the real extract** and record the curve in the
-  report. Expect the actionable middle band to be thin: the spec's post-stage-0
-  table shows 175 rules at rate >= 0.95 carrying only 99 child-only edges in the
-  entire database, while the mid band 0.60 to 0.80 is essentially two rules,
-  `D.TITR -> TIS` at 0.622 and `D.FCRB -> TIS` at 0.796.
-- [ ] **Step 4:** If the curve shows no band clearing the spec's 95% bar, SAY SO
-  as the finding. A backtest that fails to find a safe threshold is a successful
-  backtest and a blocked increment 3, and reporting it that way is the whole
-  point of doing detection before writing.
-- [ ] **Step 5: Run the full suite. Report the delta.**
+- [ ] **Step 3: Run over the real extract and record both curves.**
+- [ ] **Step 4:** If no band clears the spec's 95% bar, SAY SO as the finding. A
+  backtest that finds no safe threshold is a successful backtest.
 
 ---
 
-### Task 7: Stage C unification, and Mode 3 by subtraction
+### Task 8: Stage C unification
 
-**Files:**
-- Extend `scripts/assay_hygiene/classify.py`
-- Test: extend `tests/test_assay_hygiene_classify.py`
+**Files:** extend `classify.py` and its test.
 
-**Adds ~11 tests.**
+**Adds ~12 tests.**
 
-One pass emits `findings.csv` for all three modes, and Mode 3 becomes what
-survives after Modes 1 and 2 have declined a row.
+One pass emits `findings.csv`. **The precedence is the contract:**
 
-**The ordering is the contract.** A row is Mode 3 only if it is not Mode 1 and
-not Mode 2. Encode that as an explicit precedence, not as the order of `if`
-branches that a later edit can reorder without failing a test.
+```
+1. GATE      a rejected claim reaches no mode, ever
+2. MODE 1    registered in nothing (ANY-membership definition)
+3. LINEAGE   a neighbour carries it -> Mode 2
+4. COMPAT    routinely coexists -> Mode 2 candidate, unproven
+             never coexists     -> CLS_ALT_LABEL, no action
+             otherwise          -> CLS_UNRESOLVED
+5. MODE 3    emits nothing; no detector exists
+```
 
-**Contracts:**
+Encode it as explicit precedence, not as `if` branch order a later edit can
+reorder without failing a test.
 
 - [ ] **Step 1: Write the failing tests.** Required cases:
-  - a row that qualifies for Mode 1 and Mode 3 is Mode 1, and the test states why
-  - a row corroborated by lineage is Mode 2 and NEVER Mode 3, which is the amendment's central claim
-  - a row in `BAND_ROUTINE` with no lineage is `DISP_ABSENCE_COMPAT` and is reported as a Mode 2 CANDIDATE carrying no measured precision, not as a Mode 2 finding
-  - `DISP_UNRESOLVED` is its own output class and is not folded into any mode
-  - the four dispositions partition the input: every row gets exactly one, none gets two, and the counts sum to the input size. Assert the sum.
+  - **a gate-rejected claim is never Mode 2 even when a neighbour carries it.** This is the regression test for the third design error; the 24 FlowJo/mass-spectra rows are the fixture.
+  - a row corroborated by lineage is Mode 2 and never an error
+  - a zero-co-registration row on a reachable pair is `CLS_ALT_LABEL` and proposes nothing
+  - `CLS_UNRESOLVED` is its own class, folded into no mode
+  - **Mode 3 emits zero rows**, and the test says why: no detector exists
+  - the classes partition the input; assert the counts sum, and define "the input" explicitly in the test name
 - [ ] **Step 2: Implement to green.**
-- [ ] **Step 3: Reconcile with the spec's reproducer.** Run
-  `scripts/measure_absence_vs_contradiction.py` and your classifier over the same
-  866 flags. They must agree: 351 / 250 / 214 / 51. **If they disagree, one of
-  them is wrong and you must find out which before continuing.** Do not adjust
-  either until you know. The reproducer was written by hand during planning and
-  has no tests; your classifier has tests and no independent check. That is the
-  point of running both.
-- [ ] **Step 4: Emit `assay-hygiene/mode3-disposition.csv`** carrying all 866
-  original flags with their new disposition, so increment 1's output is
-  superseded traceably rather than deleted.
-- [ ] **Step 5: Run the full suite. Report the delta.**
+- [ ] **Step 3: Cross-check against `measure_absence_vs_contradiction.py`,
+  and do NOT pin its numbers.** That script has no tests and encodes the OLD
+  precedence (lineage before any vocabulary check), so its 351/250/214/51 split
+  is known to launder the 24. Your classifier SHOULD disagree with it. Report
+  the differences and explain each one. The first draft of this plan required
+  agreement with those four numbers, which would have pinned the bug in as
+  correct.
+- [ ] **Step 4: Emit `mode3-disposition.csv`** carrying all 866 original flags
+  with their new classification, so increment 1's output is superseded
+  traceably rather than deleted.
+- [ ] **Step 5: Full suite. Report the delta.**
 
 ---
 
-### Task 8: The wired run and the operator report
+### Task 9: The wired run and the operator report
 
-**Files:**
-- Create: `scripts/assay_hygiene/run_detect.py`
-- No new test file; assert the report's invariants inside the existing suite.
+**Files:** create `scripts/assay_hygiene/run_detect.py`. Assert report invariants in the existing suite.
 
-**Adds ~7 tests.**
+**Adds ~8 tests.**
 
-**Interface:** `PYTHONPATH=scripts uv run --with pandas --with pyarrow python -m assay_hygiene.run_detect`
+Follow `run_evidence.py`'s shape.
 
-Follow `run_evidence.py`'s shape. It is the model for this and its docstring
-explains why the report says what it says.
+The report must:
 
-**The report is the deliverable, not the counts.** It must do six things a
-count cannot:
-
-1. **State that nothing was written**, in the first paragraph and again per
-   mode. Say it at the scope of THIS run, not of the package: `stage0_apply.py`
-   carries live Cypher and a package-wide "there is no write path here" is false
-   and would rightly destroy a reader's trust in the rest.
-2. **Lead with the correction.** Increment 1's report told the operator there
-   were 866 contradictions. This one must say plainly that 94.1% of those were
-   absence reported as contradiction, that the real Mode 3 residue is 51, and
-   that the operator found the error.
-3. **Print the four integrity counts** from Task 2 whether or not they are zero.
-4. **Label the Mode 2 ceiling as a ceiling** every time the number appears.
-5. **Report `UNRESOLVED` as its own population with its size.** Do not bury it.
-6. **Key every pattern table on `(sample_type, claimed_assay, raw_value)`.** The
-   PAV `Blood` and `Necropsy` populations behave oppositely under the same tests
-   and were merged, and invisible, under the coarser key.
+1. **State that nothing was written**, first paragraph and per mode, scoped to
+   THIS run and not to the package. `stage0_apply.py` carries live Cypher and a
+   package-wide claim would be false.
+2. **State that nothing is decided.** Every row is a proposal awaiting operator
+   approval, in all three modes.
+3. **Lead with the correction.** Increment 1 told the operator there were 866
+   contradictions. Say plainly that measurement found none: 576 absences, 31
+   vocabulary defects, 45 alternative labels, 214 unclassified. Say the operator
+   found both errors.
+4. **Report Mode 3 as having no detector**, and never as "small". Undetected and
+   small are different findings.
+5. **Label the Mode 2 ceiling a ceiling** at every appearance, and split
+   ADD_PARENT from ADD_CHILD with the survival rate at threshold.
+6. **Print the integrity counts** whether or not they are zero.
+7. **Key every pattern table on `(sample_type, proposed_assay, raw_value)`.** The
+   PAV `Blood` and `Necropsy` populations behave oppositely and were invisible
+   under the coarser key.
+8. **Report the vocabulary as the largest defect source**, with the
+   `illumina library` mapping named.
 
 - [ ] **Step 1: Write the failing tests:** the report names every artifact it
-  writes; the no-write claim appears and is scoped; a nonzero integrity count
-  cannot be omitted; the disposition counts in the prose equal the counts in the
-  csv. That last one is a real risk, since increment 1 shipped a report quoting
-  a purity table it had not computed.
+  writes; the no-write and no-decision claims appear and are scoped; a nonzero
+  integrity count cannot be omitted; **the counts in the prose equal the counts
+  in the csv** (increment 1 shipped a report quoting a table it had not
+  computed).
 - [ ] **Step 2: Implement to green.**
-- [ ] **Step 3: Run end to end over the real extract.**
-- [ ] **Step 4: Read the report as the operator would.** Does it lead with the
+- [ ] **Step 3: Run end to end.**
+- [ ] **Step 4: Read it as the operator would.** Does it lead with the
   correction? Is the ceiling unmistakably a ceiling? Would someone who reviewed
-  the 866 last week understand what changed and why?
-- [ ] **Step 5: Run the full suite. Report the delta.**
+  the 866 understand what changed and why?
+- [ ] **Step 5: Full suite. Report the delta.**
 
 ---
 
 ## Definition of done
 
-- [ ] Full suite green, reported as a delta against the baseline you measured.
-- [ ] `findings.csv`, `mode3-disposition.csv` and the report written under `assay-hygiene/`.
-- [ ] The classifier and `measure_absence_vs_contradiction.py` agree on all four disposition counts over the 866.
-- [ ] Mode 2's backtest curve exists, with support per band, and no threshold is chosen in code.
+- [ ] Full suite green, reported as a delta against your measured baseline.
+- [ ] `findings.csv`, `vocabulary-defects.csv`, `mode3-disposition.csv`, and the report written under `assay-hygiene/`.
+- [ ] The 24 FlowJo and mass-spectra rows are gate rejects, not Mode 2 proposals.
+- [ ] Mode 3 emits zero rows and the report says why.
+- [ ] Both backtest curves exist with per-band support, and no threshold is chosen in code.
+- [ ] The Mode 2 ceiling discrepancy is root-caused and reported.
 - [ ] Nothing imports `stage0_apply.py` or `driver_stage0.py`. Verify by grep.
-- [ ] No `ASSAY_HYGIENE-update.xlsx`, no APPROVE column, no write path. Those are increment 3.
-- [ ] The four extract-integrity counts are printed by the run.
+- [ ] No workbook, no APPROVE column, no write path.
+- [ ] No function named `decide_*`; nothing in the codebase authorises a change.
 
 ## What this increment deliberately does not do
 
-- **No stage D.** No LLM adjudication. The rule-level judge belongs with the curator workbook it feeds.
-- **No stage E or F.** No workbook, no writer, no addition probe.
-- **No threshold decision.** Task 6 produces the curve; choosing the cutoff is increment 3's opening move and is the operator's call.
-- **No re-review of the 866.** The operator should not be asked to look at those flags again until Task 7 has re-scoped them.
-- **No fix for the 17 missing junction rows** in `dmac.assays_internal_assays`. That is a MySQL fix outside every increment of this project, it would clear four separate workarounds at once, and it is tracked as an open question rather than done here.
+- **No stage D, E or F.** No adjudication, no workbook, no writer, no addition probe.
+- **No threshold decision.** Task 7 produces the curves; under universal approval there is no cutoff to choose.
+- **No Mode 3 detector.** Building one is its own increment. Candidates, none built: registration-side reachability (a sample in an assay its type otherwise never holds); cross-project registration (1,340 membership rows register a sample in an assay whose projects are disjoint from the sample's own, plus 271 samples with no project); a removal lane.
+- **No re-review of the 866.** Not until Task 8 has reclassified them.
+- **No fix for the 17 junction-less assays** in `dmac.assays_internal_assays`. A MySQL fix outside every increment here; it would clear four workarounds at once.
+- **No curator-identity evidence.** The extract records who registered nothing; it cannot.

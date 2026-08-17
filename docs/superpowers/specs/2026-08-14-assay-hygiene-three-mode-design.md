@@ -1,10 +1,15 @@
 # Assay Hygiene, stages A-F: three equal modes over one evidence layer
 
 **Date:** 2026-08-14
-**Amended:** 2026-08-17. See "Amendment: absence is not contradiction". The mode
-table, the build order, and Mode 3's validation all changed. Do not plan from the
+**Amended:** 2026-08-17, TWICE, the second superseding the first. See "Amendment:
+what the three modes actually are". The mode table, the build order, Mode 3's
+validation, and the write-authorisation model all changed. Do not plan from the
 sections below without reading that amendment first.
-**Status:** increment 1 built and reviewed. Increments 2 and 3 not built.
+**Binding constraint:** nothing writes without per-row operator approval, in all
+three modes. Any "decides", "guarded" or "threshold gates the write" phrasing
+elsewhere in this document predates that constraint and is superseded by it.
+**Status:** increment 1 built and reviewed, and its Mode 3 output is known bad.
+Increments 2 and 3 not built. Mode 3 has no working detector.
 **Supersedes:** the stages A-F half of `docs/superpowers/specs/2026-08-12-assay-hygiene-design.md`,
 and the whole of `docs/superpowers/plans/2026-08-12-assay-hygiene.md`.
 **Carries forward unchanged:** that spec's stage 0, its write-safety analysis, its
@@ -95,109 +100,129 @@ its premise: the block is 616 rows rather than 303,866, and the metadata
 supporting it describes the child while Mode 2 asks about the parent. The
 operator revised it once the measurements were presented.
 
-What survives is narrower and better supported. Metadata decides Modes 1 and 3
-outright, where the question it answers is the question being asked. In Mode 2
-it disambiguates which assay applies but does not by itself authorise a write.
-The record is kept here so a later reader does not find an approved decision
-silently absent from the design.
+What survives is narrower and better supported. In Mode 2 metadata disambiguates
+which assay applies but does not by itself authorise a write. The record is kept
+here so a later reader does not find an approved decision silently absent from
+the design.
 
-## Amendment: absence is not contradiction
+*Superseded 2026-08-17.* This paragraph read "Metadata decides Modes 1 and 3
+outright, where the question it answers is the question being asked." Nothing
+decides now. See "Nothing decides. Everything proposes."
 
-**2026-08-17, after increment 1 shipped.**
+## Amendment: what the three modes actually are
 
-**The operator found this.** Reviewing Mode 3's flagship pattern, 97 PAV samples
-registered in 56 Patient Visit whose metadata carries `Type=Blood`, they
-observed: a PAV that had tissue collected from it should be in Patient Visit AND
-Tissue Collection, one incoming assay and one outgoing. So the flag is not a
-contradiction. It is a missing parent registration, which is exactly what Mode 2
-finds. And they added that this might make Mode 3 dependent on Mode 2 entirely.
+**2026-08-17, after increment 1 shipped. This supersedes an earlier amendment
+made the same day, which was itself wrong.** Both are recorded, because the
+error they share is the one this project keeps making.
 
-Both halves held up under measurement. 86 of those 97 PAV samples have a TIS
-child ALREADY registered in 74 Tissue Collection, and the precedent for that hop
-is strong: `TIS child <- PAV parent` under assay 74 runs a propagation rate of
-0.931 in project 2, against 27,161 both-registered and 2,009 child-only, plus
-0.960, 0.808, 1.000 and 1.000 in four other projects. Mode 2 would fire on it
-confidently.
+### What the operator asked for
 
-**Mode 3 is also a lossy detector of the same thing.** The 2,009 child-only
-figure is the real size of that gap on that one hop. Mode 3 surfaced 97, because
-it only sees samples whose metadata happens to carry a term the vocabulary maps.
+Verbatim, and this is the canonical statement of what the system is for:
 
-### Why it happened
+> 1. What samples have no assays and need some
+> 2. What samples have assays in one direction but not both and need a second assay
+> 3. What samples have INCORRECT assays
 
-The mode table said Mode 2 finds an ABSENCE and Mode 3 finds a CONTRADICTION,
-and left the distinction in prose. What increment 1 built tests
-`claimed_assay not in registered_assays`, which is an absence test. It never
-distinguished "should be in both" from "cannot be both", because nothing in the
-code knew a sample could legitimately hold two assays at once.
+Plus a binding constraint on all of it:
 
-A prose distinction between two modes, with no operational test separating them,
-becomes whichever one the code happens to implement. The fix is not a better
-sentence in the table. It is the two tests defined under Scope, both of which
-run over data already on disk.
+> there should be no "auto / guarded: writes" everything should come to me for
+> approval for either 3 of the modes.
 
-### What changed in this document
+### Two corrections, one week apart, both from the operator, both the same error
 
-1. The mode table: Mode 2 runs in both directions, Mode 3 is scoped to the
-   residue after corroboration.
-2. A new domain rule, that a sample can hold an incoming and an outgoing assay.
-3. Two operational tests, with the measured disposition of all 866 flags.
-4. The build order: Mode 2 detection moves ahead of Mode 3 interpretation, and
-   every write moves to increment 3.
-5. Mode 3's validation gains an automatable precondition.
+**Correction 1: absence reported as contradiction.** Increment 1's audit tests
+`claimed_assay not in registered_assays`, which is an ABSENCE test, and reported
+the result as CONTRADICTION. The operator observed that a PAV sample with tissue
+collected from it belongs in Patient Visit AND Tissue Collection, one incoming
+and one outgoing, so the absence of the second is a missing registration. 86 of
+those 97 PAV samples have a TIS child already registered in 74 Tissue
+Collection, and the hop runs a propagation rate of 0.931 in project 2. Mode 2
+would fire on it confidently.
 
-### Provenance of the figures in this amendment
+**Correction 2: the residue is not contradictions either.** Reviewing the 51
+flags that survived, the operator observed that they name correct assays. Adding
+a third test confirms it: 45 of 51 are ALTERNATIVE LABELS (D.IMG images sit in
+127 Tissue Imaging or 145 Histopathology, never both, because a curator picks
+one, and 145 D.IMG samples are registered in Histopathology), and 6 are
+VOCABULARY DEFECTS, where the claim itself is junk.
 
-The 88 / 263 / 515 lineage split and the whole disposition table are re-derived
-by `scripts/measure_absence_vs_contradiction.py`, committed alongside this
-amendment and read-only.
+**The shared error: a bucket named for what someone assumed was in it, rather
+than for what a test proves is in it.** It has now occurred three times. The
+third instance was found by adversarial review and is described below. Assume a
+fourth exists.
 
-An earlier ad hoc version of that split, quoted in the 2026-08-17 handoff report
-as 88 / 279 / 499, is WRONG in two of its three cells. The child figure was
-right; the parent and neither figures were not. The difference is the handling
-of 14 duplicate uuids and 755 `childof` rows that do not resolve to a sample on
-both ends. Anyone carrying numbers forward from that report should take them
-from the script instead.
+### The third instance, found by review
 
-The 86-of-97 PAV figure and the 0.931 propagation rate were both correct and are
-confirmed here.
+The 24 flags where a parent carries the claim but the pair never co-occurs are
+labelled `ABSENCE_LINEAGE` and routed to Mode 2 as future write candidates. They
+are, measured:
 
-## Scope
-
-Three modes, equal citizens, over one shared evidence layer.
-
-**Amended 2026-08-17.** This is the corrected table. The original is preserved in
-the amendment section below, because increment 1 was built against it.
-
-| Mode | Question | Decided by | Metadata's role | Writes |
+| n | type | registered | claims | via |
 |---|---|---|---|---|
-| 1 | sample is in NO assay at all; which one? | metadata claim | decides | add sample to assay |
-| 2 | a lineage NEIGHBOUR carries an assay this sample lacks; add it? | precedent on the hop | disambiguates which assay | add parent to assay, or add child to assay |
-| 3 | metadata claims an assay that NEITHER the registration NOR the lineage NOR type precedent supports | metadata vs registration vs co-registration | decides | nothing, flags only |
+| 11 | A.FLOW | 31 Flow Cytometry **Analysis** | 30 Flow Cytometry | `Software: FlowJo` |
+| 13 | A.SPC | 47 Mass Spectrometry **Analysis** | 130 Mass Spectrometry | `Type: High resolution mass spectra` |
 
-Three changes from the original table, all forced by measurement.
+Both are the analysis-versus-measurement pair, the same family as correction 2.
+Lineage precedence fires first, nothing tests the vocabulary, and so vocabulary
+defects are laundered into membership write proposals.
 
-**Mode 2 runs in both directions.** The original scoped it to "parent missing
-from the child's assay". The mirror case, a child missing from the parent's
-assay, is the larger of the two: over the 866 Mode 3 flags it is 263 against 88.
-`_schema.py` already carries `A_ADD_PARENT` and `A_ADD_CHILD` as separate
-actions, so the code anticipated this and only the spec was narrow.
+An earlier version of this section claimed these 24 were "reported as their own
+class for a curator". **That was false.** `mode3-disposition.csv` files them
+inside the 351.
 
-**Mode 3 is scoped to what it can actually establish.** It does not detect
-contradiction by testing `claimed not in registered`, because that is an absence
-test and a sample can legitimately hold more than one assay. It detects a claim
-that survives both corroboration tests defined below.
+### The vocabulary is the largest single defect source
 
-**The three modes are ordered by evidence, not by population.** Mode 1 needs no
-neighbour. Mode 2 needs a neighbour that carries the claim. Mode 3 is the
-residue after both. A flag can only be Mode 3 if Modes 1 and 2 have already
-declined it, which is why Mode 2's detection must run before Mode 3's output is
-read.
+Measured over `vocabulary.csv` and the 866 flags:
 
-Mode 3 remains an auditor that writes nothing, runs over all 177,392 samples
-rather than only those on an edge, and carries none of the deletion hazard. What
-changed is its size, not its safety: scoped correctly it flags 51 samples on
-today's extract rather than 866.
+- One mapping, `Illumina Library` -> 24 DNA Extraction at purity **0.707** over
+  2,210 samples, produces **212 of the 250** `ABSENCE_COMPAT` flags. An Illumina
+  library is a library; those DNA samples are already correctly registered in
+  115 Library Creation.
+- One product is split across three assays: `flowjo` -> 30, `flowjo v10.8.1` ->
+  31, `flowjo version 10` -> 31, `flowjo 10.3` -> 153. Nothing checks that a
+  term family maps coherently.
+- 31 of the 866 claims name an assay **no sample of that type has ever been
+  registered in**, anywhere in the database.
+
+A claim is only as good as the term that produced it, and no stage tests the
+term. This is why the vocabulary gate below runs before every mode.
+
+### The three tests, and what each actually establishes
+
+Deterministic, no model, all over the extract already on disk. Each is named for
+what it tests.
+
+| Test | Question | Establishes |
+|---|---|---|
+| **Reachability** | is this sample TYPE ever registered in the claimed assay, anywhere? | whether the CLAIM is credible at all |
+| **Lineage** | does a parent or child already register the claimed assay? | that the claim is an ABSENCE, and which direction |
+| **Co-registration** | across samples of this type in R, what share also hold X? | whether R and X coexist, or are alternative labels |
+
+**Order matters and is a contract.** Reachability first, because an incredible
+claim must never reach a membership proposal. Then lineage. Then
+co-registration. Increment 1's precedence ran lineage first and had no
+reachability test at all, which is what produced the third instance above.
+
+Measured over the 866, with reachability applied first:
+
+| Class | n | Routes to |
+|---|---|---|
+| claim not credible (type never in claimed assay) | 31 | vocabulary curation, NOT a mode |
+| claim credible, neighbour carries it | 326 | Mode 2 |
+| claim credible, no neighbour, pair coexists | 250 | Mode 2 candidate, unproven |
+| claim credible, no neighbour, pair never coexists | 45 | alternative label, no action |
+| claim credible, neither test settles it | 214 | judgment |
+
+The 24 FlowJo and mass-spectra rows sit inside the 326 today and must be pulled
+out by the vocabulary gate, not by the lineage test.
+
+**The `UNRESOLVED` 214 is mostly one benign pattern.** 204 are RNA samples with
+`Type: total RNA` claiming 61 RNA Extraction, and RNA samples ARE registered in
+RNA Extraction 1,087 times. That is a credible claim and an ordinary absence.
+
+**Support matters and is reported separately.** A co-registration rate of 0.000
+over four samples is noise. A rate is never read as evidence below 30 samples of
+the type.
 
 ### The domain rule the design lacked
 
@@ -206,103 +231,167 @@ incoming and one outgoing.** A PAV that had tissue collected from it belongs in
 56 Patient Visit, which produced it, and in 74 Tissue Collection, which consumed
 it. Neither registration is wrong and neither excludes the other.
 
-Nothing in increment 1's code represents this. `audit_contradictions` tests
-`claimed_internal_assay_id not in registered_internal(sample)`, so every
-legitimate second assay reads as a contradicted first one. This rule is the
-whole distinction between Mode 2 and Mode 3 and it must be encoded, not assumed.
+Nothing in increment 1's code represents this, which is why every absence read
+as a contradiction.
 
-### Absence and contradiction, made operational
+### Nothing decides. Everything proposes.
 
-Two deterministic tests. Neither needs a model. They are independent: the first
-asks the graph about this sample's neighbours, the second asks the graph about
-this sample TYPE's habits.
+**Binding, and it overrides every "decided by" phrase elsewhere in this
+document.** No mode writes on its own authority. Every proposed change in all
+three modes reaches the operator as a row they approve or reject, and an
+unapproved row is never sent.
 
-**Test 1, lineage.** Does a parent or child of this sample already register the
-claimed assay? If so, the sample's own lineage corroborates the claim and what
-is missing is a registration. This is Mode 2 by definition, and the direction of
-the neighbour selects `A_ADD_PARENT` or `A_ADD_CHILD`.
+Consequences, each of which contradicts something this spec said before:
 
-**Test 2, compatibility.** Across every sample of this type registered in R,
-what share ALSO register the claimed X? Call it the co-registration rate.
+1. **Thresholds do not gate writes.** They rank and triage so the operator reads
+   the strongest evidence first. A backtest curve sets reading order, not
+   permission.
+2. **"Metadata decides Modes 1 and 3 outright" is retired.** Metadata proposes.
+3. **The approval artifact must carry all three modes.** The rule-level workbook
+   is keyed `(project, hop, assay)`, and Mode 1 findings have no hop, so that
+   key structurally cannot carry them. A second shape is required.
+4. **There is no "unless explicitly overridden".** The validation bar being
+   unmet blocks a proposal from being made; it is not a lock the run can pick.
 
-- A high rate means R and X routinely coexist on this type, so the absence is
-  the anomaly and the claim is an absence.
-- A rate of exactly zero on a well supported population means they never
-  coexist. This is the only evidence in the pipeline that supports the word
-  contradiction.
-- A middling rate establishes neither and must be reported as unresolved rather
-  than resolved by a threshold nobody has backtested.
+### Mode 3 has no working detector yet
 
-Support matters and is reported separately. A rate of 0.000 over four samples is
-noise, not a finding, and must never be called a contradiction.
+Stated plainly, because the alternative is to ship a mode that reports
+alternative labels as errors.
 
-**Measured over the 866 flags** in `assay-hygiene/mode3-contradictions.csv` as
-increment 1 produced them, at its default tiers. Reproduce with
-`scripts/measure_absence_vs_contradiction.py`, read-only, which prints every row
-here and writes `assay-hygiene/mode3-disposition.csv`.
+The operator's Mode 3 is "what samples have INCORRECT assays". The detector
+built for it finds claims that disagree with registrations, and measurement now
+shows that population is alternative labels and vocabulary defects, with
+approximately zero genuine mis-registrations. Metadata disagreeing with a
+registration is simply not evidence that the registration is wrong.
 
-| | never co-occurs | no support | routinely co-occurs | sometimes |
+Candidate detectors that do not depend on the vocabulary, all measurable today
+and none built:
+
+- **Registration-side reachability.** A sample registered in an assay its own
+  type is otherwise never registered in. This is the mirror of the claim-side
+  test and needs no metadata at all.
+- **Cross-project registration.** 1,340 membership rows register a sample in an
+  assay whose project set is disjoint from the sample's own projects, plus 271
+  samples with no project at all.
+- **Removal proposals.** Mode 3 implies some assays should come off a sample.
+  No mode generates that proposal. The writer's complete-list semantics can
+  already express it, and under universal approval a removal is as reviewable as
+  an addition, but the deletion hazard means it ships last and separately.
+
+Until one of these is built and validated, Mode 3 reports and proposes nothing.
+
+## Scope
+
+Three modes over one shared evidence layer, behind one vocabulary gate.
+
+| Stage | Question | Evidence | Proposes | Writes |
 |---|---|---|---|---|
-| **child registers it** | 0 | 0 | 88 | 0 |
-| **parent registers it** | 24 | 13 | 15 | 211 |
-| **neither** | 51 | 0 | 250 | 214 |
+| **Gate** | is this claim credible? | term-family coherence, mapping support and purity, type reachability | vocabulary corrections | never |
+| **1** | sample is in NO assay; which one? | metadata claim | add sample to assay | only on approval |
+| **2** | a lineage NEIGHBOUR carries an assay this sample lacks | precedent on the hop, metadata disambiguates | add parent to assay, or add child to assay | only on approval |
+| **3** | sample holds an INCORRECT assay | no working detector yet | nothing | never |
 
-Reading that table as dispositions:
+The gate is not a mode. It produces no membership change. A claim that fails it
+is excluded from Modes 1 and 2 entirely and routed to `/curate-assay-vocabulary`.
 
-| Disposition | Flags | Share | Mode |
-|---|---|---|---|
-| `ABSENCE_LINEAGE` a neighbour already carries the claim | 351 | 40.5% | 2 |
-| `ABSENCE_COMPAT` no neighbour, but the two assays routinely coexist | 250 | 28.9% | 2 candidate, unproven |
-| `UNRESOLVED` neither test settles it | 214 | 24.7% | needs judgment |
-| `CONTRADICTION` no neighbour, and the two assays never coexist | 51 | 5.9% | 3 |
+**Mode 2's two directions are not equally supported.** `A_ADD_PARENT` is the
+direction the operator's domain rule justifies and the evidence backs.
+`A_ADD_CHILD` is the mirror, and it is weak:
 
-**94.1% of what increment 1 called a contradiction is not one.** The two tests
-agree perfectly where lineage is strongest: all 88 child-registered flags also
-sit in the routinely-coexists band, which is a consistency check the design did
-not ask for and passed.
-
-They disagree on 24 flags where a parent carries the claim but the type never
-co-registers the pair. That disagreement is real and is not resolved here. It is
-reported as its own class for a curator, because a sample whose parent is in an
-assay its type never shares is either a genuine contradiction or a mislabelled
-parent, and the pipeline cannot tell which.
-
-**The flagship case, split.** The 122 PAV samples claiming 74 Tissue Collection
-are two populations, not one:
-
-| raw value | flags | explained by lineage |
+| | ADD_PARENT | ADD_CHILD |
 |---|---|---|
-| `Blood` | 97 | 86 (88.7%) |
-| `Necropsy` | 25 | 2 (8.0%) |
+| corroborated by co-registration, over the 866 | **88 / 88, 100%** | 15 / 263, 5.7% |
+| edge-weighted rate over `precedent.csv` | 0.351 | 0.280 |
+| rules at rate >= 0.95 | 5 | 15 |
+| candidate rows surviving rate >= 0.5 | 79,488 | **3,663** of 111,039 |
+| rows that would create a (type, assay) pair existing nowhere | 55.6% | **67.6%** |
 
-The 86 of 97 confirms the operator's reading exactly. The `Necropsy` variant
-behaves oppositely under the same test and was invisible while both were quoted
-as one 122-row pattern. Grouping by `(sample_type, claimed_assay)` without
-`raw_value` merges populations that behave differently, and any pattern table
-must key on the raw value.
+The mechanism behind the asymmetry: a sample has one producing assay but many
+consuming ones, so "the child is in X" pins the parent tightly, while "the
+parent is in X" says little about any one child. The cleanest single datum is
+one hop carrying both directions: `TIS <- PAV` under 56 Patient Visit runs a
+reverse rate of **0.006** while the same hop under 74 Tissue Collection runs a
+propagation rate of **0.931**. On the very hop that justified Mode 2, the
+parent's assay does not flow down while the child's flows up.
 
-**The residue that survives both tests** is 51 flags over 5 patterns, dominated
-by one: 44 `D.IMG` samples claiming 145 Histopathology, whose registered assay
-127 never co-registers 145 across 1,907 samples of that type. That single
-pattern is the real Mode 3 finding in this database, and it was 5% of a list of
-866 nobody could read.
+**An earlier version of this section argued for symmetry from volume**, that the
+mirror is "the larger of the two, 263 against 88". That reasoning is backwards:
+the 263 are precisely the weakly corroborated direction. `A_ADD_CHILD` survives
+only where `reverse_rate` earns it, roughly 3% of its ceiling, and the spec must
+never quote its unfiltered size without that qualification.
 
-### What this costs and what it does not
+### Which lineage relation, stated once
 
-The two tests are read-only, deterministic, and run over the extract already on
-disk. Neither needs the write path, an LLM, or production access. `precedent.py`
-already carries the propagation rates; the lineage test is a lookup against
-`childof.parquet` and `membership.parquet`.
+`CHILD_OF` and `DERIVED_FROM` are different relations and the choice moves every
+Mode 2 figure by about 9%.
 
-The compatibility test is NOT a substitute for the Mode 2 backtest. It says two
-assays coexist on a type; it does not say this sample should be added, and it
-carries no measured precision. Everything it produces is a candidate for Mode
-2's precedent-decided path, never an authorised write.
+```
+CHILD_OF        742,534 pairs     ceiling  50,508 ADD_PARENT / 111,039 ADD_CHILD
+DERIVED_FROM    794,593 edges     ceiling  55,007 ADD_PARENT / 117,463 ADD_CHILD
+divergence      52,185 DF-only, 126 CO-only
+```
 
-Mode 2 keeps precedent as its decider. What metadata adds is discrimination:
-`D.IMG -> TIS` carries 23 assay rules, precedent can only speak about the hop as
-a whole, and `Type` / `Protocol` vary per sample. That is the one thing
-precedent structurally cannot do.
+Precedent, the decider, is mined over `DERIVED_FROM`. A lineage test run over
+`CHILD_OF` therefore asks about a different graph than the one its own evidence
+was measured on. **Mode 2 uses `DERIVED_FROM` for both**, and any figure quoted
+from the other relation says so. This is the branch's signature defect again,
+two meanings one frame apart, and it was introduced by the first version of this
+amendment.
+
+### Metadata's role, narrowed again
+
+Metadata decides nothing. It proposes, and only after the gate has accepted the
+term that produced it.
+
+In Mode 1 it is the only evidence available, so a Mode 1 proposal is exactly as
+good as its vocabulary row. In Mode 2 it disambiguates which assay applies when
+a hop carries several, which is the one thing precedent structurally cannot do:
+`D.IMG -> TIS` carries 23 assay rules, precedent speaks only about the hop as a
+whole, and `Type` / `Protocol` vary per sample.
+
+### What the adjudicator needs in front of it
+
+The operator asked for the logistics folded into the decision. Per proposed row,
+all of the following already exist or are one query away:
+
+- the sample's registered assays, with titles, crossed through the internal
+  junction (`audit.registered_internal`, `precedent.assay_index`)
+- the claim, its tier, whether it is contested, and its vocabulary row with
+  support, sample count, purity and provenance
+- both precedent rates for every hop touching the sample, with `n_both`,
+  `n_child_only`, `n_parent_only`
+- lineage neighbours and what they are registered in
+- the co-registration rate and support for the assay pair
+- the type's base-rate registration distribution
+- peer examples: other samples of the type carrying the same term
+- protocol and SOP titles, project ids, creation date
+
+Missing and worth building: a `sample_types` extract, so `assays.sample_type_id`
+resolves and the DECLARED sample-type-to-assay mapping can be compared against
+the OBSERVED one that `precedent.py` mines. Today only the observed direction is
+answerable. Also absent from the extract entirely: any record of WHO registered
+a sample, so curator identity can never be evidence.
+
+### What currently exists in the database
+
+Measured, and worth stating because "what is already there" is half the
+operator's question:
+
+```
+sample records                       163,393
+membership rows                      214,296   over 157,151 samples
+  registered only via a junction-less assay        82 samples
+assay records                            458   of which 285 have ZERO samples
+distinct internal assay ids used         110
+assays with no junction row               17   forcing fallback identity in 4 places
+lineage pairs (CHILD_OF)             742,534
+DERIVED_FROM edges                   794,593   labelled 360,027, dark 434,566
+mined precedent rules                    961   over 213 project/hop triples
+learned vocabulary terms                 736   plus 266 unresolved, 0 curator-corrected
+```
+
+The 285 empty assays and the 266 unresolved terms are both cheap to report and
+neither has been surfaced to a curator.
 
 ## Architecture
 
@@ -313,7 +402,7 @@ B2. claims       deterministic + a cached alignment   -> claims.parquet, vocabul
 C.  classify     deterministic                        -> findings.csv
 D.  adjudicate   rule-level LLM over all evidence     -> decisions.csv
 E.  emit         deterministic                        -> ASSAY_HYGIENE-update.xlsx
-F.  apply        guarded, over HTTPS                  -> applied/<ts>-manifest.jsonl
+F.  apply        APPROVED ROWS ONLY, over HTTPS       -> applied/<ts>-manifest.jsonl
 ```
 
 Production is touched twice: A reads, F writes. B through E re-run locally
@@ -337,8 +426,14 @@ Tiers, from the measurement above:
 - `strong` — a strong field predicts. 98.4%.
 - `corroborated` — `Type` and `Protocol` both predict and agree. 99.9%.
 - `weak` — only `Protocol` or `DataType` predicts. 90.4%.
-- `conflict` — populated fields predict different assays. 3.1% of the labelled
-  population. Goes to stage D.
+- `conflict` — **RETIRED, and this bullet is wrong.** It describes a tier the
+  shipped code does not emit. `_schema.py:137-141` retired it and
+  `tests/test_assay_hygiene_claims.py:76` pins `T_CONFLICT not in out.tier`;
+  disagreement between fields is carried by the `contested` COLUMN instead, so
+  that a contested claim keeps its own tier and the audit's monotonicity
+  argument survives. Anything planning against this bullet will fail its own
+  test suite. Left in place, corrected, rather than deleted, because the
+  2026-08-12 plan and its readers still reference the tier.
 - `none` — nothing predicts.
 
 Tier is assigned by rule, not by model. The percentages above are the
@@ -393,8 +488,13 @@ re-run. A cache miss is visible in the output, never silent.
 ## Validation
 
 Each mode is validated separately, because each infers a different thing. The
-95% bar is stated per mode, reported rather than asserted, and the run refuses
-to write when unmet unless explicitly overridden.
+95% bar is stated per mode and reported rather than asserted.
+
+*Amended 2026-08-17.* This read "the run refuses to write when unmet unless
+explicitly overridden". There is no override, because there is no autonomous
+write to override. An unmet bar means the pipeline does not PROPOSE the row at
+all; it never meant a lock the run could pick. Under universal approval the bar
+governs what reaches the operator, and the operator governs what is written.
 
 **Mode 1.** Hide the membership of samples that have one, predict from metadata
 alone, measure recovery. This is exactly the measurement already run: 98.4% on
@@ -410,26 +510,29 @@ assigned. Thresholds are an output of that curve, never chosen in advance.
 automated. Mode 3 writes nothing, so a wrong flag costs attention rather than
 data.
 
-*Amended 2026-08-17.* Increment 1 shipped this validation as "emit a sample for
-curator review" and that is not enough, because it cannot distinguish a wrong
-flag from a correctly detected absence. Mode 3 now has one automatable
-precondition before any human sees a flag:
+*Amended 2026-08-17, twice.* The first amendment required every flag to survive
+both corroboration tests and asserted that the 866 "must reduce to 51". **That
+target is now known to be wrong**, because measurement showed the 51 are
+alternative labels and vocabulary defects rather than contradictions. Do not
+pin 51 as a validation target.
 
-**Every flag must survive both corroboration tests.** A flag whose claim is
-carried by a lineage neighbour, or whose assay pair routinely coexists on its
-sample type, is not a Mode 3 finding and must be routed to Mode 2 instead of
-shown to a curator. This is a property of the classifier and is testable
-without a human: on the current extract the audit's 866 must reduce to 51.
+Mode 3 cannot be validated because it has no working detector. See "Mode 3 has
+no working detector yet". Its validation is defined when a detector exists, and
+the honest interim statement is that the mode reports nothing.
 
-Only the residue goes to a curator, keyed by `(sample_type, claimed_assay,
-raw_value)` and never by `(sample_type, claimed_assay)` alone, because the PAV
-`Blood` and `Necropsy` populations behave oppositely under the same tests and
-were merged by the coarser key.
+**What is validatable today, and required of the classifier:**
 
-The `UNRESOLVED` class is reported as its own population with its size stated.
-It is not folded into either mode. Reporting 214 flags the pipeline cannot
-classify is the honest output; silently banding them into Mode 3 would restate
-the same error this amendment exists to fix.
+1. **No claim that fails the vocabulary gate reaches any mode.** Testable
+   without a human. The 24 FlowJo and mass-spectra rows are the fixture.
+2. **No row corroborated by lineage is reported as an error.** This is the
+   amendment's central claim and the thing that broke.
+3. **Every pattern table is keyed `(sample_type, claimed_assay, raw_value)`**,
+   never `(sample_type, claimed_assay)` alone, because the PAV `Blood` and
+   `Necropsy` populations behave oppositely under the same tests and were
+   merged, and invisible, under the coarser key.
+4. **Each class is reported at its own size**, including the ones the pipeline
+   cannot classify. Silently banding an unclassifiable row into a mode restates
+   the error this amendment exists to fix.
 
 ### What cannot be validated, stated plainly
 
@@ -477,29 +580,46 @@ vocabulary alignment, and the audit. Produces `vocabulary.csv` and
 3 output is mis-scoped as described in the amendment above and is superseded by
 increment 2, but the evidence layer under it stands.
 
-**2. Mode 1 and Mode 2 detection, read-only.** Stage C for all three modes, plus
-the two corroboration tests, plus the Mode 2 backtest. No stage D, no curator
-workbook, no write path. This increment answers "what would we change" and
-nothing else. It also re-scopes Mode 3 by subtraction, which is the reason it
-comes before anyone reviews Mode 3's flags.
+**2. The vocabulary gate, plus Mode 1 and Mode 2 detection. Read-only.** The
+three tests, the gate that runs before every mode, stage C, and the Mode 2
+backtest. No stage D, no workbook, no write path. This increment answers "what
+would we propose" and nothing else.
 
-**3. Adjudication, the curator workbook, and the write path.** Stages D, E and
-F, behind the addition probe. The deletion hazard is faced once, here.
+The gate leads the increment rather than trailing it. Measured, the vocabulary
+is the largest single defect source in the current output: one mapping produces
+212 of 250 `ABSENCE_COMPAT` flags, and lineage-first precedence launders 24 more
+vocabulary defects into Mode 2 write candidates. Building detection on an
+ungated vocabulary reproduces that by construction.
+
+**3. Adjudication, the approval surface, and the write path.** Stages D, E and
+F, behind the addition probe. Two approval shapes are required, because the
+rule-level workbook is keyed `(project, hop, assay)` and Mode 1 findings have no
+hop. The deletion hazard is faced once, here, and any removal lane ships after
+the addition path is proven.
+
+**Not scheduled: a Mode 3 detector.** Mode 3 has none. Building one is its own
+increment and it is not increment 3.
 
 ### Why detection precedes interpretation
 
 Every Mode-2-shaped gap appears as a Mode 3 flag until Mode 2 fills it. On
-today's extract that is 601 of 866 flags, 69.4%, and it was not visible until
-the two tests above were run. Mode 3's numbers cannot be read before Mode 2 has
-run, so ordering Mode 3 first optimised for shipping something safe and produced
-something unreadable.
+today's extract that is 576 of 866 flags, 66.5%, counted as the rows whose claim
+is credible and which either carry a lineage neighbour or sit in a coexisting
+pair. It was not visible until the three tests were run. Ordering Mode 3 first
+optimised for shipping something safe and produced something unreadable.
 
-The corrected order costs nothing in safety. Mode 2's DETECTION needs no write
-path: stages B and C are read-only and only stage F writes.
+The corrected order costs nothing in safety. Detection needs no write path:
+stages B and C are read-only and only stage F writes.
 
 **Do not ask a curator to review Mode 3's 866 flags as increment 1 emitted
-them.** 94.1% of that list is absence reported as contradiction, and the review
-would burn the curator's attention and their trust in the tool.
+them.** Measured, not one of the classes in that list is a contradiction: 576
+are absences, 31 are vocabulary defects, 45 are alternative labels, and 214 are
+unclassified. The review would burn the curator's attention and their trust in
+the tool.
+
+**And do not read that as "Mode 3 is small".** Mode 3 is not smaller than
+believed; it is undetected. The list contained no contradictions at all, which
+is a different and worse finding than a short list of real ones.
 
 ### Original build order, superseded
 
@@ -518,14 +638,23 @@ reasoning survives and now applies to increment 3.
 - `claims.parquet` — per-sample metadata claims with tiers
 - `findings.csv` — per-sample classification, one row per (sample, claimed
   assay), carrying the mode, the disposition, and both corroboration tests
-- `mode3-disposition.csv` — the 866 audit flags re-scoped by both tests, which
-  is how increment 1's Mode 3 output is superseded rather than deleted
-- `ASSAY_HYGIENE-update.xlsx` — rule-level, one row per (project, hop, assay,
-  verdict) with evidence, affected ROW count, and a curator-owned APPROVE column
-- `applied/<ts>-manifest.jsonl` — what stage F actually sent
+- `vocabulary-defects.csv` — claims rejected by the gate, with the failing test
+  named, routed to `/curate-assay-vocabulary` and to no mode
+- `mode3-disposition.csv` — the 866 audit flags re-classified, which is how
+  increment 1's Mode 3 output is superseded rather than deleted
+- `ASSAY_HYGIENE-update.xlsx` — the RULE-level approval surface, one row per
+  (project, hop, assay) with evidence, affected ROW count, and an operator-owned
+  APPROVE column. Carries Mode 2 only.
+- `ASSAY_HYGIENE-mode1.xlsx` — the SECOND approval surface, required because
+  Mode 1 findings have no hop and the rule key structurally cannot carry them.
+  Grouped by (sample type, term, assay) so the operator judges terms rather than
+  6,242 individual samples.
+- `applied/<ts>-manifest.jsonl` — what stage F actually sent, and it may contain
+  only rows an operator approved
 
-The first four are increment 2 and earlier, and are read-only. The last two are
-increment 3 and are the only artifacts in the project that imply a write.
+Everything through `mode3-disposition.csv` is increment 2 or earlier and is
+read-only. The two workbooks and the manifest are increment 3. **No artifact in
+this project authorises a write except an APPROVE cell the operator filled in.**
 
 ## Findings this design does not address
 
