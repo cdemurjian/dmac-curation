@@ -476,6 +476,15 @@ COMPAT_BANDS = (BAND_NEVER, BAND_SOMETIMES, BAND_ROUTINE, BAND_NO_SUPPORT)
 # backtest curves, and a curve sets reading order, not permission; if a later
 # reader finds a `>=` on either of these deciding whether a row is PROPOSED
 # rather than merely how it is BANDED, that is the defect, not the number.
+#
+# THE ONE APPROVED READER IS `compatibility.compat_band`, which maps a measured
+# rate onto `COMPAT_BANDS` and nothing else. `MIN_CO_REG_SUPPORT` decides only
+# whether an unread rate is labelled BAND_NO_SUPPORT instead of BAND_NEVER, and
+# `CO_OCCUR_BAND` separates two bands that are BOTH reported. BAND_NEVER, which
+# carries the alternative-label finding, rests on a rate of exactly 0.0 and has
+# no tuned number in it at all, so no recalibration can create or destroy one.
+# `test_the_two_reporting_numbers_gate_nothing` pins the reader by name and
+# fails again on a second one.
 MIN_CO_REG_SUPPORT = 30     # samples of the type, below which a rate is unread
 CO_OCCUR_BAND = 0.5         # the routinely / sometimes boundary
 

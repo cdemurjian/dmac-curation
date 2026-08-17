@@ -95,8 +95,10 @@ from .precedent import assay_index
 # a co-registration population, and a second floor beside it under a similar
 # name is how the units confusion below happened the first time -- a test in
 # `tests/test_assay_hygiene_schema.py` pins that those two names appear in no
-# module here but `_schema.py`, which is why this comment does not spell either.
-# These two floors are the gate's and nothing else reads them.
+# module here but `_schema.py` and `compatibility.py`, which is why this comment
+# does not spell either. THIS MODULE IS NOT AN APPROVED READER OF THEM and the
+# test would fail if it became one. These two floors are the gate's, and nothing
+# else reads them.
 #
 # `MIN_VOCAB_SAMPLES` COUNTS DISTINCT SAMPLES. It reads `VOCAB_COLUMNS.n_samples`
 # and never `VOCAB_COLUMNS.support`, and the choice is material rather than

@@ -24,9 +24,10 @@ defect this project keeps repeating.
 
 NOTHING HERE IMPORTS `MIN_CO_REG_SUPPORT` OR `CO_OCCUR_BAND`. Those are
 co-registration reporting bands, they size a population of samples of a type,
-and `tests/test_assay_hygiene_schema.py` asserts no module under
-`scripts/assay_hygiene/` outside `_schema.py` reads either name. The gate's
-floors are its own and live in `gate.py`.
+and `tests/test_assay_hygiene_schema.py` asserts that `compatibility.py` is the
+ONLY module under `scripts/assay_hygiene/` outside `_schema.py` reading either
+name, and that it BANDS on them rather than gating. The gate's floors are its
+own and live in `gate.py`.
 """
 import hashlib
 import sys

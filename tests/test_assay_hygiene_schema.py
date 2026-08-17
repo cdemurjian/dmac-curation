@@ -707,18 +707,36 @@ def test_the_two_reporting_numbers_gate_nothing():
     the title certified a property the body never exercised, which is the
     self-certifying-test failure increment 1 shipped five of.
 
-    The checkable form at this increment is that NO module under
-    `scripts/assay_hygiene/` references either name. `_schema.py` declares them
-    and nothing consumes them, so a `>=` cannot exist anywhere -- which is
-    exactly what "they gate nothing" means today. When Task 4 does read them for
-    banding, this test fails and the reader has to say in its message which
-    module reads them and that it bands rather than gates. That is the intended
-    cost: the claim stops being free the moment it stops being structural.
+    The checkable form until 2026-08-17 was that NO module under
+    `scripts/assay_hygiene/` references either name. That version has now done
+    its job: Task 4 needed them for banding, this test failed, and the reader
+    had to be named and confirmed. THE BAN IS NOT LIFTED, IT IS NARROWED to one
+    approved module, so the same cost falls on the next reader.
+
+    THE APPROVED READER IS `compatibility.py`, AND WHAT IT DOES WITH THEM IS
+    BAND. `compat_band` maps a measured rate onto one of `COMPAT_BANDS` so an
+    operator reads the strongest evidence first. Confirmed by reading it:
+
+      * `MIN_CO_REG_SUPPORT` decides only which LABEL an unread rate gets --
+        `BAND_NO_SUPPORT` rather than `BAND_NEVER` -- which is the distinction
+        that stops a rate of 0.000 over four samples being reported as "these
+        two assays never coexist".
+      * `CO_OCCUR_BAND` separates `BAND_ROUTINE` from `BAND_SOMETIMES`. BOTH are
+        reported and both reach the operator, so moving it changes reading
+        order and changes nothing else. `BAND_NEVER`, the band that carries the
+        alternative-label finding, rests on a rate of exactly 0.0 and so has no
+        tuned number in it at all.
+      * Neither appears in any expression deciding whether a row reaches Mode 1
+        or Mode 2. That is `gate.blocks_mode`, it tests membership of a closed
+        tuple, and `test_assay_hygiene_gate.py` pins it.
+
+    A THIRD READER FAILS THIS TEST AGAIN, deliberately.
     """
     package = REPO / "scripts" / "assay_hygiene"
+    APPROVED = {"compatibility.py"}
     readers = sorted(
         p.name for p in package.glob("*.py")
-        if p.name != "_schema.py"
+        if p.name != "_schema.py" and p.name not in APPROVED
         and ("MIN_CO_REG_SUPPORT" in p.read_text()
              or "CO_OCCUR_BAND" in p.read_text())
     )
@@ -727,7 +745,25 @@ def test_the_two_reporting_numbers_gate_nothing():
         "backtest behind them: under universal approval there is no autonomous "
         "write for a threshold to gate, so a reader may BAND on them and must "
         "never decide whether a row is PROPOSED. Confirm that, then name the "
-        "reader here.")
+        f"reader here beside {sorted(APPROVED)}.")
+
+    # ...and the approved reader is still THERE. A test that only forbids
+    # readers passes trivially once the approved one is deleted or renamed, and
+    # would then re-arm against nothing.
+    assert (package / "compatibility.py").exists()
+    compat = (package / "compatibility.py").read_text()
+    assert "MIN_CO_REG_SUPPORT" in compat and "CO_OCCUR_BAND" in compat
+    # the shape of the read: both appear inside `compat_band` and the only
+    # comparison against either is the one that picks a label.
+    banding = compat.split("def compat_band(")[1].split("\ndef ")[0]
+    assert "S.MIN_CO_REG_SUPPORT" in banding and "S.CO_OCCUR_BAND" in banding
+    assert compat.count("S.MIN_CO_REG_SUPPORT") == banding.count(
+        "S.MIN_CO_REG_SUPPORT"), (
+        "MIN_CO_REG_SUPPORT is compared outside compat_band, which is where a "
+        "band turns into a gate")
+    assert compat.count("S.CO_OCCUR_BAND") == banding.count("S.CO_OCCUR_BAND"), (
+        "CO_OCCUR_BAND is compared outside compat_band, which is where a band "
+        "turns into a gate")
 
     # ...and the declarations themselves, so the values cannot drift silently
     assert S.MIN_CO_REG_SUPPORT == 30
