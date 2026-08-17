@@ -1,0 +1,379 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pandas>=2.0", "pyarrow>=14"]
+# ///
+"""The lineage test. Does a parent or a child already register this assay?
+
+Second of the three deterministic tests, and it runs after the vocabulary gate
+and before co-registration. Each test is named for what it establishes:
+
+    reachability   is a sample of this TYPE ever registered in the claimed
+                   assay, anywhere?            -> is the CLAIM credible at all
+    lineage        does a parent or child already register it?
+                                               -> is this an ABSENCE, and which
+                                                  DIRECTION does it run in
+    co-registration  across samples of this type in R, what share hold X?
+                                               -> do R and X coexist at all
+
+**This module establishes an absence and a direction. It establishes nothing
+else, and in particular it does not establish that the claim is right.** That
+is the gate's business and it has already run. Increment 1 ran lineage FIRST,
+with no reachability test at all, and so filed 24 vocabulary defects -- 11
+A.FLOW rows on a split `Software: flowjo` family, 13 A.SPC rows naming an assay
+no A.SPC sample is registered in anywhere -- as membership write proposals. The
+order is a contract precisely because of those 24.
+
+THE RELATION IS `DERIVED_FROM`, AND THE CHOICE IS MATERIAL.
+
+    CHILD_OF        742,534 distinct (child, parent) id pairs
+    DERIVED_FROM    794,592 distinct (child, parent) id pairs
+    divergence      52,184 DF-only, 126 CO-only
+
+Measured on the 2026-08-14 extract, 9,878 of the 161,531 samples appearing in
+either relation carry a DIFFERENT neighbour set under the two, both relations
+read through this module so both have their self-loop excluded. The raw
+comparison reads 9,879, and the extra one is sample 70: DERIVED_FROM carries a
+self-loop on it and CHILD_OF does not, which is a difference in the frames and
+not in anyone's lineage.
+
+`precedent.mine_precedent` mines its rates over `DERIVED_FROM`, so a lineage
+test run over the other relation would ask about a different graph than the one
+its own evidence was measured on, and would move every Mode 2 figure by roughly
+9%. This module reads the DERIVED_FROM frame and opens no other relation file.
+The spec quotes 52,185 DF-only on a uuid-pair basis; in id space, which is the
+space `membership.sample_id` speaks and so the space this module works in, it is
+52,184, and the one row between the two readings is the same duplicated pair
+`duplicate_edge_pairs` counts.
+
+THE TWO DIRECTIONS ARE NOT PEERS, AND A TIE RESOLVES TO THE STRONG ONE.
+
+    LIN_CHILD   a CHILD carries it   -> the PARENT's registration is missing
+                                     -> Task 6 emits A_ADD_PARENT
+    LIN_PARENT  a PARENT carries it  -> the CHILD's registration is missing
+                                     -> Task 6 emits A_ADD_CHILD
+
+Measured over the 866 flags, A_ADD_PARENT is corroborated by co-registration
+88 times out of 88 and A_ADD_CHILD 15 times out of 263. On the single hop that
+justified Mode 2, `TIS <- PAV`, the child's assay flows up under 74 Tissue
+Collection at 0.931 while the parent's flows down under 56 Patient Visit at
+0.006. The mechanism is that a sample has ONE producing assay and many
+consuming ones, so "the child is in X" pins the parent tightly while "the
+parent is in X" says little about any one child. So when both directions are
+available `neighbour_registers` reports LIN_CHILD, and
+`neighbours_registering` hands the caller both lists so nothing is hidden by
+that choice.
+
+NOTHING DECIDES. This module proposes nothing, writes nothing and reads no
+database. It builds two dicts and answers a question about them.
+
+    PYTHONPATH=scripts uv run --with pandas --with pyarrow \
+        python -m assay_hygiene.lineage
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+from . import _schema as S
+
+# Every key `lineage_index` returns, in report order. Declared rather than
+# implied by whatever the function happened to put in the dict, because the
+# report prints them EVEN AT ZERO: an omitted line and a line reading 0 are the
+# same pixel to an operator, and they must be able to tell "nothing was
+# excluded" from "nobody looked".
+#
+# THE SUFFIX IS THE UNIT. A key ending `_rows`, `_edges` or `_pairs` counts
+# ROWS of an input frame. Every other key is a SORTED LIST OF SAMPLE IDS and
+# its `len()` is the sample-level figure. A count quoted without its unit is
+# this project's signature defect -- `gate.gate_claims` renamed a parameter for
+# the same reason -- and these are read side by side in one report.
+INTEGRITY_KEYS = (
+    "edge_rows",
+    "duplicate_edge_pairs",
+    "self_loop_edges",
+    "self_loop_samples",
+    "unresolved_edges",
+    "unresolved_samples",
+    "dup_uuid_rows",
+    "dup_uuid_samples",
+    "membership_without_sample",
+    "membership_without_sample_rows",
+)
+
+
+def lineage_index(
+    edges: pd.DataFrame,
+    samples: pd.DataFrame,
+    membership: pd.DataFrame,
+) -> tuple[dict[int, frozenset[int]], dict[int, frozenset[int]], dict]:
+    """-> (children_of, parents_of, integrity), keyed by sample_id, over DERIVED_FROM.
+
+    `children_of[s]` is every sample DERIVED FROM `s`; `parents_of[s]` is every
+    sample `s` was derived from.
+
+    THE SIGNATURE DROPS THE `assays` ARGUMENT THE BRIEF SPECIFIED, and takes
+    `samples` and `membership` for one purpose each. `edges.child_id` /
+    `edges.parent_id` are the graph node's own `id` property (see
+    `extract.EDGES_CYPHER`), which is the same id space `membership.sample_id`
+    speaks, so the index joins ids to ids and crosses no namespace. `assays`
+    exists in this package to cross the seek `assay_assets.assay_id` junction
+    into the dmac internal one, and this function never reads an assay id at
+    all -- taking the frame would advertise a validation it does not perform.
+    The caller crosses that junction once, in `audit.registered_internal`, and
+    hands the result to `neighbour_registers`.
+
+    `samples` is here for the integrity report and for nothing else: it supplies
+    `dup_uuid_rows` and it is the frame `membership_without_sample` is measured
+    against. `membership` is here because the brief's first draft required that
+    count from a signature that could not see the frame carrying it.
+
+    NO SAMPLE TYPE IS READ, so no second sample-type index is created.
+    `gate.sample_type_index` remains the only one in the package and is
+    untouched. Reachability and co-registration are per-TYPE questions; lineage
+    is a per-SAMPLE one, and the type of either endpoint changes no answer here.
+
+    THREE POPULATIONS CANNOT BE RESOLVED AGAINST `samples`, AND ALL THREE ARE
+    KEPT. Measured on the 2026-08-14 extract:
+
+      dup_uuid_rows        28 rows of `samples` over 14 uuids name two
+                           sample_ids each. NOTHING IS RESOLVED and nothing is
+                           aliased. An earlier draft of this task required
+                           resolving such a uuid to the LOWEST of its
+                           sample_ids; on this extract the graph node carries
+                           the HIGHER id in all 14 cases, so "lowest wins"
+                           would point the index at the endpoint with no edges
+                           on it every time. Aliasing the other way was
+                           rejected too: `registered` is keyed on raw
+                           `membership.sample_id`, so a canonicalised index
+                           beside a raw registration frame would be two
+                           identities one frame apart. The bounded, stated cost
+                           is that at most 14 of 163,393 samples read LIN_NONE
+                           while a sibling row carries their edges, and
+                           `dup_uuid_samples` names them.
+      unresolved_edges     979 edge rows have an endpoint with no `samples`
+                           row, over 243 distinct endpoints. THEY STAY IN THE
+                           INDEX. 182 of those 243 are registered in
+                           `membership`, so each can settle a real absence for
+                           a neighbour; resolving edges through `samples`
+                           instead would answer LIN_NONE for those neighbours
+                           and the loss would show up in no artifact. A missing
+                           `samples` row means the sample has no mysql metadata
+                           row in this extract, not that it is unregistered.
+      membership_without_  362 sample_ids over 368 membership rows have no
+      sample               `samples` row. Same decision and the same reason:
+                           `neighbour_registers` reads `registered` and never
+                           `samples`, so these register assays like any other
+                           sample.
+
+    Two more populations leave the index and are counted:
+
+      self_loop_edges      1 row, `CEL-200702FOR-1` -> itself. Excluded, because
+                           a sample that is its own neighbour can satisfy the
+                           lineage test with its own registration, and a claim
+                           corroborating itself reads in the artifact exactly
+                           like a corroborated one.
+      duplicate_edge_      1 row. 794,593 edge rows carry 794,592 distinct id
+      pairs                pairs. A set is the right structure -- a neighbour
+                           asked about twice is one neighbour -- and a set
+                           collapses silently, so the collapse is counted.
+
+    The counts are NOT a partition of `edge_rows`: `unresolved_edges` is
+    measured over every row read, including the rows the other two remove, so
+    one row can appear in two counts. They describe the input frame, and a
+    partition would hide a self-loop that is also unresolved.
+
+    Returns PLAIN dicts, for the reason `audit.registered_internal` states: a
+    `defaultdict` answers `children_of[999]` by CREATING the entry, so after one
+    lookup `999 in children_of` is true of every sample ever asked about and a
+    later membership test on the same index reads an isolated sample as
+    connected. Callers use `.get(sid, frozenset())`.
+    """
+    children: dict[int, set[int]] = {}
+    parents: dict[int, set[int]] = {}
+    seen: set[tuple[int, int]] = set()
+
+    edge_rows = 0
+    duplicate_pairs = 0
+    self_loop_edges = 0
+    self_loops: set[int] = set()
+    endpoints: set[int] = set()
+
+    for raw_child, raw_parent in zip(edges.child_id, edges.parent_id):
+        edge_rows += 1
+        child, parent = int(raw_child), int(raw_parent)
+        endpoints.add(child)
+        endpoints.add(parent)
+        if child == parent:
+            self_loop_edges += 1
+            self_loops.add(child)
+            continue
+        if (child, parent) in seen:
+            duplicate_pairs += 1
+            continue
+        seen.add((child, parent))
+        children.setdefault(parent, set()).add(child)
+        parents.setdefault(child, set()).add(parent)
+
+    known = {int(s) for s in samples.sample_id}
+    unresolved = sorted(endpoints - known)
+    unresolved_set = set(unresolved)
+    unresolved_edges = sum(
+        1 for c, p in zip(edges.child_id, edges.parent_id)
+        if int(c) in unresolved_set or int(p) in unresolved_set
+    )
+
+    dup_uuid = sorted(
+        int(s) for s in samples.sample_id[samples.uuid.duplicated(keep=False)])
+
+    missing_membership = sorted(
+        {int(s) for s in membership.sample_id} - known)
+    missing_set = set(missing_membership)
+    missing_rows = sum(1 for s in membership.sample_id if int(s) in missing_set)
+
+    integrity = {
+        "edge_rows": edge_rows,
+        "duplicate_edge_pairs": duplicate_pairs,
+        "self_loop_edges": self_loop_edges,
+        "self_loop_samples": sorted(self_loops),
+        "unresolved_edges": unresolved_edges,
+        "unresolved_samples": unresolved,
+        "dup_uuid_rows": len(dup_uuid),
+        "dup_uuid_samples": dup_uuid,
+        "membership_without_sample": missing_membership,
+        "membership_without_sample_rows": missing_rows,
+    }
+    # Declared once, above, and built here: a report that iterates the constant
+    # and a function that fills the dict ad hoc drift apart silently, and the
+    # symptom is a population that stops being printed rather than an error.
+    assert set(integrity) == set(INTEGRITY_KEYS), "INTEGRITY_KEYS is out of date"
+
+    return (
+        {s: frozenset(v) for s, v in children.items()},
+        {s: frozenset(v) for s, v in parents.items()},
+        integrity,
+    )
+
+
+def neighbours_registering(
+    sample_id: int,
+    assay_id: int,
+    children_of: dict[int, frozenset[int]],
+    parents_of: dict[int, frozenset[int]],
+    registered: dict[int, set[int]],
+) -> tuple[list[int], list[int]]:
+    """-> (children registering it, parents registering it), each sorted ascending.
+
+    The full evidence behind one lineage verdict. `neighbour_registers` is this
+    function collapsed to one relation and one neighbour, which is what a
+    classifier keys on; these lists are what a curator reads, and Task 6 counts
+    the supports behind a proposal from them -- a `(sample, assay)` pair
+    reachable from two neighbours is ONE write and has to record that it had
+    two supports. Both readings come from this one scan so they cannot disagree
+    about which neighbours qualified.
+
+    RETURNS TWO EMPTY LISTS IF `sample_id` ITSELF REGISTERS `assay_id`, and the
+    guard lives here rather than in the collapse. Nothing is absent from a
+    sample that already holds the assay, so there is no absence for a neighbour
+    to corroborate; a guard placed only in `neighbour_registers` would leave
+    Task 6 counting two supports for a proposal that does not exist.
+
+    `assay_id` is a dmac INTERNAL assay id, and so are the ids in `registered`.
+    Build `registered` with `audit.registered_internal`, which is the package's
+    single crossing of the seek `assay_assets.assay_id` junction. A raw grouping
+    of the membership frame speaks the other id space, and the two overlap
+    numerically, so the comparison would silently read every claim as an
+    absence.
+
+    Sorted ascending because set iteration order is not part of any contract and
+    the extractor's row order is not stable across extracts, so an unordered
+    pick would make the artifact a curator diffs change between runs on
+    identical data.
+    """
+    if assay_id in registered.get(sample_id, ()):
+        return ([], [])
+    empty: frozenset[int] = frozenset()
+    return (
+        sorted(n for n in children_of.get(sample_id, empty)
+               if assay_id in registered.get(n, ())),
+        sorted(n for n in parents_of.get(sample_id, empty)
+               if assay_id in registered.get(n, ())),
+    )
+
+
+def neighbour_registers(
+    sample_id: int,
+    assay_id: int,
+    children_of: dict[int, frozenset[int]],
+    parents_of: dict[int, frozenset[int]],
+    registered: dict[int, set[int]],
+) -> tuple[str, int | None]:
+    """-> (LIN_CHILD | LIN_PARENT | LIN_NONE, neighbour sample_id or None).
+
+    The neighbour is returned so a reviewer can check the verdict against a
+    specific edge rather than against the word of the classifier.
+
+    LIN_CHILD BEATS LIN_PARENT WHEN BOTH ARE AVAILABLE. LIN_CHILD means a child
+    carries the assay and the PARENT's registration is missing, which is
+    A_ADD_PARENT: corroborated 88 times out of 88 against 15 of 263 for the
+    mirror, and 0.931 against 0.006 on the hop that justified Mode 2. Reporting
+    the mirror when the strong direction is available would propose the weaker
+    of two writes with no note that a better one existed. `neighbours_
+    registering` returns both lists whole, so the choice hides nothing.
+
+    LIN_NONE MEANS NO ABSENCE IS ESTABLISHED IN EITHER DIRECTION, which covers
+    two situations that are the same answer here and different everywhere else:
+    no neighbour carries the assay, and `sample_id` already carries it itself.
+    The second is why `LINEAGE_RELATIONS` needs no fourth member -- a sample
+    that already holds the assay has nothing absent to point a direction at.
+    Task 6 still drops a sample already registered in the assay on its own
+    account; the two guards are independent and both are cheap.
+    """
+    kids, rents = neighbours_registering(
+        sample_id, assay_id, children_of, parents_of, registered)
+    if kids:
+        return (S.LIN_CHILD, kids[0])
+    if rents:
+        return (S.LIN_PARENT, rents[0])
+    return (S.LIN_NONE, None)
+
+
+def main(extract_dir: str = "assay-hygiene/extract") -> int:
+    """Build the index off the extract on disk and print its integrity report.
+
+    Read-only in the strongest sense available: it opens three files, writes
+    none, proposes nothing and touches no database. It exists so the numbers
+    this module's docstring states can be re-derived by anyone in one command,
+    and so the excluded populations are printed EVEN AT ZERO.
+    """
+    d = Path(extract_dir)
+    edges = pd.read_parquet(d / "edges.parquet")
+    samples = pd.read_parquet(d / "samples.parquet")
+    membership = pd.read_parquet(d / "membership.parquet")
+
+    children_of, parents_of, integrity = lineage_index(edges, samples, membership)
+
+    connected = set(children_of) | set(parents_of)
+    print(f"DERIVED_FROM lineage over {integrity['edge_rows']:,} edge rows: "
+          f"{len(connected):,} samples with at least one neighbour "
+          f"({len(children_of):,} with a child, {len(parents_of):,} with a parent)")
+    print("integrity -- every population, printed at zero as well:")
+    for key in INTEGRITY_KEYS:
+        value = integrity[key]
+        if isinstance(value, list):
+            head = ", ".join(str(v) for v in value[:10])
+            more = " ..." if len(value) > 10 else ""
+            print(f"  {key:<32} {len(value):>8,}  [{head}{more}]")
+        else:
+            print(f"  {key:<32} {value:>8,}")
+    print("no row here was dropped: the unresolved endpoints, the duplicate "
+          "uuids and the membership rows without a sample all stay in play, "
+          "because a sample with no `samples` row can still be registered and "
+          "can still settle a real absence")
+    print("nothing was written, and this module proposes no membership change")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(*sys.argv[1:]))
