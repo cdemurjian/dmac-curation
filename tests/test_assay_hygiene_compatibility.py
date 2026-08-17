@@ -256,8 +256,16 @@ def test_a_sample_typed_under_two_nodes_counts_under_both_types():
     and the denominator twice, the rate would silently halve, and if it counted
     it twice against a denominator of one the rate would exceed 1.0.
 
-    THE GUARD IS THAT BOTH TYPES READ THE SAME RATE and that neither exceeds
-    1.0, which no single-type rule can satisfy.
+    THE GUARD IS THE **TIS** ASSERTION, and this docstring said otherwise until
+    self-review. It claimed the guard was "both types read the same rate", which
+    the body does not assert and which is not even true here: MUS reads 1.0 over
+    1 and TIS reads 0.667 over 60. The discriminating assertion is that the TIS
+    population is still 60 AFTER the sample acquires a second type. Under a
+    one-type-per-sample_id rule the second node row displaces the first, TIS
+    reads 59, and it is that line which fails -- the MUS assertions pass under
+    both rules, because the sample lands in MUS either way. The `<= 1.0` sweep
+    is the second half: it catches the mirror error, a numerator counting the
+    sample under both types against a denominator counting it under one.
     """
     nodes, membership, assays = _world_a()
     # sample 1 (TIS, in 11 and 12) gains a second node row typed MUS
@@ -503,7 +511,8 @@ def test_a_sample_in_three_assays_yields_the_best_rate_and_this_names_the_winner
     # what the three wrong rules would have chosen, computed off the table
     by_support = max([21, 22, 23], key=lambda a: table[("CEL", a, 24)][1])
     by_id = min([21, 22, 23])
-    assert by_support == by_id == 21 != winner
+    by_iteration = next(iter({21, 22, 23}))
+    assert by_support == by_id == by_iteration == 21 != winner
     assert K.compat_band(rate, pop) == S.BAND_ROUTINE
     assert K.compat_band(*table[("CEL", 21, 24)]) == S.BAND_SOMETIMES, (
         "the losing candidate bands differently, so the choice is material")
