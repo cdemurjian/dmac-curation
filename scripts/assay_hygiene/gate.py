@@ -156,10 +156,19 @@ GATE_COLUMNS = [
 # There is no `proposed_*`, no `mode` and no `action`: the gate produces no
 # membership change, so its artifact carries no column capable of stating one,
 # and the file routes to `/curate-assay-vocabulary` rather than to a mode.
+#
+# The four evidence columns keep the `vocab_` prefix they carry in
+# `GATE_COLUMNS` -- one concept, one name, across both of this module's frames.
+# It also separates them from the two CLAIM-side counts beside them:
+# `vocab_n_samples` is how many distinct samples back the MAPPING and
+# `n_samples_affected` is how many samples' claims this run gated on it. Those
+# are different numbers under names one column apart, which is this package's
+# signature hazard, so the prefix is doing real work rather than matching a
+# convention.
 DEFECT_COLUMNS = [
     "defect", "source_field", "raw_value", "sample_type",
     "internal_assay_id", "internal_assay_title",
-    "support", "n_samples", "purity", "provenance",
+    "vocab_support", "vocab_n_samples", "vocab_purity", "vocab_provenance",
     "term_family", "family_internal_assay_ids",
     "n_claims", "n_samples_affected", "example_uuids", "detail",
 ]
@@ -617,10 +626,10 @@ def vocabulary_defects(
             "sample_type": stype,
             "internal_assay_id": iaid,
             "internal_assay_title": row.internal_assay_title,
-            "support": row.support,
-            "n_samples": row.n_samples,
-            "purity": row.purity,
-            "provenance": row.provenance,
+            "vocab_support": row.support,
+            "vocab_n_samples": row.n_samples,
+            "vocab_purity": row.purity,
+            "vocab_provenance": row.provenance,
             "term_family": f"{family_key[0]}/{family_key[1]}",
             "family_internal_assay_ids": (
                 ";".join(str(i) for i in family) if family else ""),

@@ -183,9 +183,17 @@ def test_type_registration_index_counts_distinct_samples_of_the_type():
 
     `membership.assay_id` is a seek `assays.id` and the gate speaks internal
     ids, so the index has to cross `assay_index`'s funnel or it compares two id
-    spaces that overlap numerically and share no meaning. Sample 200 appears in
-    the fixture's membership twice, under seek assays 1 and 2; it must count
-    once under each internal assay and never twice under either.
+    spaces that overlap numerically and share no meaning.
+
+    THE SECOND WORLD BELOW IS THE ONE THAT MAKES THE TITLE TRUE, and it is here
+    because self-review caught its absence: over the shared fixture alone, no
+    sample is registered twice in one INTERNAL assay, so rows and distinct
+    samples are equal in every cell and a row-counting index passes every
+    assertion above. That is the self-certifying-test failure increment 1
+    shipped five of. The real shape it stands in for is ordinary -- seek
+    instantiates the same logical assay once per study, 458 records collapsing
+    to 154 internal ids -- so a sample in two studies' Tissue Collection is two
+    membership rows and one sample of that type.
     """
     fx = S.make_fixture()
     nodes = _nodes(fx)
@@ -198,6 +206,21 @@ def test_type_registration_index_counts_distinct_samples_of_the_type():
     assert idx[("D.IMG", 11)] == 3        # 100, 101, 102
     assert ("DNA", 11) not in idx         # no DNA sample is registered anywhere
     assert all(isinstance(v, int) and v > 0 for v in idx.values())
+
+    # two seek assays, one internal assay, one sample registered under both:
+    # three membership rows over two distinct samples.
+    assays = pd.DataFrame(
+        [(1, "Tissue Collection", 7, 3, 2, 10, "P", 74, "Tissue Collection"),
+         (2, "Tissue Collection", 8, 4, 2, 11, "Q", 74, "Tissue Collection")],
+        columns=S.ASSAY_COLUMNS,
+    )
+    membership = pd.DataFrame(
+        [(1, 1), (1, 2), (2, 1)], columns=S.MEMBERSHIP_COLUMNS,
+    )
+    nodes = pd.DataFrame(
+        [("TIS-1", 1, "TIS"), ("TIS-2", 2, "TIS")], columns=S.NODES_COLUMNS,
+    )
+    assert G.type_registration_index(membership, assays, nodes) == {("TIS", 74): 2}
 
 
 def test_registrations_whose_sample_has_no_node_row_are_named_and_not_dropped():
@@ -600,6 +623,15 @@ def test_main_writes_one_artifact_and_leaves_its_inputs_byte_identical(tmp_path,
     `plugin_sentinel` is the P1 guard: nothing may be created inside the plugin
     checkout, and a driver that defaulted its output path into the repo is
     exactly the failure it catches.
+
+    THE INPUTS ARE MADE READ-ONLY, and the digests alone are not enough. Self
+    review caught this: `save_vocabulary` round-trips byte-identically, so a
+    `main` that rewrote `vocabulary.csv` on the way through passed the hash
+    check and the title's promise held only by luck of the serialiser. The mode
+    bits make it structural -- the file is an INPUT, so a write of any kind
+    raises rather than being judged by whether it happened to preserve bytes.
+    The digests stay, because they are what catches a write through a path the
+    mode bits do not cover.
     """
     fx = S.make_fixture()
     extract, out = tmp_path / "extract", tmp_path / "out"
@@ -614,6 +646,8 @@ def test_main_writes_one_artifact_and_leaves_its_inputs_byte_identical(tmp_path,
 
     digests = {p: hashlib.sha256(p.read_bytes()).hexdigest()
                for p in (out / "claims.parquet", out / "vocabulary.csv")}
+    for p in digests:
+        p.chmod(0o444)
     assert G.main(str(extract), str(out)) == 0
 
     defects = out / "vocabulary-defects.csv"
