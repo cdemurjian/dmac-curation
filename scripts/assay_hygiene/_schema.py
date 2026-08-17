@@ -191,6 +191,47 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 #   reaches a co-registration key, and `compat_band` bands that BAND_NO_SUPPORT
 #   because it tests support before rate. An id beside a support of 0 would name
 #   a population nobody measured.
+# `co_reg_alt_label_internal_assay_id` and `co_reg_alt_label_pop` carry the
+#   COUNTER-EVIDENCE: the assay this sample ALREADY HOLDS that never
+#   co-registers with the proposed one, over a population big enough to read,
+#   and the size of that population. `compatibility.best_co_registration`
+#   returns both.
+#
+#   They exist because the winning rate is a BEST-OF and a best-of hides its
+#   losers. A sample holding R1 and R2, proposed X, with (T,R1,X) = 0.000 over
+#   2,000 and (T,R2,X) = 0.9 over 100, reports 0.9 -> BAND_ROUTINE ->
+#   CLS_ABSENCE_COMPAT, "the absence is the anomaly, propose X" -- while the
+#   well-supported zero saying X is an ALTERNATIVE LABEL for R1, which the
+#   sample already carries, never reaches the operator. A well-supported zero is
+#   not silence; it is the counter-evidence.
+#
+#   NOT RARE, which is why they are columns and not a footnote. Measured
+#   2026-08-17 over the 7,831 (gated claim, type) rows on a registered sample
+#   whose proposed assay it does not hold: 5,839 (74.6%) have a well-supported
+#   zero available, and 428 (5.5%) are outright conflicts where the row would
+#   otherwise say "propose X" unopposed. 408 of the 428 are the spec's own
+#   flagship vocabulary defect -- DNA samples proposed 24 DNA Extraction on the
+#   `Type: Illumina Library` mapping at purity 0.707 -- so the counter-evidence
+#   points at rows already independently identified as wrong.
+#
+#   THE POPULATION RIDES WITH THE ID for the reason `co_reg_pop` rides with
+#   `co_reg_rate` and `n_samples` rides with `support`: the whole meaning of a
+#   zero is its support, which is what `BAND_NO_SUPPORT` exists to say. A bare
+#   "never co-registers with 173" with no population repeats the exact error
+#   that band was declared to prevent.
+#
+#   BOTH ARE EMPTY when no registration of this sample carries a well-supported
+#   zero against the proposal. When the WINNER is itself a zero the two agree by
+#   construction, the row is self-consistent, and the id names the registration
+#   the proposal duplicates -- 1,755 rows read "propose 138 CometChip Assay"
+#   against a zero on 37 Device Imaging over 8,179, and without the column the
+#   operator is told these are alternative labels and never told of what.
+#
+#   THEY DO NOT RE-CLASSIFY ANYTHING. `compat_band` still bands the WINNER, so a
+#   conflicted row still reads CLS_ABSENCE_COMPAT. Whether a populated
+#   alt-label id should demote it is a classification ruling and Tasks 5 and 6
+#   own classification; this layer owes them the evidence and its measured size,
+#   not a fourth bucket named for what someone assumed was in it.
 # `precedent_direction` says which of stage B's two rates `precedent_rate`
 #   holds. They differ -- 0.931 against 0.006 on the hop that justified Mode 2
 #   -- so a row carrying a bare rate cannot be audited.
@@ -203,6 +244,7 @@ FINDING_COLUMNS = [
     "vocab_support", "vocab_purity", "vocab_provenance",
     "lineage", "lineage_neighbour_uuid",
     "co_reg_rate", "co_reg_pop", "co_reg_registered_internal_assay_id",
+    "co_reg_alt_label_internal_assay_id", "co_reg_alt_label_pop",
     "compat_band",
     "precedent_rate", "precedent_direction",
     "precedent_n_both", "precedent_n_child_only", "precedent_n_parent_only",

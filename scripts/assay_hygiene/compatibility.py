@@ -19,13 +19,26 @@ vocabulary gate and after lineage. Each is named for what it establishes:
 **A ZERO RATE ON A REACHABLE, WELL-SUPPORTED PAIR MEANS ALTERNATIVE LABELS. IT
 IS NOT A CONTRADICTION, AND THE FIRST DRAFT OF THIS TASK'S PLAN SAID IT WAS.**
 That is the second of the two corrections the operator made to this design, and
-it is the reason this module exists. Increment 1 reported 866 "contradictions";
-measurement showed 45 of the 51 that survived the first correction name CORRECT
-assays. D.IMG images sit in 127 Tissue Imaging OR in 145 Histopathology, never
-both, because a curator picks one -- and 145 D.IMG samples ARE registered in
-Histopathology, so the pair is reachable in both directions and the gate passes
-the claim. Measured 2026-08-17 over the real extract, `(D.IMG, 127, 145)` reads
-0.000 over 2,035 samples of the type. Nothing is wrong with those registrations.
+it is the reason this module exists.
+
+Increment 1 reported 866 "contradictions". Reviewing the 51 that survived the
+first correction, 45 were found to name CORRECT assays -- **but that 45/51 was
+produced by `scripts/measure_absence_vs_contradiction.py`, NOT by this module,
+and its scope is not this module's.** That script types samples by the uuid
+prefix in `samples.parquet`, drops membership rows whose assay has no junction
+row (the MAPPABLE-only definition of "registered", the same one that understated
+the Mode 2 ceiling by 227 and 1,098), and takes lineage over `childof.parquet`
+rather than DERIVED_FROM. It is quoted here as the OBSERVATION that motivated
+this test and never as a figure this test reproduces; nothing in this package
+re-derives it, and it should not be repeated without this sentence.
+
+What this module measures, on its own rule and stated in its own scope: over the
+real extract 2026-08-17, typing samples off `nodes.type` and counting ANY
+membership row as registered, `(D.IMG, 127, 145)` reads 0.000 over 2,035 samples
+of the type. D.IMG images sit in 127 Tissue Imaging OR in 145 Histopathology,
+never both, because a curator picks one -- and 145 D.IMG samples ARE registered
+in Histopathology, so the pair is reachable in both directions and the gate
+passes the claim. Nothing is wrong with those registrations.
 
 The mirror reading is the useful one: a HIGH rate means the two assays routinely
 coexist on this type, so the absence of the second IS the anomaly. `(PAV, 56,
@@ -67,6 +80,7 @@ from __future__ import annotations
 import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import NamedTuple
 
 import pandas as pd
 
@@ -290,13 +304,35 @@ def band_establishes(band: str) -> str:
         ) from None
 
 
+class CoRegistration(NamedTuple):
+    """What one (sample, proposed assay) row's co-registration evidence says.
+
+    A NAMEDTUPLE AND NOT A BARE 5-TUPLE, because three of these five fields are
+    ints and two of them are POPULATIONS. `support` and `alt_label_support` are
+    the same type, mean different things and sit three positions apart, which is
+    this package's signature defect in its most literal form -- a positional
+    unpack that swapped them would produce a populated, wrong row rather than an
+    error. It still compares equal to a plain tuple, so tests may assert either.
+
+    `support` and `alt_label_support` are BOTH counts of samples of the type,
+    and each is the check on the rate beside it: `rate` over `support` for the
+    winner, and an implied 0.000 over `alt_label_support` for the counter-
+    evidence. See `best_co_registration` for what the pair means together.
+    """
+    rate: float
+    support: int
+    registered_assay_id: int | None
+    alt_label_assay_id: int | None
+    alt_label_support: int
+
+
 def best_co_registration(
     sample_type: str,
     registered_assay_ids,
     proposed_assay_id: int,
     table: dict[tuple[str, int, int], tuple[float, int]],
-) -> tuple[float, int, int | None]:
-    """-> (rate, support, the registered assay that produced them).
+) -> CoRegistration:
+    """The winning rate, AND the strongest evidence against it.
 
     THE COLLAPSE LIVES HERE AND NOT IN EACH CONSUMER. `FINDING_COLUMNS` carries
     ONE co-registration block per row and a row is per (sample, proposed assay),
@@ -306,8 +342,55 @@ def best_co_registration(
     produced three wrong figures on this branch.
 
     THE BEST RATE WINS, because any registered assay that routinely coexists
-    with the proposed one supports the proposal, and a sample's other
-    registrations do not weaken evidence they say nothing about.
+    with the proposed one supports the proposal. The rule is mandated by the
+    plan and is unchanged.
+
+    BUT A WELL-SUPPORTED ZERO IS NOT SILENCE, IT IS COUNTER-EVIDENCE, and an
+    earlier version of this docstring argued that "a sample's other
+    registrations do not weaken evidence they say nothing about". That is true
+    of a weak or middling rate and FALSE of a `BAND_NEVER` one. If the sample
+    holds R1, and X never co-registers with R1 across a well-supported
+    population, then X and R1 are ALTERNATIVE LABELS -- so proposing X may be
+    adding a synonym to a sample that already carries the thing. Reporting only
+    the winner discards that in exactly the case where it is strongest.
+
+    So `alt_label_assay_id` carries the best well-supported zero among the
+    sample's own registrations, with `alt_label_support` beside it, and both
+    reach the operator through `FINDING_COLUMNS`. MEASURED 2026-08-17 over the
+    7,831 (gated claim, type) rows on a registered sample whose proposed assay
+    it does not hold:
+
+      5,839 of 7,831 (74.6%)  have a well-supported zero available at all
+        428 of 7,831 ( 5.5%)  are OUTRIGHT CONFLICTS -- the winner bands
+                              BAND_ROUTINE, so `BAND_ESTABLISHES` reads
+                              CLS_ABSENCE_COMPAT and the row says "propose X",
+                              while a well-supported zero says X is an
+                              alternative label for something the sample HOLDS
+
+    408 of those 428 are one pattern, and it is the pattern the spec already
+    calls its flagship vocabulary defect: DNA samples proposed 24 DNA Extraction
+    on the `Type: Illumina Library` mapping (purity 0.707, 212 of 250 compat
+    flags), winner 64 Short Read Sequencing at 0.797 over 5,437, against a zero
+    on 173 cDNA Synthesis over 420 that the sample already holds. The
+    counter-evidence points at the rows the spec independently identified as
+    wrong.
+
+    THIS DOES NOT RE-CLASSIFY ANYTHING, AND THE OPEN QUESTION IS HANDED FORWARD.
+    `BAND_ESTABLISHES` still maps the WINNER's band, so a conflicted row still
+    reads CLS_ABSENCE_COMPAT today. Whether a populated `alt_label_assay_id`
+    should demote such a row -- to CLS_UNRESOLVED, or to a contested class of
+    its own -- is a classification ruling, Tasks 5 and 6 own classification, and
+    inventing it here would be a fourth bucket named for what someone assumed
+    was in it. What this module owes them is the evidence and its size, and
+    those are above.
+
+    WHEN THE WINNER IS ITSELF A ZERO the two agree by construction and the row
+    is self-consistent: `compat_band` reads BAND_NEVER, `BAND_ESTABLISHES` reads
+    CLS_ALT_LABEL, and `alt_label_assay_id` NAMES the registration X duplicates
+    -- which is the D.IMG finding made legible. 1,755 rows read "propose 138
+    CometChip Assay" against a zero on 37 Device Imaging over 8,179. Without the
+    column the operator is told these are alternative labels and never told of
+    WHAT.
 
     THE WINNER IS RETURNED AND IT HAS A COLUMN OF ITS OWN,
     `FINDING_COLUMNS.co_reg_registered_internal_assay_id`, which rides between
@@ -323,6 +406,14 @@ def best_co_registration(
     it tests support before rate. An id beside a support of 0 would name a
     population nobody measured.
 
+    "WELL-SUPPORTED ZERO" IS SPELLED `compat_band(...) == BAND_NEVER` AND NOT AS
+    A COMPARISON AGAINST `MIN_CO_REG_SUPPORT`. That band already means "zero,
+    over a population big enough to read", so re-deriving it here would be a
+    second definition of the same idea -- and it would put a floor comparison
+    outside `compat_band`, which is the line
+    `test_the_two_reporting_numbers_gate_nothing` draws between BANDING on a
+    reporting number and GATING on one.
+
     Ties break on the larger support and then on the LOWEST assay id. Both are
     stable under any iteration order; a bare `max` over a set would make the
     artifact a curator diffs change between runs on identical data, which is the
@@ -334,9 +425,9 @@ def best_co_registration(
     `GATE_UNREACHABLE` and not a measured absence of coexistence; see
     `co_registration`.
 
-    RETURNS `(0.0, 0, None)` WHEN NOTHING REACHES A POPULATION, and the zero
-    rate is safe only because the zero support rides beside it and `compat_band`
-    tests support FIRST. Banded, that pair reads `BAND_NO_SUPPORT`. Were the
+    RETURNS `(0.0, 0, None, None, 0)` WHEN NOTHING REACHES A POPULATION, and the
+    zero rate is safe only because the zero support rides beside it and
+    `compat_band` tests support FIRST. Banded, that pair reads `BAND_NO_SUPPORT`. Were the
     order reversed it would read `BAND_NEVER` -- "these assays never coexist" --
     asserted on no population at all.
 
@@ -345,6 +436,10 @@ def best_co_registration(
     because `co_registration` emits no diagonal.
     """
     best: tuple[float, int, int] | None = None
+    # the strongest counter-evidence: the well-supported zero over the LARGEST
+    # population, because a zero over 8,179 samples is a firmer statement that
+    # two assays are alternative labels than a zero over 30.
+    worst: tuple[int, int] | None = None
     for r in registered_assay_ids:
         hit = table.get((sample_type, int(r), int(proposed_assay_id)))
         if hit is None:
@@ -353,7 +448,13 @@ def best_co_registration(
         key = (rate, pop, -int(r))
         if best is None or key > (best[0], best[1], -best[2]):
             best = (rate, pop, int(r))
-    return best if best is not None else (0.0, 0, None)
+        if compat_band(rate, pop) == S.BAND_NEVER:
+            zkey = (pop, -int(r))
+            if worst is None or zkey > (worst[0], -worst[1]):
+                worst = (pop, int(r))
+    rate, pop, winner = best if best is not None else (0.0, 0, None)
+    alt_pop, alt = worst if worst is not None else (0, None)
+    return CoRegistration(rate, pop, winner, alt, alt_pop)
 
 
 def main(extract_dir: str = "assay-hygiene/extract") -> int:

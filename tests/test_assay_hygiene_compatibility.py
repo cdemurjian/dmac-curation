@@ -504,9 +504,12 @@ def test_a_sample_in_three_assays_yields_the_best_rate_and_this_names_the_winner
     assert table[("CEL", 22, 24)] == (0.60, 50)
     assert table[("CEL", 23, 24)] == (0.90, 40)
 
-    rate, pop, winner = K.best_co_registration("CEL", {21, 22, 23}, 24, table)
+    got = K.best_co_registration("CEL", {21, 22, 23}, 24, table)
+    rate, pop, winner = got.rate, got.support, got.registered_assay_id
     assert winner == 23
     assert (rate, pop) == (0.90, 40)
+    # nothing here is a well-supported zero, so there is no counter-evidence
+    assert (got.alt_label_assay_id, got.alt_label_support) == (None, 0)
 
     # what the three wrong rules would have chosen, computed off the table
     by_support = max([21, 22, 23], key=lambda a: table[("CEL", a, 24)][1])
@@ -539,13 +542,16 @@ def test_a_collapse_that_reaches_no_population_reads_no_support_never_never():
     nodes, membership, assays = _world_a()
     table = K.co_registration(membership, assays, nodes)
 
-    rate, pop, winner = K.best_co_registration("TIS", {11}, 14, table)
-    assert (rate, pop, winner) == (0.0, 0, None)
-    assert K.compat_band(rate, pop) == S.BAND_NO_SUPPORT
-    assert K.compat_band(rate, pop) != S.BAND_NEVER
+    got = K.best_co_registration("TIS", {11}, 14, table)
+    assert got == (0.0, 0, None, None, 0)
+    assert K.compat_band(got.rate, got.support) == S.BAND_NO_SUPPORT
+    assert K.compat_band(got.rate, got.support) != S.BAND_NEVER
+    # ...and no counter-evidence is manufactured out of the empty population
+    assert got.alt_label_assay_id is None and got.alt_label_support == 0
 
     # a type nobody in this world carries: same answer, still not BAND_NEVER
-    assert K.best_co_registration("NOPE", {11, 12}, 13, table) == (0.0, 0, None)
+    assert K.best_co_registration("NOPE", {11, 12}, 13, table) == (0.0, 0, None,
+                                                                   None, 0)
 
 
 # --- against the real extract -------------------------------------------------
@@ -590,3 +596,126 @@ def test_the_alternative_label_and_coexistence_figures_on_the_real_extract():
     rev_rate, rev_pop = table[("PAV", 74, 56)]
     assert rev_pop == 10782 and round(rev_rate, 3) == 0.987
     assert rev_rate != pav_rate
+
+
+def test_a_well_supported_zero_survives_the_best_of_and_names_what_it_opposes():
+    """The counter-evidence a best-of rate would otherwise discard.
+
+    WORLD C is the shape the reviewer described. A sample holds 31, 32 and 34
+    and is proposed X=33.
+
+        pop(CON,31) =  50, n_both(31,33) =   0  -> 0.000, BAND_NEVER
+        pop(CON,32) =  40, n_both(32,33) =  36  -> 0.900, BAND_ROUTINE
+        pop(CON,34) = 200, n_both(34,33) =   0  -> 0.000, BAND_NEVER
+
+    So the winner is 32 at 0.900 and the row says CLS_ABSENCE_COMPAT, "the
+    absence is the anomaly, propose 33" -- while 200 samples of this type say 33
+    never co-occurs with 34, which this sample HOLDS. That zero is the evidence
+    that 33 and 34 are alternative labels and the proposal may be adding a
+    synonym to a sample that already carries the thing.
+
+    THERE ARE TWO WELL-SUPPORTED ZEROS AND THEY ARE ORDERED AGAINST EACH OTHER.
+    The first version of this test had only one, so "the largest population" and
+    "the smallest" were indistinguishable and a mutation reversing the choice
+    went undetected. Here the larger population (200) carries the HIGHER id
+    (34) and the smaller (50) the lower (31), so the correct answer 34 is
+    reached by neither a smallest-population rule nor a lowest-id rule -- both
+    return 31.
+
+    THE GUARD IS THAT THE WINNER AND THE COUNTER-EVIDENCE DISAGREE ON EVERY
+    FIELD. Winner 32 against opponent 34; support 40 against population 200;
+    rate 0.9 against 0.0. A single-value collapse -- the shape this function had
+    before 2026-08-17 -- cannot express any of it, and a test asserting only 0.9
+    passed under it.
+
+    IT DOES NOT RE-CLASSIFY THE ROW, and this test pins that too. The band still
+    reads BAND_ROUTINE and `band_establishes` still reads CLS_ABSENCE_COMPAT,
+    because `compat_band` bands the WINNER. Whether a populated counter-evidence
+    column should demote the classification is a ruling Tasks 5 and 6 own, and
+    asserting today's behaviour is what makes that change visible when they make
+    it.
+    """
+    nodes, membership = _population([
+        ("CON", 50, [31]),           # a well-supported zero, SMALLER, lower id
+        ("CON", 36, [32, 33]),       # 36 of the 40 in 32 are also in X
+        ("CON", 4, [32]),
+        ("CON", 200, [34]),          # a well-supported zero, LARGER, higher id
+        ("CON", 40, [33]),           # X is reachable for the type in its own right
+    ])
+    assays = _assays(31, 32, 33, 34)
+    table = K.co_registration(membership, assays, nodes)
+
+    assert table[("CON", 31, 33)] == (0.0, 50)
+    assert table[("CON", 32, 33)] == (0.90, 40)
+    assert table[("CON", 34, 33)] == (0.0, 200)
+    assert K.compat_band(*table[("CON", 31, 33)]) == S.BAND_NEVER
+    assert K.compat_band(*table[("CON", 32, 33)]) == S.BAND_ROUTINE
+    assert K.compat_band(*table[("CON", 34, 33)]) == S.BAND_NEVER
+
+    got = K.best_co_registration("CON", {31, 32, 34}, 33, table)
+
+    # the winner is unchanged: the best-rate rule is plan-mandated
+    assert (got.rate, got.support, got.registered_assay_id) == (0.90, 40, 32)
+    # ...and the STRONGEST counter-evidence survives beside it, with its
+    # population. Both wrong rules return 31, computed off the table.
+    assert got.alt_label_assay_id == 34
+    assert got.alt_label_support == 200
+
+    zeros = {a: table[("CON", a, 33)][1] for a in (31, 34)}
+    assert min(zeros, key=lambda a: zeros[a]) == 31 != got.alt_label_assay_id, (
+        "a smallest-population rule would answer 31")
+    assert min(zeros) == 31 != got.alt_label_assay_id, (
+        "a lowest-id rule would answer 31")
+
+    # every field disagrees, so no single-value collapse can stand in for this
+    assert got.registered_assay_id != got.alt_label_assay_id
+    assert got.support != got.alt_label_support
+    assert got.rate != table[("CON", got.alt_label_assay_id, 33)][0]
+
+    # the classification is NOT changed by this task, and that is asserted so
+    # the change is visible when Tasks 5/6 make it
+    band = K.compat_band(got.rate, got.support)
+    assert band == S.BAND_ROUTINE
+    assert K.band_establishes(band) == S.CLS_ABSENCE_COMPAT
+
+    # the row has somewhere to put both halves
+    assert "co_reg_alt_label_internal_assay_id" in S.FINDING_COLUMNS
+    assert "co_reg_alt_label_pop" in S.FINDING_COLUMNS
+
+
+def test_a_thinly_supported_zero_is_not_counter_evidence():
+    """BAND_NO_SUPPORT is not BAND_NEVER, in the counter-evidence too.
+
+    The distinction `_schema` declares BAND_NO_SUPPORT for applies on BOTH sides
+    of the row. A zero over 29 samples is noise, and reporting it as "these two
+    are alternative labels" would manufacture counter-evidence out of an empty
+    population -- the same error, one column over, and the place it would next
+    appear now that the winner is guarded against it.
+
+    THE GUARD IS ONE SAMPLE. The two worlds differ only in the size of the zero
+    population, 29 against 30, so nothing but the support can have moved the
+    answer. `best_co_registration` spells this `compat_band(...) == BAND_NEVER`
+    rather than comparing to the floor itself, which is what keeps the only
+    comparison against `MIN_CO_REG_SUPPORT` inside `compat_band`.
+    """
+    floor = S.MIN_CO_REG_SUPPORT
+    nodes, membership = _population([
+        ("THIN", floor - 1, [31]), ("THIN", 36, [32, 33]), ("THIN", 4, [32]),
+        ("FAT", floor, [31]), ("FAT", 36, [32, 33]), ("FAT", 4, [32]),
+    ])
+    table = K.co_registration(membership, _assays(31, 32, 33), nodes)
+
+    assert table[("THIN", 31, 33)] == (0.0, floor - 1)
+    assert table[("FAT", 31, 33)] == (0.0, floor)
+
+    thin = K.best_co_registration("THIN", {31, 32}, 33, table)
+    fat = K.best_co_registration("FAT", {31, 32}, 33, table)
+
+    # identical winners, so only the counter-evidence can differ
+    assert (thin.rate, thin.support, thin.registered_assay_id) == \
+           (fat.rate, fat.support, fat.registered_assay_id)
+
+    assert (thin.alt_label_assay_id, thin.alt_label_support) == (None, 0), (
+        "a zero over an unreadable population is noise, not an alternative "
+        "label")
+    assert (fat.alt_label_assay_id, fat.alt_label_support) == (31, floor)

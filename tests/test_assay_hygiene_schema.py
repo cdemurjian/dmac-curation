@@ -76,13 +76,15 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
     itself as `registered_internal_assay_ids`, so there is nothing for a
     tiebreak to recover later and nothing at the end to protect. The successor
     below is strictly stronger than the assertion it replaces: the old test
-    pinned two facts about one column, this one pins all 32 columns, their
+    pinned two facts about one column, this one pins all 34 columns, their
     order, and their uniqueness.
 
-    32 and not 31 since 2026-08-17, when `co_reg_registered_internal_assay_id`
-    was added between `co_reg_pop` and `compat_band`. See
+    34 and not 31 since 2026-08-17. `co_reg_registered_internal_assay_id` names
+    which pair the winning rate measured, and
+    `co_reg_alt_label_internal_assay_id` / `co_reg_alt_label_pop` carry the
+    counter-evidence a best-of rate would otherwise hide. See
     `test_a_co_registration_rate_names_the_registration_it_was_measured_against`
-    for why it is there and why an ID.
+    and `test_a_best_of_rate_carries_the_well_supported_zero_it_beat`.
 
     Pinned against a literal for the reason `VOCAB_COLUMNS` and `CLAIM_COLUMNS`
     are: a test asserting only "the frame matches the constant" stays green
@@ -97,6 +99,7 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
         "vocab_support", "vocab_purity", "vocab_provenance",
         "lineage", "lineage_neighbour_uuid",
         "co_reg_rate", "co_reg_pop", "co_reg_registered_internal_assay_id",
+        "co_reg_alt_label_internal_assay_id", "co_reg_alt_label_pop",
         "compat_band",
         "precedent_rate", "precedent_direction",
         "precedent_n_both", "precedent_n_child_only", "precedent_n_parent_only",
@@ -147,8 +150,8 @@ def test_a_co_registration_rate_names_the_registration_it_was_measured_against()
     assert against == pop + 1, (
         "the registration the rate was measured against belongs with the rate "
         "and its support, not adrift from them")
-    assert band == against + 1, (
-        "the band LABELS the three facts before it and must not sit among them")
+    assert band > against, (
+        "the band LABELS the facts before it and must never sit among them")
 
     # an id, and it takes no title partner
     assert S.FINDING_COLUMNS[against].endswith("_id")
@@ -164,8 +167,55 @@ def test_a_co_registration_rate_names_the_registration_it_was_measured_against()
     # the whole co-registration block, in order, so a reordering fails here too
     assert S.FINDING_COLUMNS[rate:band + 1] == [
         "co_reg_rate", "co_reg_pop", "co_reg_registered_internal_assay_id",
+        "co_reg_alt_label_internal_assay_id", "co_reg_alt_label_pop",
         "compat_band",
     ]
+
+
+def test_a_best_of_rate_carries_the_well_supported_zero_it_beat():
+    """The winning rate is a BEST-OF, and a best-of hides its losers.
+
+    A sample holding R1 and R2, proposed X, with `(T,R1,X)` = 0.000 over 2,000
+    and `(T,R2,X)` = 0.9 over 100, reports 0.9 -> BAND_ROUTINE ->
+    CLS_ABSENCE_COMPAT, "the absence is the anomaly, propose X" -- while the
+    well-supported zero, saying X is an ALTERNATIVE LABEL for R1 which the
+    sample ALREADY CARRIES, reaches nobody. A well-supported zero is not
+    silence; it is counter-evidence, and it is strongest in exactly the case
+    where the winner is loudest.
+
+    NOT RARE, which is why these are columns rather than a footnote. Measured
+    2026-08-17 over the 7,831 (gated claim, type) rows on a registered sample
+    whose proposed assay it does not hold: 5,839 (74.6%) have a well-supported
+    zero available and 428 (5.5%) are outright conflicts. 408 of the 428 are one
+    pattern, and it is the spec's own flagship vocabulary defect -- DNA samples
+    proposed 24 DNA Extraction on the `Type: Illumina Library` mapping.
+
+    THE POPULATION RIDES WITH THE ID, because the whole meaning of a zero is its
+    support -- which is what `BAND_NO_SUPPORT` exists to say. An alt-label id
+    with no population beside it repeats the error that band was declared to
+    prevent.
+    """
+    aid = S.FINDING_COLUMNS.index("co_reg_alt_label_internal_assay_id")
+    apop = S.FINDING_COLUMNS.index("co_reg_alt_label_pop")
+    against = S.FINDING_COLUMNS.index("co_reg_registered_internal_assay_id")
+    band = S.FINDING_COLUMNS.index("compat_band")
+
+    assert aid == against + 1, (
+        "the counter-evidence belongs in the co-registration block, beside the "
+        "rate it opposes, not adrift at the end of the row")
+    assert apop == aid + 1, (
+        "a zero with no population is exactly what BAND_NO_SUPPORT exists to "
+        "refuse; the id may never travel without its support")
+    assert band == apop + 1, (
+        "the band is the LABEL and comes after every fact it labels")
+
+    # an id and never a title, like every other identity in this module
+    assert S.FINDING_COLUMNS[aid].endswith("_id")
+    assert "co_reg_alt_label_internal_assay_title" not in S.FINDING_COLUMNS
+
+    # the winner and the counter-evidence are DIFFERENT columns. One column
+    # doing both jobs would report whichever the code looked at last.
+    assert len({against, aid, apop}) == 3
 
 
 def test_no_per_edge_finding_column_survives_the_grain_change():
