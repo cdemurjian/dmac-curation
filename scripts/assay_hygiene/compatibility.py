@@ -457,7 +457,125 @@ def best_co_registration(
     return CoRegistration(rate, pop, winner, alt, alt_pop)
 
 
-def main(extract_dir: str = "assay-hygiene/extract") -> int:
+# Every key `counter_evidence_census` returns, in report order, declared for the
+# reason `INTEGRITY_KEYS` and `CEILING_KEYS` are: the report prints them all, and
+# a key that stops being produced must break rather than stop being printed.
+#
+# THE TWO CONFLICT KEYS ARE DIFFERENT NUMBERS AND BOTH ARE NAMED. An earlier
+# write-up of this measurement used "conflicted" in two senses one paragraph
+# apart -- the loose any-band sense and the strict banded-ROUTINE one -- and
+# quoted 12,360 for one population against 428 for the other. They differ by a
+# factor of 29 on the Mode 2 ceiling. Two names, so the ambiguity cannot recur.
+CENSUS_KEYS = (
+    "rows",
+    "rows_with_counter_evidence",
+    "conflicts_any_band",
+    "conflicts_at_band_routine",
+    "self_consistent_alt_labels",
+)
+
+
+def counter_evidence_census(
+    gated: pd.DataFrame,
+    table: dict[tuple[str, int, int], tuple[float, int]],
+    registered: dict[int, set[int]],
+    types: dict[int, frozenset[str]],
+    top: int = 5,
+) -> tuple[dict[str, int], list[tuple], list[tuple]]:
+    """How often the counter-evidence columns actually carry something.
+
+    -> (counts over CENSUS_KEYS, top conflict patterns, top alt-label patterns)
+
+    THIS EXISTS BECAUSE A SCHEMA CHANGE WAS JUSTIFIED BY A NUMBER THAT LIVED
+    ONLY IN PROSE. `co_reg_alt_label_internal_assay_id` and `co_reg_alt_label_pop`
+    were added to `FINDING_COLUMNS` on the strength of "5.5% of rows are
+    conflicts", and nothing in the tree computed it. That is the same standing
+    this package refused for the Mode 2 ceiling, where two prose readings
+    disagreed by 227 and 1,098 and neither could be re-derived; `mode2_ceiling`
+    was written as code for exactly that reason and two columns in a shared
+    contract deserve at least as much.
+
+    THE POPULATION, STATED PRECISELY ENOUGH TO REPRODUCE WITHOUT READING THIS
+    CODE. One row per (gated claim, sample type) pair satisfying ALL of:
+
+      1. the claim REACHES A MODE -- `gate.reaches_modes` is true, meaning
+         `gate_failures` contains neither `GATE_UNREACHABLE` nor
+         `GATE_INCOHERENT`. A recorded `GATE_LOW_SUPPORT` does NOT exclude it,
+         because a tuned floor marks and does not block;
+      2. the sample is registered in at least one internal assay, under the
+         ANY-MEMBERSHIP definition (`audit.registered_internal`), not the
+         MAPPABLE-only one;
+      3. the sample is NOT already registered in the claimed assay, since a
+         sample holding it has no absence to propose;
+      4. one row per (claim, TYPE): a sample carrying two node rows that
+         disagree on type contributes TWO rows, matching
+         `gate.type_registration_index`, which counts such a sample under both.
+
+    Mode 1's population cannot appear here: rule 2 excludes it by construction,
+    because a sample registered nowhere has no registration to carry
+    counter-evidence.
+
+    THE COUNTS:
+
+      rows                        the population above
+      rows_with_counter_evidence  `alt_label_assay_id` is not None
+      conflicts_any_band          the winner's rate is above zero AND
+                                  counter-evidence exists -- the LOOSE sense
+      conflicts_at_band_routine   the winner bands `BAND_ROUTINE`, so
+                                  `BAND_ESTABLISHES` reads `CLS_ABSENCE_COMPAT`
+                                  and the row says "propose X", AND
+                                  counter-evidence exists -- the STRICT sense,
+                                  and the one that justified the columns
+      self_consistent_alt_labels  the winner is ITSELF a well-supported zero, so
+                                  the row already reads `CLS_ALT_LABEL` and the
+                                  column names WHAT the proposal duplicates
+
+    The two conflict counts are separate keys because they are separate numbers:
+    over the Mode 2 ceiling they read 12,360 and 14, a factor of 29 apart, and a
+    single name for both is how one gets quoted for the other.
+
+    Read-only, like everything here. It counts; it proposes nothing.
+    """
+    from .gate import reaches_modes    # local: keeps the module import-light
+
+    counts = dict.fromkeys(CENSUS_KEYS, 0)
+    conflicts: dict[tuple, int] = defaultdict(int)
+    alt_labels: dict[tuple, int] = defaultdict(int)
+
+    for row, ok in zip(gated.itertuples(index=False), reaches_modes(gated)):
+        if not ok:
+            continue
+        sample_id, proposed = int(row.sample_id), int(row.internal_assay_id)
+        have = registered.get(sample_id)
+        if not have or proposed in have:
+            continue
+        for stype in types.get(sample_id, ()):
+            counts["rows"] += 1
+            got = best_co_registration(stype, have, proposed, table)
+            if got.alt_label_assay_id is None:
+                continue
+            counts["rows_with_counter_evidence"] += 1
+            band = compat_band(got.rate, got.support)
+            if got.rate > 0.0:
+                counts["conflicts_any_band"] += 1
+            if band == S.BAND_ROUTINE:
+                counts["conflicts_at_band_routine"] += 1
+                conflicts[(stype, proposed, got.registered_assay_id,
+                           got.alt_label_assay_id)] += 1
+            elif band == S.BAND_NEVER:
+                counts["self_consistent_alt_labels"] += 1
+                alt_labels[(stype, proposed, got.alt_label_assay_id)] += 1
+
+    assert set(counts) == set(CENSUS_KEYS), "CENSUS_KEYS is out of date"
+    # sorted by count then by key, so the artifact is stable across runs over
+    # identical data -- the hazard every sort in this package guards
+    rank = lambda d: sorted(  # noqa: E731
+        ((n, k) for k, n in d.items()), key=lambda t: (-t[0], t[1]))[:top]
+    return counts, rank(conflicts), rank(alt_labels)
+
+
+def main(extract_dir: str = "assay-hygiene/extract",
+         out_dir: str = "assay-hygiene") -> int:
     """Measure co-registration off the extract on disk and print the headlines.
 
     Read-only. Three files opened, none written, nothing proposed, no database
@@ -498,11 +616,63 @@ def main(extract_dir: str = "assay-hygiene/extract") -> int:
     print(f"NOTE: {len(untyped)} registered sample(s) have no node row and so no "
           f"type; they reach no cell, in the numerator or the denominator: "
           f"{untyped[:10]}" + (" ..." if len(untyped) > 10 else ""))
+
+    _census(Path(out_dir), membership, assays, nodes, table)
     print("a rate of 0.000 on a REACHABLE, well-supported pair means the two "
           "assays are ALTERNATIVE LABELS a curator chooses between. It is not a "
           "contradiction and it proposes nothing.")
     print("nothing was written, and this module proposes no membership change")
     return 0
+
+
+def _census(out: Path, membership, assays, nodes, table) -> None:
+    """Print the counter-evidence census, or say why it could not be computed.
+
+    Split out of `main` because it needs two files `main`'s other half does not
+    -- `claims.parquet` and `vocabulary.csv`, which are stage B outputs rather
+    than extract inputs -- and a co-registration table is still worth printing
+    on an extract that has not been through stage B. Absence is REPORTED and
+    never silent, per the house rule.
+    """
+    from . import gate as G, vocabulary as V
+
+    missing = [f for f in ("claims.parquet", "vocabulary.csv")
+               if not (out / f).exists()]
+    if missing:
+        print(f"NOTE: the counter-evidence census needs {missing} under {out} "
+              "and they are not there, so it was NOT computed. Run "
+              "`python -m assay_hygiene.gate` first.")
+        return
+
+    claims = pd.read_parquet(out / "claims.parquet")
+    vocab = V.load_vocabulary(out / "vocabulary.csv")
+    type_reg = type_registration_index(membership, assays, nodes)
+    gated = G.gate_claims(claims, vocab, type_reg, G.sample_type_index(nodes))
+    counts, conflicts, alt_labels = counter_evidence_census(
+        gated, table, registered_internal(membership, assays),
+        sample_type_sets(nodes))
+
+    print("counter-evidence census, over (gated claim, sample type) rows that "
+          "reach a mode, on a sample registered somewhere and NOT already "
+          "registered in the claimed assay:")
+    for key in CENSUS_KEYS:
+        share = f"{100 * counts[key] / counts['rows']:5.1f}%" if counts["rows"] else "    --"
+        print(f"  {key:<28} {counts[key]:>8,}  {share}")
+    print("  the two conflict counts are DIFFERENT numbers: the first is any "
+          "positive winning rate, the second is only the rows banded "
+          "BAND_ROUTINE, which are the ones that say 'propose X'.")
+    print("top conflicts -- the row proposes X while a well-supported zero says "
+          "X is an alternative label for something the sample HOLDS:")
+    for n, (stype, proposed, winner, alt) in conflicts:
+        print(f"  {n:>6,}  {stype:<7} propose {proposed:<4} winner {winner:<4} "
+              f"rate {table[(stype, winner, proposed)][0]:.3f} over "
+              f"{table[(stype, winner, proposed)][1]:>6,}  |  ZERO against {alt} "
+              f"over {table[(stype, alt, proposed)][1]:>6,}")
+    print("top self-consistent alternative labels -- the row already reads "
+          "CLS_ALT_LABEL and the column names WHAT it duplicates:")
+    for n, (stype, proposed, alt) in alt_labels:
+        print(f"  {n:>6,}  {stype:<7} propose {proposed:<4} is an alt label for "
+              f"{alt} over {table[(stype, alt, proposed)][1]:>6,}")
 
 
 if __name__ == "__main__":

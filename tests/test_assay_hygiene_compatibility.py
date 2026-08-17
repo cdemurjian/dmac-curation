@@ -5,11 +5,27 @@
 """Task 4: the co-registration test, and what a zero rate actually means.
 
 WHY THIS FILE EXISTS, stated once. Increment 1 reported 866 "contradictions".
-Measurement showed 45 of the 51 that survived the first two corrections are
-ALTERNATIVE LABELS: D.IMG images sit in 127 Tissue Imaging or in 145
-Histopathology, never both, because a curator picks one, and 145 D.IMG samples
-are registered in Histopathology. The first draft of this task's plan called a
-zero co-registration rate a contradiction. It is not one, and
+Reviewing the 51 that survived the FIRST correction, 45 were found to name
+correct assays -- alternative labels, not contradictions: D.IMG images sit in
+127 Tissue Imaging or in 145 Histopathology, never both, because a curator picks
+one, and 145 D.IMG samples are registered in Histopathology.
+
+**THAT 45/51 WAS PRODUCED BY `scripts/measure_absence_vs_contradiction.py`, NOT
+BY THE MODULE UNDER TEST, AND ITS SCOPE IS NOT THIS MODULE'S.** That script types
+samples by the uuid prefix in `samples.parquet`, drops membership rows whose
+assay has no junction row (the MAPPABLE-only definition of "registered", the same
+one that understated the Mode 2 ceiling by 227 and 1,098), and takes lineage over
+`childof.parquet` rather than DERIVED_FROM. It is the OBSERVATION that motivated
+this test and never a figure these tests reproduce. Every figure asserted below
+is measured on this module's own rule, typing samples off `nodes.type` and
+counting ANY membership row as registered.
+
+An earlier version of this paragraph said "the first TWO corrections", which is
+wrong and disagreed with `compatibility.py`: the 45/51 finding IS the second
+correction, so the 51 survived the first one only.
+
+The first draft of this task's plan called a zero co-registration rate a
+contradiction. It is not one, and
 `test_a_zero_rate_on_a_reachable_pair_is_an_alternative_label_and_never_an_error`
 is the regression for exactly that mislabelling.
 
@@ -38,10 +54,13 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
 from assay_hygiene import _schema as S  # noqa: E402
+from assay_hygiene import audit as A  # noqa: E402
 from assay_hygiene import compatibility as K  # noqa: E402
 from assay_hygiene import gate as G  # noqa: E402
+from assay_hygiene import vocabulary as V  # noqa: E402
 
 EXTRACT = REPO / "assay-hygiene" / "extract"
+ARTIFACTS = REPO / "assay-hygiene"
 
 
 # --- fixture plumbing --------------------------------------------------------
@@ -601,32 +620,40 @@ def test_the_alternative_label_and_coexistence_figures_on_the_real_extract():
 def test_a_well_supported_zero_survives_the_best_of_and_names_what_it_opposes():
     """The counter-evidence a best-of rate would otherwise discard.
 
-    WORLD C is the shape the reviewer described. A sample holds 31, 32 and 34
+    WORLD C is the shape the reviewer described. A sample holds 25, 31 and 32
     and is proposed X=33.
 
-        pop(CON,31) =  50, n_both(31,33) =   0  -> 0.000, BAND_NEVER
+        pop(CON,25) =  50, n_both(25,33) =   0  -> 0.000, BAND_NEVER
+        pop(CON,31) = 200, n_both(31,33) =   0  -> 0.000, BAND_NEVER
         pop(CON,32) =  40, n_both(32,33) =  36  -> 0.900, BAND_ROUTINE
-        pop(CON,34) = 200, n_both(34,33) =   0  -> 0.000, BAND_NEVER
 
     So the winner is 32 at 0.900 and the row says CLS_ABSENCE_COMPAT, "the
     absence is the anomaly, propose 33" -- while 200 samples of this type say 33
-    never co-occurs with 34, which this sample HOLDS. That zero is the evidence
-    that 33 and 34 are alternative labels and the proposal may be adding a
+    never co-occurs with 31, which this sample HOLDS. That zero is the evidence
+    that 33 and 31 are alternative labels and the proposal may be adding a
     synonym to a sample that already carries the thing.
 
-    THERE ARE TWO WELL-SUPPORTED ZEROS AND THEY ARE ORDERED AGAINST EACH OTHER.
-    The first version of this test had only one, so "the largest population" and
-    "the smallest" were indistinguishable and a mutation reversing the choice
-    went undetected. Here the larger population (200) carries the HIGHER id
-    (34) and the smaller (50) the lower (31), so the correct answer 34 is
-    reached by neither a smallest-population rule nor a lowest-id rule -- both
-    return 31.
+    THE THREE IDS ARE CHOSEN SO THAT EVERY WRONG RULE ANSWERS 25 AND THE RIGHT
+    ONE ANSWERS 31. Two earlier versions of this test could not see a
+    first-wins rule: with `{31, 32, 34}` CPython iterates `[32, 34, 31]`, so the
+    first well-supported zero encountered was already the correct answer and
+    deleting the comparison entirely survived. Here `{25, 31, 32}` iterates
+    `[32, 25, 31]`, so:
 
-    THE GUARD IS THAT THE WINNER AND THE COUNTER-EVIDENCE DISAGREE ON EVERY
-    FIELD. Winner 32 against opponent 34; support 40 against population 200;
-    rate 0.9 against 0.0. A single-value collapse -- the shape this function had
-    before 2026-08-17 -- cannot express any of it, and a test asserting only 0.9
-    passed under it.
+        first zero in iteration order   25   WRONG
+        smallest population             25   WRONG
+        lowest assay id                 25   WRONG
+        LARGEST POPULATION              31   correct
+
+    All four are computed off the frame below, never typed in, and the
+    iteration-order simulation is the same one the sibling winner test performs
+    with `next(iter(...))`. The counter-evidence side had no such simulation
+    until the reviewer proved the omission by running the mutant.
+
+    THE WINNER AND THE COUNTER-EVIDENCE ALSO DISAGREE ON EVERY FIELD. Winner 32
+    against opponent 31; support 40 against population 200; rate 0.9 against
+    0.0. A single-value collapse -- the shape this function had before
+    2026-08-17 -- cannot express any of it.
 
     IT DOES NOT RE-CLASSIFY THE ROW, and this test pins that too. The band still
     reads BAND_ROUTINE and `band_establishes` still reads CLS_ABSENCE_COMPAT,
@@ -636,41 +663,95 @@ def test_a_well_supported_zero_survives_the_best_of_and_names_what_it_opposes():
     it.
     """
     nodes, membership = _population([
-        ("CON", 50, [31]),           # a well-supported zero, SMALLER, lower id
+        ("CON", 50, [25]),           # a well-supported zero: SMALL pop, LOW id
+        ("CON", 200, [31]),          # a well-supported zero: LARGE pop, HIGH id
         ("CON", 36, [32, 33]),       # 36 of the 40 in 32 are also in X
         ("CON", 4, [32]),
-        ("CON", 200, [34]),          # a well-supported zero, LARGER, higher id
         ("CON", 40, [33]),           # X is reachable for the type in its own right
     ])
-    assays = _assays(31, 32, 33, 34)
+    assays = _assays(25, 31, 32, 33)
     table = K.co_registration(membership, assays, nodes)
+    held = {25, 31, 32}
 
-    assert table[("CON", 31, 33)] == (0.0, 50)
+    assert table[("CON", 25, 33)] == (0.0, 50)
+    assert table[("CON", 31, 33)] == (0.0, 200)
     assert table[("CON", 32, 33)] == (0.90, 40)
-    assert table[("CON", 34, 33)] == (0.0, 200)
+    assert K.compat_band(*table[("CON", 25, 33)]) == S.BAND_NEVER
     assert K.compat_band(*table[("CON", 31, 33)]) == S.BAND_NEVER
     assert K.compat_band(*table[("CON", 32, 33)]) == S.BAND_ROUTINE
-    assert K.compat_band(*table[("CON", 34, 33)]) == S.BAND_NEVER
 
-    got = K.best_co_registration("CON", {31, 32, 34}, 33, table)
+    got = K.best_co_registration("CON", held, 33, table)
 
     # the winner is unchanged: the best-rate rule is plan-mandated
     assert (got.rate, got.support, got.registered_assay_id) == (0.90, 40, 32)
     # ...and the STRONGEST counter-evidence survives beside it, with its
-    # population. Both wrong rules return 31, computed off the table.
-    assert got.alt_label_assay_id == 34
+    # population.
+    assert got.alt_label_assay_id == 31
     assert got.alt_label_support == 200
 
-    zeros = {a: table[("CON", a, 33)][1] for a in (31, 34)}
-    assert min(zeros, key=lambda a: zeros[a]) == 31 != got.alt_label_assay_id, (
-        "a smallest-population rule would answer 31")
-    assert min(zeros) == 31 != got.alt_label_assay_id, (
-        "a lowest-id rule would answer 31")
+    # the three wrong rules, each computed off the frame
+    zeros = {a: table[("CON", a, 33)][1] for a in held
+             if K.compat_band(*table[("CON", a, 33)]) == S.BAND_NEVER}
+    by_iteration = next(a for a in held if a in zeros)
+    by_smallest = min(zeros, key=lambda a: zeros[a])
+    by_lowest_id = min(zeros)
+    assert by_iteration == by_smallest == by_lowest_id == 25, (
+        "the fixture must make every wrong rule answer 25, or it cannot "
+        "discriminate the right one")
+    assert got.alt_label_assay_id != by_iteration, (
+        "a first-wins rule -- deleting the comparison entirely -- would answer "
+        "25, and this is the assertion two earlier fixtures could not make")
 
     # every field disagrees, so no single-value collapse can stand in for this
     assert got.registered_assay_id != got.alt_label_assay_id
     assert got.support != got.alt_label_support
     assert got.rate != table[("CON", got.alt_label_assay_id, 33)][0]
+
+
+def test_two_equally_supported_zeros_break_to_the_lowest_assay_id():
+    """The counter-evidence tie-break, which had no test at all.
+
+    `best_co_registration` documents that its tie-breaks exist so the artifact a
+    curator diffs does not change between runs under set iteration order. The
+    WINNER's tie-break is exercised by
+    `test_a_sample_in_three_assays_yields_the_best_rate_and_this_names_the_winner`;
+    the counter-evidence's was asserted nowhere, so a highest-id-on-tie mutation
+    was uncaught across the whole file.
+
+    Two zeros, EQUAL populations of 60, so population cannot separate them and
+    only the id rule can. The ids are chosen so the tie-break disagrees with
+    iteration order too: `{33, 34, 40}` iterates `[40, 33, 34]`, so the first
+    zero encountered is 40 while the answer is 33.
+
+        first zero in iteration order   40   WRONG
+        highest assay id               40   WRONG
+        LOWEST ASSAY ID                33   correct
+    """
+    nodes, membership = _population([
+        ("TIE", 60, [40]),           # a well-supported zero, HIGHER id
+        ("TIE", 60, [33]),           # a well-supported zero, LOWER id, same pop
+        ("TIE", 36, [34, 35]),       # the winner, 36 of 40
+        ("TIE", 4, [34]),
+    ])
+    table = K.co_registration(membership, _assays(33, 34, 35, 40), nodes)
+    held = {33, 34, 40}
+
+    assert table[("TIE", 40, 35)] == table[("TIE", 33, 35)] == (0.0, 60), (
+        "the two populations must be EQUAL, or this is not a tie")
+    assert table[("TIE", 34, 35)] == (0.90, 40)
+
+    got = K.best_co_registration("TIE", held, 35, table)
+    assert (got.rate, got.registered_assay_id) == (0.90, 34)
+    assert got.alt_label_assay_id == 33
+    assert got.alt_label_support == 60
+
+    zeros = [a for a in held
+             if K.compat_band(*table[("TIE", a, 35)]) == S.BAND_NEVER]
+    assert next(a for a in held if a in zeros) == 40 != got.alt_label_assay_id, (
+        "a first-wins rule would answer 40")
+    assert max(zeros) == 40 != got.alt_label_assay_id, (
+        "a highest-id-on-tie rule would answer 40")
+    assert got.alt_label_assay_id == min(zeros)
 
     # the classification is NOT changed by this task, and that is asserted so
     # the change is visible when Tasks 5/6 make it
@@ -719,3 +800,183 @@ def test_a_thinly_supported_zero_is_not_counter_evidence():
         "a zero over an unreadable population is noise, not an alternative "
         "label")
     assert (fat.alt_label_assay_id, fat.alt_label_support) == (31, floor)
+
+
+# --- the census that justifies the two counter-evidence columns ---------------
+
+
+def _gated(*rows):
+    """A GATE_COLUMNS frame from (sample_id, internal_assay_id, gate_failures).
+
+    Only the three columns `counter_evidence_census` reads carry meaning; the
+    rest are filled so the frame matches its declared contract. `gate_failures`
+    is the column `gate.reaches_modes` rules on -- never `gate`, which holds only
+    the most severe outcome.
+    """
+    return pd.DataFrame(
+        [(sid, f"U-{sid}", "CEN", iaid, f"Assay {iaid}", "Type", "t",
+          (fails.split(";")[0] if fails else S.GATE_PASS), fails, "",
+          100, 100, 0.99, S.P_LEARNED, "Type/t", "", 1)
+         for sid, iaid, fails in rows],
+        columns=G.GATE_COLUMNS,
+    )
+
+
+def _census_world():
+    """A world where every census rule excludes or admits exactly one sample.
+
+        pop(CEN,25) =  54  zero against 33   -> counter-evidence, SMALL
+        pop(CEN,31) = 203  zero against 33   -> counter-evidence, LARGE
+        pop(CEN,32) =  44  36 also in 33     -> 0.818, BAND_ROUTINE, the winner
+
+    Samples 9001-9006 each exercise one rule, and no two land in the same set of
+    counts.
+    """
+    nodes, membership = _population([
+        ("CEN", 50, [25]),
+        ("CEN", 200, [31]),
+        ("CEN", 36, [32, 33]),
+        ("CEN", 4, [32]),
+        ("CEN", 40, [33]),
+    ])
+    extra_nodes, extra_membership = _population([
+        ("CEN", 1, [25, 31, 32]),      # 9001 conflict, reaches a mode
+        ("CEN", 1, [25, 31, 32]),      # 9002 conflict, carries a FLOOR failure
+        ("CEN", 1, [25, 31, 32]),      # 9003 BLOCKED, must not be counted
+        ("CEN", 1, [25]),              # 9004 winner is itself a zero
+        ("CEN", 1, [32]),              # 9005 no counter-evidence at all
+        ("CEN", 1, [33]),              # 9006 already holds the claim
+    ], start=9001)
+    # 9007 is registered NOWHERE, so it needs a node row and no membership
+    extra_nodes = pd.concat(
+        [extra_nodes, pd.DataFrame([("CEN-9007", 9007, "CEN")],
+                                   columns=S.NODES_COLUMNS)], ignore_index=True)
+    return (pd.concat([nodes, extra_nodes], ignore_index=True),
+            pd.concat([membership, extra_membership], ignore_index=True),
+            _assays(25, 31, 32, 33))
+
+
+def test_the_census_counts_only_rows_a_finding_could_actually_be_written_for():
+    """Each of the four population rules excludes a sample this world contains.
+
+    THE MEASUREMENT THAT JUSTIFIED A SCHEMA CHANGE HAS TO BE COMPUTABLE.
+    `co_reg_alt_label_internal_assay_id` and `co_reg_alt_label_pop` were added
+    to `FINDING_COLUMNS` on the strength of "5.5% of rows are conflicts" and
+    nothing in the tree computed it -- the same standing this package refused
+    for the Mode 2 ceiling, where two prose readings disagreed and neither could
+    be re-derived.
+
+    THE GUARD IS THAT ALL FIVE COUNTS DIFFER, and that each excluded sample is
+    excluded by a DIFFERENT rule:
+
+        9001  conflict, clean gate                 counted
+        9002  conflict, GATE_LOW_SUPPORT           counted -- a tuned floor
+                                                   MARKS and does not block, so
+                                                   dropping it would silently
+                                                   apply the blocking rule this
+                                                   package spent a task removing
+        9003  GATE_UNREACHABLE                     excluded, rule 1
+        9004  winner is itself a well-supported    counted, and it is the
+              zero                                 self-consistent bucket
+        9005  no zero among its registrations      counted in `rows` only
+        9006  already registered in the claim      excluded, rule 3
+        9007  registered nowhere (Mode 1)          excluded, rule 2
+
+    A rule that admitted 9003, 9006 or 9007, or dropped 9002, moves a count that
+    no other row can restore.
+    """
+    nodes, membership, assays = _census_world()
+    table = K.co_registration(membership, assays, nodes)
+    registered = A.registered_internal(membership, assays)
+    types = G.sample_type_sets(nodes)
+
+    gated = _gated(
+        (9001, 33, ""),
+        (9002, 33, S.GATE_LOW_SUPPORT),
+        (9003, 33, S.GATE_UNREACHABLE),
+        (9004, 33, ""),
+        (9005, 33, ""),
+        (9006, 33, ""),
+        (9007, 33, ""),
+    )
+    counts, conflicts, alt_labels = K.counter_evidence_census(
+        gated, table, registered, types)
+
+    assert set(counts) == set(K.CENSUS_KEYS)
+    assert counts["rows"] == 4                       # 9001 9002 9004 9005
+    assert counts["rows_with_counter_evidence"] == 3  # ...minus 9005
+    assert counts["conflicts_any_band"] == 2          # 9001 9002
+    assert counts["conflicts_at_band_routine"] == 2
+    assert counts["self_consistent_alt_labels"] == 1  # 9004
+    assert len(set(counts.values())) == 4, (
+        "the counts must not coincide, or a rule could move one unseen")
+
+    # the blocked row is the one a `gate == GATE_PASS` test would ALSO have
+    # dropped 9002 for; this asserts the correct rule, not the convenient one
+    blocked = K.counter_evidence_census(
+        _gated((9002, 33, S.GATE_UNREACHABLE)), table, registered, types)[0]
+    kept = K.counter_evidence_census(
+        _gated((9002, 33, S.GATE_LOW_SUPPORT)), table, registered, types)[0]
+    assert blocked["rows"] == 0 and kept["rows"] == 1, (
+        "GATE_LOW_SUPPORT marks and must not block; GATE_UNREACHABLE blocks")
+
+    # the patterns name the winner AND the opponent, and they differ
+    assert conflicts == [(2, ("CEN", 33, 32, 31))]
+    assert alt_labels == [(1, ("CEN", 33, 25))]
+    assert conflicts[0][1][2] != conflicts[0][1][3]
+
+
+@pytest.mark.skipif(not (EXTRACT / "membership.parquet").exists()
+                    or not (ARTIFACTS / "claims.parquet").exists(),
+                    reason="the extract and stage B outputs are gitignored")
+def test_the_census_reproduces_the_figures_that_justified_the_two_columns():
+    """7,831 / 5,839 / 625 / 428, and the 408 that are one known-bad mapping.
+
+    These four numbers are why `co_reg_alt_label_internal_assay_id` and
+    `co_reg_alt_label_pop` exist. They appeared only as prose in a report until
+    2026-08-17; this is the assertion that makes them re-derivable, and it fails
+    if the population definition drifts.
+
+    408 of the 428 conflicts are ONE pattern and it is the spec's own flagship
+    vocabulary defect: DNA samples proposed 24 DNA Extraction through
+    `Type: Illumina Library` (purity 0.707, 212 of 250 compat flags), whose
+    winner is 64 Short Read Sequencing at 0.797 over 5,437 while 173 cDNA
+    Synthesis -- which the sample already holds -- never co-registers with 24
+    over 420 samples. The counter-evidence points at rows the spec identified as
+    wrong by a completely different route, which is the strongest evidence
+    available that it is measuring something real.
+    """
+    membership = pd.read_parquet(EXTRACT / "membership.parquet")
+    assays = pd.read_parquet(EXTRACT / "assays.parquet")
+    nodes = pd.read_parquet(EXTRACT / "nodes.parquet")
+    claims = pd.read_parquet(ARTIFACTS / "claims.parquet")
+    vocab = V.load_vocabulary(ARTIFACTS / "vocabulary.csv")
+
+    table = K.co_registration(membership, assays, nodes)
+    gated = G.gate_claims(claims, vocab,
+                          G.type_registration_index(membership, assays, nodes),
+                          G.sample_type_index(nodes))
+    counts, conflicts, alt_labels = K.counter_evidence_census(
+        gated, table, A.registered_internal(membership, assays),
+        G.sample_type_sets(nodes))
+
+    assert counts["rows"] == 7_831
+    assert counts["rows_with_counter_evidence"] == 5_839
+    assert counts["conflicts_any_band"] == 625
+    assert counts["conflicts_at_band_routine"] == 428
+    assert counts["self_consistent_alt_labels"] == 5_214
+
+    # the two conflict senses are DIFFERENT numbers, which is why they are two
+    # keys; a write-up quoted one for the other before they were named apart
+    assert counts["conflicts_any_band"] != counts["conflicts_at_band_routine"]
+
+    # 408 of the 428 are the Illumina-Library mapping the spec already flags
+    assert conflicts[0] == (408, ("DNA", 24, 64, 173))
+    assert table[("DNA", 64, 24)] == pytest.approx((0.797, 5437), abs=1e-3)
+    assert table[("DNA", 173, 24)] == (0.0, 420)
+    assert sum(n for n, _ in conflicts[:2]) == 428, (
+        "the top two patterns account for every conflict")
+
+    # and the largest self-consistent bucket names what the proposal duplicates
+    assert alt_labels[0] == (1_755, ("D.IMG", 138, 37))
+    assert table[("D.IMG", 37, 138)] == (0.0, 8179)
