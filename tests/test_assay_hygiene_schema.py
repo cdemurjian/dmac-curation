@@ -86,12 +86,18 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
     `test_a_co_registration_rate_names_the_registration_it_was_measured_against`
     and `test_a_best_of_rate_carries_the_well_supported_zero_it_beat`.
 
+    `project_ids` is PLURAL and was `project_id` until 2026-08-17, renamed when
+    the first emitter was written and measured the value: 1,052 of Mode 1's
+    6,242 population samples hold more than one project id and 34 hold a
+    duplicate. `test_no_finding_column_collides_with_the_rule_key` carries the
+    decisive half of that argument.
+
     Pinned against a literal for the reason `VOCAB_COLUMNS` and `CLAIM_COLUMNS`
     are: a test asserting only "the frame matches the constant" stays green
     through any reordering of the constant itself.
     """
     assert S.FINDING_COLUMNS == [
-        "sample_id", "uuid", "sample_type", "project_id",
+        "sample_id", "uuid", "sample_type", "project_ids",
         "registered_internal_assay_ids", "registered_internal_assay_titles",
         "proposed_internal_assay_id", "proposed_internal_assay_title",
         "mode", "classification", "gate",
@@ -106,6 +112,60 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
         "proposed_by", "evidence_summary", "action",
     ]
     assert len(set(S.FINDING_COLUMNS)) == len(S.FINDING_COLUMNS)
+
+
+def test_no_finding_column_collides_with_the_rule_key():
+    """One name, one meaning, across the two frames a Mode 2 classifier holds open.
+
+    `RULE_KEY` is `(project_id, child_type, parent_type, internal_assay_id)` and
+    every component of it is SINGULAR by construction: a precedent rule is scoped
+    to exactly one project and exactly one hop. `FINDING_COLUMNS` describes a
+    sample, whose project set is not singular at all -- 1,052 of Mode 1's 6,242
+    population samples hold more than one project id, 34 hold the same id twice,
+    and 193 hold none.
+
+    Mode 2 keys on `RULE_KEY` and emits `FINDING_COLUMNS`, so the two constants
+    are in scope in one function. Until 2026-08-17 both spelled `project_id`,
+    which put "exactly one project" and "a `;`-joined set of projects" under one
+    name one frame apart -- this module's signature defect, the one it has
+    documented for `edge_internal_assay_id`, for `provenance` / `source_provenance`
+    and for the grain change above, and the one that has cost this branch four
+    tasks. The finding column is now `project_ids`.
+
+    THE ASSERTION IS DISJOINTNESS AND NOT AN INEQUALITY ON ONE NAME. A test
+    spelling `"project_id" not in FINDING_COLUMNS` would pin the instance and
+    miss the class; the next collision would be `internal_assay_id`, which
+    `FINDING_COLUMNS` deliberately carries only under the prefixes
+    `proposed_`, `co_reg_registered_` and `co_reg_alt_label_` precisely because
+    the bare name is the rule key's.
+
+    A future column MAY share a name with a rule-key component -- if it genuinely
+    carries the same thing, this test is the place to say so and to record why.
+    Silence here means no such column has ever been justified.
+    """
+    shared = sorted(set(S.FINDING_COLUMNS) & set(S.RULE_KEY))
+    assert not shared, (
+        f"{shared} appear in both FINDING_COLUMNS and RULE_KEY. A rule-key "
+        "component is singular by construction and a finding column describes "
+        "a sample; if the two genuinely mean the same thing, say so here and "
+        "name the column in an exemption. Otherwise prefix or pluralise it.")
+
+    # ...and the same for the whole precedent frame, which the finding row
+    # borrows from under `precedent_*` prefixes for exactly this reason.
+    shared = sorted(set(S.FINDING_COLUMNS) & set(S.PRECEDENT_COLUMNS))
+    assert not shared, (
+        f"{shared} appear in both FINDING_COLUMNS and PRECEDENT_COLUMNS. Every "
+        "borrowed column carries the prefix of the frame it came from, so a "
+        "reader can tell `precedent_rate` from a co-registration rate.")
+
+    # The rule key's own components are unchanged, so this test cannot be made
+    # to pass by renaming the OTHER side of the collision: a precedent rule is
+    # scoped to one project and that name is correct where it lives.
+    assert S.RULE_KEY == ["project_id", "child_type", "parent_type",
+                          "internal_assay_id"]
+    assert "project_id" in S.ASSAY_COLUMNS      # one assay, one project
+    assert "project_ids" in S.SAMPLE_COLUMNS    # one sample, a GROUP_CONCAT
+    assert "project_ids" in S.FINDING_COLUMNS   # ...and the row reads the sample
 
 
 def test_a_co_registration_rate_names_the_registration_it_was_measured_against():

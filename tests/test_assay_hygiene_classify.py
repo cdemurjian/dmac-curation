@@ -561,36 +561,45 @@ def test_the_evidence_summary_carries_the_two_numbers_the_finding_columns_drop()
 
 
 def test_the_project_column_carries_every_project_a_sample_holds_deduped_and_sorted():
-    """`SAMPLE_COLUMNS.project_ids` is PLURAL and `FINDING_COLUMNS.project_id` is not.
+    """`SAMPLE_COLUMNS.project_ids` is PLURAL, and so, since 2026-08-17, is the
+    column that reads it.
 
     1,052 of the real 6,242 population samples carry more than one project id,
     34 carry a DUPLICATED one ("2,2"), and 193 carry none. The proposed assay's
     project is no better a source: 75 of the 154 internal assay ids span more
     than one project, up to seven. So the sample's whole project set is emitted,
-    `;`-joined in the convention `registered_internal_assay_ids` already uses,
-    and the singular column NAME is reported as a schema defect rather than
-    quietly satisfied by dropping projects.
+    `;`-joined in the convention `registered_internal_assay_ids` already uses.
+
+    `FINDING_COLUMNS` called this `project_id` until this task measured the
+    value. `RULE_KEY.project_id` and `ASSAY_COLUMNS.project_id` are genuinely
+    singular and stay, and Mode 2 holds `RULE_KEY` and `FINDING_COLUMNS` open at
+    once, so the old spelling put two meanings under one name one frame apart.
+    `tests/test_assay_hygiene_schema.py::test_no_finding_column_collides_with_the_rule_key`
+    owns that half and fails on any recurrence.
 
     The wrong rule -- take the first project and drop the rest -- is simulated
     and asserted to differ.
     """
     _, _, _, _, _, findings = _pipeline()
 
-    assert findings[findings.sample_id == 108].iloc[0].project_id == "2;6"
-    assert findings[findings.sample_id == 105].iloc[0].project_id == "2"
-    assert findings[findings.sample_id == 106].iloc[0].project_id == ""
-    assert findings[findings.sample_id == 100].iloc[0].project_id == "3"
+    assert findings[findings.sample_id == 108].iloc[0].project_ids == "2;6"
+    assert findings[findings.sample_id == 105].iloc[0].project_ids == "2"
+    assert findings[findings.sample_id == 106].iloc[0].project_ids == ""
+    assert findings[findings.sample_id == 100].iloc[0].project_ids == "3"
+    # the column is the plural one, and the singular name is gone from the row
+    assert "project_ids" in findings.columns
+    assert "project_id" not in findings.columns
 
     # THE WRONG RULE: first id only
     raw = _world()["samples"]
     first_only = {int(s): (str(p).split(",")[0] if pd.notna(p) else "")
                   for s, p in zip(raw.sample_id, raw.project_ids)}
     assert first_only[108] == "6"
-    assert first_only[108] != findings[findings.sample_id == 108].iloc[0].project_id
+    assert first_only[108] != findings[findings.sample_id == 108].iloc[0].project_ids
     # ...and the un-deduplicated rule, which reads plausibly and is not right
     assert ";".join(str(raw[raw.sample_id == 105].iloc[0].project_ids)
                     .split(",")) == "2;2"
-    assert findings[findings.sample_id == 105].iloc[0].project_id == "2"
+    assert findings[findings.sample_id == 105].iloc[0].project_ids == "2"
 
 
 # --- the frames --------------------------------------------------------------

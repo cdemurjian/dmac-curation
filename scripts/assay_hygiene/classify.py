@@ -150,22 +150,28 @@ MODE1_CENSUS_KEYS = (
 def project_index(samples: pd.DataFrame) -> dict[int, str]:
     """sample_id -> its project ids, deduplicated, sorted, `;`-joined.
 
-    THE COLUMN THIS FEEDS IS SINGULAR AND THE VALUE IS NOT, and that is a schema
-    defect reported rather than quietly satisfied. `SAMPLE_COLUMNS.project_ids`
-    is a `GROUP_CONCAT`, and measured over Mode 1's real population 1,052 of the
-    6,242 samples carry more than one project id, 34 carry the same id twice
-    (`2,2`), and 193 carry none. The proposed assay's project is no better a
-    source: 75 of the 154 internal assay ids span more than one project, up to
-    seven, so `FINDING_COLUMNS.project_id` cannot be single-valued from either
-    side of the row.
+    THE VALUE IS A SET AND THE COLUMN IS NOW NAMED FOR ONE.
+    `FINDING_COLUMNS` spelled this `project_id` until 2026-08-17; it is
+    `project_ids`, renamed on the measurement this function's first run produced.
+    Over Mode 1's real population, 1,052 of the 6,242 samples carry more than one
+    project id, 34 carry the same id twice (the raw `GROUP_CONCAT` spells it
+    `2,2`), and 193 carry none. The proposed assay's project would not have
+    rescued the singular either -- 75 of the 154 internal assay ids span more
+    than one project, up to seven -- so there is no single-valued project
+    anywhere on the row, from either side of it.
 
-    Emitting the whole set under a singular name is the least-wrong of the three
-    available answers -- the other two are dropping projects an operator needs,
-    or renaming a shared output contract three later tasks are already dispatched
-    against. A `;`-joined value under a singular header reads as plural at a
-    glance; a silently truncated one reads as correct, and this package's whole
-    discipline is that the second failure is the expensive one. The rename to
-    `project_ids` is the real fix and is reported, not taken here.
+    THE DECISIVE HALF IS THE COLLISION. `RULE_KEY.project_id` is the ONE project
+    a precedent rule is scoped to, and `ASSAY_COLUMNS.project_id` the ONE project
+    an assay record belongs to; both are genuinely singular. Mode 2 keys on
+    `RULE_KEY` and emits `FINDING_COLUMNS`, so under the old spelling one name
+    would mean "exactly one project" in the key and "a `;`-joined set" in the
+    row, in two frames one function holds open at once.
+    `test_no_finding_column_collides_with_the_rule_key` fails on any recurrence
+    rather than leaving it to a reader.
+
+    Truncating to one project was the alternative and it is the expensive
+    failure: a `;`-joined value reads as plural at a glance, while a silently
+    dropped project reads as correct.
 
     `;`-joined and not `,`-joined, matching `registered_internal_assay_ids`: one
     join convention across the finding row, so a consumer splitting one column
@@ -390,6 +396,14 @@ def mode1_findings(
     settles it" where neither test applies. That is a bucket named for what
     someone assumed was in it, which is the error this spec records three times.
 
+    THE NULLS ARE ALSO WHAT KEEPS TASK 8 FREE, and that is the second reason to
+    prefer them. An unrun test has to stay distinguishable from a test that ran
+    and found nothing: a later pass that gathers lineage or co-registration
+    evidence for these rows can FILL a null without contradicting anything this
+    task shipped, whereas it would have to OVERWRITE a `LIN_NONE` -- and an
+    overwrite of a published value is indistinguishable, in a diff a curator
+    reads, from the pipeline changing its mind.
+
     `registered_internal_assay_ids` is the EMPTY STRING and not null, which is
     the opposite statement and the one Mode 1 is built on: the sample's
     registrations were measured and there are none.
@@ -411,7 +425,7 @@ def mode1_findings(
             "sample_id": sample_id,
             "uuid": c.uuid,
             "sample_type": stype,
-            "project_id": projects.get(sample_id, ""),
+            "project_ids": projects.get(sample_id, ""),
             # measured, and empty. Never null: see the docstring.
             "registered_internal_assay_ids": "",
             "registered_internal_assay_titles": "",

@@ -101,11 +101,15 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 # test -- and no producer or consumer at all. There was nothing to migrate.
 #
 # The mitigation for the next reader is structural rather than documentary. The
-# two column sets are DISJOINT apart from `project_id`, which means the same
-# thing in both, so anything written against the per-edge shape
-# (`child_id`, `parent_id`, `verdict`, `candidates`, `matched_*`, `target_*`)
-# raises a KeyError instead of reading a populated, wrong column.
+# two column sets are WHOLLY DISJOINT, so anything written against the per-edge
+# shape (`child_id`, `parent_id`, `verdict`, `candidates`, `matched_*`,
+# `target_*`) raises a KeyError instead of reading a populated, wrong column.
 # tests/test_assay_hygiene_schema.py pins that absence by name.
+#
+# It read "DISJOINT apart from `project_id`, which means the same thing in both"
+# until 2026-08-17, when that one shared name was renamed to `project_ids`. See
+# the column note below: it was neither the same thing in both nor singular in
+# either, and the exemption is now gone rather than merely documented.
 #
 # Why per-sample. Mode 1's population is samples registered in NO assay and has
 # no edge to hang a row on; Mode 2's proposal is a membership row, which is
@@ -115,6 +119,38 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 #
 # Column notes, where the name carries something a reader cannot recover:
 #
+# `project_ids` is PLURAL, and it was `project_id` until 2026-08-17. Three
+#   separate facts forced the rename, and any one of them alone would have:
+#
+#   1. THE VALUE IS A SET. It carries the SAMPLE's projects, `;`-joined in the
+#      convention `registered_internal_assay_ids` one line down already uses.
+#      Measured over Mode 1's population, 1,052 of the 6,242 samples hold more
+#      than one project id, 34 hold the same id twice (the raw `GROUP_CONCAT`
+#      spells it `2,2`), and 193 hold none.
+#   2. THE SOURCE IS ALREADY PLURAL. `SAMPLE_COLUMNS.project_ids` above is the
+#      frame this is read from, so the singular spelling here was the ONLY place
+#      in this module that renamed a plural set on its way through.
+#   3. THE SINGULAR NAME IS TAKEN, TWICE, BY SOMETHING THAT REALLY IS SINGULAR.
+#      `ASSAY_COLUMNS.project_id` is the one project an assay record belongs to,
+#      and `RULE_KEY.project_id` is the one project a precedent rule is scoped
+#      to. That is the decisive one: the Mode 2 classifier keys on `RULE_KEY`
+#      and emits `FINDING_COLUMNS`, so under the old spelling one name meant
+#      "exactly one project" in the key and "a `;`-joined set" in the row, in
+#      two frames the same function holds open at once. That is this module's
+#      signature defect in its purest form and it has cost this branch four
+#      tasks. `test_no_finding_column_collides_with_the_rule_key` now fails on
+#      any future recurrence rather than leaving it to a reader.
+#
+#   The proposed assay's project would not have rescued the singular either: 75
+#   of the 154 internal assay ids span more than one project, up to seven. There
+#   is no single-valued project anywhere on this row.
+#
+#   Renamed before the first emitter shipped, which is the same moment
+#   `registered_internal_assay_titles` and `co_reg_registered_internal_assay_id`
+#   were ADDED and the same argument: `FINDING_COLUMNS` had no producer outside
+#   the module being written against it, so this is the cheapest it will ever be.
+#   It takes no `_titles` partner and needs none -- a project id is what a
+#   curator routes on and this package extracts no project title per sample.
 # `registered_internal_assay_ids` is the ANY-membership definition -- a sample
 #   with any membership row is registered -- crossed to the internal namespace
 #   by `audit.registered_internal`. The MAPPABLE definition is a smaller set,
@@ -236,7 +272,7 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 #   holds. They differ -- 0.931 against 0.006 on the hop that justified Mode 2
 #   -- so a row carrying a bare rate cannot be audited.
 FINDING_COLUMNS = [
-    "sample_id", "uuid", "sample_type", "project_id",
+    "sample_id", "uuid", "sample_type", "project_ids",
     "registered_internal_assay_ids", "registered_internal_assay_titles",
     "proposed_internal_assay_id", "proposed_internal_assay_title",
     "mode", "classification", "gate",
