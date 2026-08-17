@@ -268,6 +268,46 @@ def sample_type_index(nodes: pd.DataFrame) -> dict[str, str]:
     }
 
 
+def sample_type_sets(nodes: pd.DataFrame) -> dict[int, frozenset[str]]:
+    """sample_id -> the SET of types its node rows carry.
+
+    THE SECOND INDEX OFF `nodes`, AND THE PAIR IS NOT A DUPLICATION.
+    `sample_type_index` is keyed on UUID and returns ONE type, because uuid is
+    unique over all 177,392 node rows. This one is keyed on SAMPLE_ID and
+    returns a SET, because sample_id is NOT unique there: 86 sample_ids carry
+    two node rows under two uuids and 51 of those pairs disagree on type. The
+    two questions are different -- "what type is this uuid" against "what types
+    does this id answer to" -- and neither is derivable from the other, since
+    the uuid-keyed map has thrown the id away.
+
+    IT EXISTS AS A FUNCTION BECAUSE TWO CALLERS NEED IT.
+    `type_registration_index` built this map inline until 2026-08-17, when
+    `compatibility.co_registration` needed the identical map to count the
+    NUMERATOR of a rate whose denominator is a `type_registration_index` cell.
+    A second copy would be two definitions of "what type is this sample" one
+    module apart, and the failure mode is arithmetic rather than an error: a
+    numerator counting a dual-typed sample once against a denominator counting
+    it twice halves a rate silently, and the reverse pushes it over 1.0. So the
+    map is defined once, here, and both read it.
+
+    A DUAL-TYPED SAMPLE APPEARS UNDER BOTH TYPES, which is the ruling
+    `type_registration_index` documents and the reason its value is a set. Rows
+    with a null sample_id or a null type are skipped; a sample with no node row
+    at all is absent from this map entirely and is reported by
+    `untyped_registration_samples`.
+
+    Returns a PLAIN dict, for the reason `audit.registered_internal` gives:
+    a `defaultdict` answers `types[999]` by CREATING the entry, so `999 in
+    types` becomes true of every sample ever asked about. Callers use
+    `.get(sid, frozenset())`.
+    """
+    acc: dict[int, set[str]] = {}
+    for sid, t in zip(nodes.sample_id, nodes.type):
+        if pd.notna(sid) and pd.notna(t):
+            acc.setdefault(int(sid), set()).add(str(t))
+    return {sid: frozenset(v) for sid, v in acc.items()}
+
+
 def untyped_registration_samples(
     membership: pd.DataFrame,
     nodes: pd.DataFrame,
@@ -327,6 +367,11 @@ def type_registration_index(
     `GATE_UNREACHABLE` -- a finding deleted silently, reported as a vocabulary
     defect that is not one.
 
+    The sample-to-type map comes from `sample_type_sets`, which is shared with
+    `compatibility.co_registration` so the NUMERATOR of a co-registration rate
+    and the DENOMINATOR it divides -- this cell -- cannot type a sample
+    differently.
+
     A sample with two node rows disagreeing on type counts under BOTH types, and
     that direction is chosen on purpose. 20 of the 214,296 membership rows are
     affected. Counting it under one type would make reachability depend on a row
@@ -347,10 +392,7 @@ def type_registration_index(
             "an error. Re-extract so the two frames agree."
         )
 
-    types: dict[int, set[str]] = defaultdict(set)
-    for sid, t in zip(nodes.sample_id, nodes.type):
-        if pd.notna(sid) and pd.notna(t):
-            types[int(sid)].add(str(t))
+    types = sample_type_sets(nodes)
 
     cells: dict[tuple[str, int], set[int]] = defaultdict(set)
     for sid, aid in zip(membership.sample_id, membership.assay_id):
