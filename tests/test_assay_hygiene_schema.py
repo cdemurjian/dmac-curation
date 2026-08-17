@@ -76,7 +76,7 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
     itself as `registered_internal_assay_ids`, so there is nothing for a
     tiebreak to recover later and nothing at the end to protect. The successor
     below is strictly stronger than the assertion it replaces: the old test
-    pinned two facts about one column, this one pins all 30 columns, their
+    pinned two facts about one column, this one pins all 31 columns, their
     order, and their uniqueness.
 
     Pinned against a literal for the reason `VOCAB_COLUMNS` and `CLAIM_COLUMNS`
@@ -85,7 +85,7 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
     """
     assert S.FINDING_COLUMNS == [
         "sample_id", "uuid", "sample_type", "project_id",
-        "registered_internal_assay_ids",
+        "registered_internal_assay_ids", "registered_internal_assay_titles",
         "proposed_internal_assay_id", "proposed_internal_assay_title",
         "mode", "classification", "gate",
         "claim_tier", "contested", "source_field", "raw_value",
@@ -144,6 +144,95 @@ def test_nothing_in_a_finding_row_is_named_as_a_decision():
     assert "proposed_by" in S.RULE_COLUMNS
     assert "proposed_internal_assay_id" in S.FINDING_COLUMNS
     assert "proposed_internal_assay_title" in S.FINDING_COLUMNS
+
+
+def test_both_sides_of_a_finding_row_are_decoded_and_the_title_is_display_only():
+    """Registered ids and titles ride together, and no key is ever a title.
+
+    Without the titles a row reads `registered 115, proposes 24 DNA Extraction`
+    -- a bare id on the registered side against a decoded one on the proposed
+    side -- so the operator cannot judge the proposal the row makes without a
+    lookup they have no artifact for. `AUDIT_COLUMNS` settled this exact
+    asymmetry one section down in `_schema.py` and the same argument applies
+    here unchanged; the column carries the SAME name in both frames because it
+    means the same thing, which is the opposite of the hazard this module
+    usually guards.
+
+    The two columns are PLURAL and the proposed pair is SINGULAR, and that is
+    the grain: one row proposes exactly one assay and lists every assay the
+    sample already holds.
+
+    A title is display and never identity. `assay_index` raises on a
+    junction-less assay whose fallback id collides with a genuine internal id,
+    which makes ids safe to key on; nothing makes titles safe -- 458 seek assay
+    records collapse to 291 normalised titles, so titles are not unique even
+    within one namespace. The last assertion is the general form of
+    `test_rule_key_is_internal_assay_id`: a title may only appear beside the id
+    it decodes, never alone and never in a key.
+    """
+    ids = S.FINDING_COLUMNS.index("registered_internal_assay_ids")
+    titles = S.FINDING_COLUMNS.index("registered_internal_assay_titles")
+    assert titles == ids + 1, (
+        "the titles must ride immediately behind the ids they decode, so a "
+        "reader scanning the header meets the two halves of one fact together")
+
+    # plural on the registered side, singular on the proposed side
+    assert S.FINDING_COLUMNS[ids].endswith("_ids")
+    assert S.FINDING_COLUMNS[titles].endswith("_titles")
+    assert "proposed_internal_assay_id" in S.FINDING_COLUMNS
+    assert "proposed_internal_assay_titles" not in S.FINDING_COLUMNS
+
+    # every title column has the id column it decodes, on both sides
+    for col in S.FINDING_COLUMNS:
+        if col.endswith("_title"):
+            assert col[: -len("_title")] + "_id" in S.FINDING_COLUMNS, col
+        if col.endswith("_titles"):
+            assert col[: -len("_titles")] + "_ids" in S.FINDING_COLUMNS, col
+
+    # ...and no key anywhere in this module is a title
+    assert not [c for c in S.RULE_KEY if "title" in c]
+
+
+def test_the_registered_pair_lines_up_positionally_for_a_multi_assay_sample():
+    """Index i of the ids names index i of the titles, on a PLURAL row.
+
+    A sample legitimately holds more than one assay -- the domain rule -- so the
+    single-assay case cannot exercise the pairing at all: with one element the
+    two strings agree under any decode, including a wrong one. This builds the
+    two `;`-joined strings the way a producer must, off a sample that holds two,
+    and asserts they line up.
+
+    The decode itself is asserted total and single-valued over the fixture,
+    which is the property `AUDIT_COLUMNS` measured on the real extract: 0 of the
+    458 assay records carry an internal id with no title, and 0 internal ids
+    resolve to more than one distinct title. Titles come from the SAME funnel
+    that produced the ids, so no id can decode to a title its own registration
+    does not carry and no second source of truth appears.
+    """
+    fx = S.make_fixture()
+    reg = _registered_internal(fx)
+
+    decode = {}
+    for iaid, title in zip(fx["assays"]["internal_assay_id"],
+                           fx["assays"]["internal_assay_title"]):
+        decode.setdefault(iaid, set()).add(title)
+    assert all(len(t) == 1 for t in decode.values()), "an id decodes two ways"
+    decode = {k: v.pop() for k, v in decode.items()}
+    assert set().union(*reg.values()) <= set(decode), "an id does not decode"
+
+    plural = sorted(s for s, a in reg.items() if len(a) > 1)
+    assert plural, (
+        "no sample holds two registered assays, so the plural pairing is "
+        "untested -- with one element any decode agrees, including a wrong one")
+
+    for sid in plural:
+        ordered = sorted(reg[sid])
+        ids = ";".join(str(a) for a in ordered)
+        titles = ";".join(decode[a] for a in ordered)
+        assert len(ids.split(";")) == len(titles.split(";")) > 1
+        for i, a in enumerate(ordered):
+            assert titles.split(";")[i] == decode[int(ids.split(";")[i])]
+            assert ids.split(";")[i] == str(a)
 
 
 def test_fixture_encodes_the_four_canonical_situations():

@@ -121,6 +121,25 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 #   82 samples smaller on the real extract, because 17 assays carry no junction
 #   row. The two differ, they have been confused once already in this project,
 #   and this column is the ANY one.
+# `registered_internal_assay_titles` rides immediately behind its id column and
+#   holds the SAME ids decoded, in the SAME positions, both `;`-joined: index i
+#   of one names index i of the other. It carries the identical name and meaning
+#   as AUDIT_COLUMNS' column of that spelling, deliberately -- one concept, one
+#   name, which is the opposite of the adjacency hazard the rest of this module
+#   guards. Without it a row reads `registered 115, proposes 24 DNA Extraction`,
+#   a bare id on the registered side against a decoded one on the proposed side,
+#   and the operator cannot judge the proposal without a lookup they have no
+#   artifact for. AUDIT_COLUMNS settled this same asymmetry in increment 1 and
+#   the argument carries over unchanged; it is added here for the reason given
+#   there, that the moment before the first consumer exists is the one moment a
+#   column costs nothing, and no task builds a findings row yet.
+#
+#   The ids stay. A title is DISPLAY and never IDENTITY: `assay_index` raises on
+#   a junction-less assay whose fallback id collides with a genuine internal id,
+#   which is what makes ids safe to key on, and nothing makes titles safe -- 458
+#   seek assay records collapse to 291 normalised titles. Nothing downstream may
+#   key, join or group on this column. Titles come from `precedent.assay_index`,
+#   the same funnel that produced the ids, so no second source of truth appears.
 # `proposed_*` and not `claimed_*` or `target_*`: under the binding constraint
 #   ("nothing decides, everything proposes") the row is a proposal, and the
 #   header is where a reader forms their belief about what the pipeline already
@@ -146,7 +165,7 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 #   -- so a row carrying a bare rate cannot be audited.
 FINDING_COLUMNS = [
     "sample_id", "uuid", "sample_type", "project_id",
-    "registered_internal_assay_ids",
+    "registered_internal_assay_ids", "registered_internal_assay_titles",
     "proposed_internal_assay_id", "proposed_internal_assay_title",
     "mode", "classification", "gate",
     "claim_tier", "contested", "source_field", "raw_value",
