@@ -3123,8 +3123,9 @@ def test_a_zero_co_registration_row_on_a_reachable_pair_is_an_alternative_label_
     assert row.lineage_n_supports == 0
 
     # THE WRONG RULE: reading a zero as a contradiction. That is what increment
-    # 1 did and what `measure_absence_vs_contradiction.py` still does; the rate
-    # is identical and only the LABEL changed.
+    # 1 did, and what `measure_absence_vs_contradiction.py` did until it was
+    # deleted 2026-08-18 for being a second writer of `mode3-disposition.csv`;
+    # the rate is identical and only the LABEL changed.
     assert S.CLS_ALT_LABEL in S.CLASSES
     assert "CONTRADICTION" not in S.CLASSES
     assert CP.band_establishes(S.BAND_NEVER) == S.CLS_ALT_LABEL
@@ -3672,6 +3673,15 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
     # the spec says must be pulled out BY THE VOCABULARY GATE. All 24 are
     # lineage candidates -- a D.FLOW or D.SPC data parent registers the
     # measurement assay -- so the gate is the only thing that can stop them.
+    #
+    # THE SCOPING BELOW IS PART OF THE FIGURE, and the selector states it:
+    # (A.FLOW, 30) and (A.SPC, 130), which is a SAMPLE TYPE and CLAIMED ASSAY
+    # pair. Keyed on the TERM instead -- any `FlowJo*` or mass-spectra
+    # raw_value -- the same family is 25 flags, the extra being one D.ADNKA
+    # sample carrying `FlowJo 10.3`. Both counts are correct and they are not
+    # interchangeable, so prose saying "the 24 FlowJo and mass-spectra flags"
+    # without naming the scoping is ambiguous; every one of the 25 is a gate
+    # refusal either way, so the gate-first finding does not depend on which.
     twenty_four = flags[
         ((flags.sample_type == "A.FLOW") & (flags.claimed_internal_assay_id == 30))
         | ((flags.sample_type == "A.SPC")

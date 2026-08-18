@@ -1447,9 +1447,14 @@ def findings_census(
 # two artifacts side by side, and increment 1's output is superseded rather than
 # deleted.
 #
-# THIS FILE REPLACES `scripts/measure_absence_vs_contradiction.py`'S OUTPUT OF
-# THE SAME NAME, and the prototype should be retired rather than left as a
-# second writer. It has no tests; it types samples by uuid prefix, drops
+# THIS FILE REPLACED `scripts/measure_absence_vs_contradiction.py`'S OUTPUT OF
+# THE SAME NAME, AND THAT PROTOTYPE WAS DELETED 2026-08-18 -- recoverable from
+# git history, and referred to here and in `compatibility.py` only as the
+# historical OBSERVATION that motivated this work. It was left in the tree for
+# one review cycle as a KNOWN SECOND WRITER OF THIS EXACT FILENAME: two
+# writers, no coordination, last one wins, and an operator running both would
+# silently read whichever finished last.
+# It had no tests; it types samples by uuid prefix, drops
 # unmapped membership rows, traverses the CHILD_OF relation rather than
 # `DERIVED_FROM`, bands on `>` where `compatibility.compat_band` bands on `>=`,
 # has no vocabulary gate at all, and labels a well-supported zero CONTRADICTION
@@ -1735,8 +1740,13 @@ def main(extract_dir: str = "assay-hygiene/extract",
     print(f"  the {ucensus['keys_refused_by_the_gate']:,} key(s) the gate "
           "refused emit NOTHING, and that is the third design error reversed: "
           "a rejected claim reaches no mode even where a lineage neighbour "
-          "carries the same pair, which is the shape of the 24 FlowJo and "
-          "mass-spectra flags increment 1 routed to Mode 2.")
+          "carries the same pair, which is the shape of the 24 flags "
+          "increment 1 routed to Mode 2: A.FLOW claiming 30 Flow Cytometry "
+          "and A.SPC claiming 130 Mass Spectrometry. THAT SCOPING IS PART OF "
+          "THE FIGURE -- keyed on the TERM instead, `FlowJo*` and mass-spectra "
+          "terms are 25 flags, the extra being one D.ADNKA sample carrying "
+          "`FlowJo 10.3`. Both counts are right and they are not "
+          "interchangeable; all of them are gate refusals either way.")
     print(f"  emitted MODE_2 is {ucensus['rows_mode_2']:,} against a lineage "
           f"CEILING of {ucensus['lineage_ceiling_offered']:,}: the gate refuses "
           f"{ucensus['lineage_refused_by_the_gate']:,} of the ceiling's rows "

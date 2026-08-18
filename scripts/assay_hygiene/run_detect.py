@@ -108,6 +108,20 @@ def _cell(v) -> str:
     return str(v).replace("|", "\\|")
 
 
+def _truthy(series: pd.Series) -> pd.Series:
+    """A boolean column that has been through csv, coerced back.
+
+    `contested` round-trips as the STRINGS "True"/"False" when the frame is
+    read back off disk, and a bare `.astype(bool)` on those is True for both --
+    a non-empty string is truthy -- so the contested count would equal the row
+    count and look like a finding. This report reads its frames off csv by
+    design, so the coercion belongs here rather than in the caller.
+    """
+    if series.dtype == bool:
+        return series
+    return series.astype(str).str.strip().str.lower().isin(("true", "1"))
+
+
 def _integrity_cell(value) -> tuple[str, str]:
     """-> (count, ids). `integrity` holds SCALARS AND LISTS in the same dict.
 
@@ -406,11 +420,41 @@ def build_report(findings: pd.DataFrame,
         "",
         f"- proposals: **{_mode(S.MODE_1):,}** over "
         f"**{m1.sample_id.nunique() if len(m1) else 0:,}** samples",
+    ]
+    if len(m1):
+        # READ THE TIER BEFORE THE COUNT. An unqualified headline here would
+        # badly misrepresent the evidence: Task 5's review measured that most
+        # of this population is contested and weak-tiered, and recorded it as
+        # a carry precisely so the number would not ship bare.
+        contested = int(_truthy(m1.contested).sum())
+        tiers = m1.claim_tier.value_counts(dropna=False)
+        floored = int((m1.gate != S.GATE_PASS).sum())
+        lines.append(
+            f"- **{contested:,}** of them are CONTESTED "
+            f"({contested / len(m1):.0%}) -- the sample's own evidence named "
+            "more than one assay, and each row keeps the tier its OWN evidence "
+            "earned, so a second claim never demotes the first")
+        lines.append("- by claim tier: " + " | ".join(
+            f"`{t}` **{int(n):,}**" for t, n in tiers.items()))
+        if floored:
+            lines.append(
+                f"- **{floored:,}** carry a RECORDED FLOOR FAILURE and were "
+                "proposed anyway; the gate blocks a claim only on its most "
+                "severe outcome, and a thin mapping is reported rather than "
+                "blocked")
+    lines += [
         "",
         "A sample registered in NO assay whose own metadata names one. The",
         "claim has passed the vocabulary gate; the absence is of a registration",
         "that the sample's own record already asserts. **Nothing was written:**",
         "each row is a proposal awaiting operator approval.",
+        "",
+        "THE HEADLINE COUNT IS THE WEAKEST THING ON THIS PAGE, and it is",
+        "qualified above rather than below for that reason. A reader who takes",
+        "the proposal count and not the tier split will overstate what this",
+        "mode found: these are the rows where a sample registered nowhere has",
+        "metadata pointing somewhere, and the metadata is frequently thin and",
+        "frequently self-contradicting. Sort by tier before reading.",
         "",
     ]
 

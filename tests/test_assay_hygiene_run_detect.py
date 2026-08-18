@@ -315,6 +315,42 @@ def test_the_report_leads_with_the_correction_and_takes_its_split_from_the_csv(
             "breakdown must reach the operator, not just the largest")
 
 
+def test_mode_1s_headline_never_ships_without_its_tier_and_contested_split(
+        tmp_path):
+    """Task 5's carry, which Task 9 shipped without and the final review caught.
+
+    Measured on the real extract: of MODE_1's 2,166 proposals, 1,591 are
+    CONTESTED and 1,576 are tier `weak`. An unqualified "2,166 Mode 1
+    proposals" states a number three quarters of whose support is a weak field
+    the sample contradicts elsewhere, and the review that measured it recorded
+    "Report must qualify it" as a carry. The first version of this report
+    published the bare count.
+
+    The qualification is asserted as a RELATIONSHIP, not as literals: every
+    tier the frame carries appears with its own count, and the contested count
+    is the one the frame holds. A future extract changes all four numbers and
+    none of these assertions.
+    """
+    out, md = _run(tmp_path)
+    findings = pd.read_csv(out / "findings.csv", low_memory=False)
+    m1 = findings[findings["mode"] == S.MODE_1]
+    assert len(m1), "the fixture emitted no MODE_1 rows to qualify"
+
+    section = _section(md, S.MODE_1)
+    contested = int(RD._truthy(m1.contested).sum())
+    assert f"{contested:,}" in section and "CONTESTED" in section, (
+        "the contested count is missing from the MODE_1 section")
+    for tier, n in m1.claim_tier.value_counts(dropna=False).items():
+        assert f"`{tier}`" in section, f"tier {tier} is not named"
+        assert f"{int(n):,}" in section, f"tier {tier}'s count is missing"
+
+    # ...and the qualification is ABOVE the prose, not a footnote below it
+    head = section.split("A sample registered in NO assay")[0]
+    assert "CONTESTED" in head, (
+        "the tier split is below the descriptive prose; a reader takes the "
+        "headline count and stops")
+
+
 def test_mode_3_is_reported_as_undetected_and_never_as_small(tmp_path):
     """Requirement 4. Undetected and small are different findings.
 
@@ -550,6 +586,13 @@ def test_every_bolded_integer_in_the_prose_is_a_number_the_artifacts_hold(
                 legitimate.add(int(frame[col].nunique()))
     legitimate |= set(int(v) for v in ceiling.values())
     legitimate |= {0}
+    # MODE_1's qualification counts, which are subset counts and so are not
+    # reachable from the whole-frame value_counts above
+    m1 = findings[findings["mode"] == S.MODE_1]
+    if len(m1):
+        legitimate.add(int(RD._truthy(m1.contested).sum()))
+        legitimate |= set(m1.claim_tier.value_counts(dropna=False).tolist())
+        legitimate.add(int((m1.gate != S.GATE_PASS).sum()))
     if "n_claims" in defects.columns and len(defects):
         legitimate.add(int(defects.n_claims.sum()))
         legitimate |= set(defects.groupby("defect").n_claims.sum().tolist())

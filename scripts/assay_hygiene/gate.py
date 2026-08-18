@@ -463,6 +463,43 @@ def term_stem(value: str) -> str:
     return " ".join(tokens[:end]) if end else value
 
 
+def _maps_an_assay(row) -> bool:
+    """Is this vocabulary row a MAPPING? ONE POLICY, declared once.
+
+    THE POLICY IS WHAT WAS DUPLICATED, NOT THE LOOP. This module built the
+    vocabulary index in three places and they DISAGREED about nulls:
+    `term_families` skipped a row whose `internal_assay_id` is null, while the
+    indexes in `gate_claims` and `vocabulary_defects` kept it. That asymmetry
+    is the defect -- one of the two survivors feeds `int(row.internal_assay_id)`
+    in `vocabulary_defects`, which raises `ValueError` on a null, so the same
+    frame was safe through one reader and a crash through another.
+
+    Unreachable on the 2026-08-14 extract: 0 of 736 vocabulary rows carry a
+    null. It is fixed as a POLICY rather than as a guard at the crash site
+    because the next reader would have made the same choice independently and
+    had no way to know which of the three it was agreeing with.
+
+    A row naming no assay is not a mapping: it cannot support a claim and
+    cannot be a defect's target. Skipping it everywhere makes `gate_claims`
+    raise its named "term with no vocabulary row" error rather than gate a
+    claim against a row with no assay -- a loud failure replacing a silent one,
+    which is this package's stated preference.
+    """
+    return bool(S.normalise_value(row.raw_value)) and not pd.isna(
+        row.internal_assay_id)
+
+
+def _vocab_index(vocabulary: pd.DataFrame) -> dict[tuple[str, str], object]:
+    """(source_field, normalised value) -> the vocabulary row.
+
+    Last row wins on a duplicate key, which is what both call sites did before
+    they shared this. `merge_vocabulary` is what guarantees the key is unique.
+    """
+    return {(str(r.source_field), S.normalise_value(r.raw_value)): r
+            for r in vocabulary.itertuples(index=False)
+            if _maps_an_assay(r)}
+
+
 def term_families(vocabulary: pd.DataFrame) -> dict[tuple[str, str], list]:
     """(source_field, stem) -> the vocabulary rows sharing it.
 
@@ -476,10 +513,10 @@ def term_families(vocabulary: pd.DataFrame) -> dict[tuple[str, str], list]:
     """
     out: dict[tuple[str, str], list] = defaultdict(list)
     for r in vocabulary.itertuples(index=False):
-        value = S.normalise_value(r.raw_value)
-        if not value or pd.isna(r.internal_assay_id):
+        if not _maps_an_assay(r):
             continue
-        out[(str(r.source_field), term_stem(value))].append(r)
+        out[(str(r.source_field),
+             term_stem(S.normalise_value(r.raw_value)))].append(r)
     return dict(out)
 
 
@@ -620,11 +657,7 @@ def gate_claims(
 
     Neither input frame is mutated.
     """
-    index = {}
-    for r in vocabulary.itertuples(index=False):
-        value = S.normalise_value(r.raw_value)
-        if value:
-            index[(str(r.source_field), value)] = r
+    index = _vocab_index(vocabulary)
     incoherent = incoherent_families(vocabulary)
 
     missing_terms, missing_types = [], []
@@ -780,11 +813,7 @@ def vocabulary_defects(
     an order `test_assay_hygiene_stage0.py` already records as unstable across
     extracts. Same hazard and same fix as `audit.audit_contradictions`.
     """
-    vocab_rows = {}
-    for r in vocabulary.itertuples(index=False):
-        value = S.normalise_value(r.raw_value)
-        if value:
-            vocab_rows[(str(r.source_field), value)] = r
+    vocab_rows = _vocab_index(vocabulary)
     families = term_families(vocabulary)
     incoherent = incoherent_families(vocabulary)
 
@@ -934,6 +963,18 @@ if __name__ == "__main__":
     # sweep invoked as `... extract out 10 0.95` compares an int against the
     # string "10" and raises inside the ruling loop, one frame from anything
     # that names the argument.
+    #
+    # THE ARITY IS CHECKED BEFORE THE ZIP, because `zip` stops at the shorter
+    # of the two. Casting through it silently DISCARDED a fifth argument that
+    # the previous `main(*sys.argv[1:])` spelling raised `TypeError` on, so
+    # adding the casts traded a loud failure for a quiet one -- a typo'd
+    # invocation would run at the DEFAULT floors and report figures for numbers
+    # the caller never asked for. That is exactly the class of silent
+    # substitution this module's floors exist to make visible.
     _argv = list(sys.argv[1:])
     _casts = (str, str, int, float)
+    if len(_argv) > len(_casts):
+        sys.exit(f"gate: expected at most {len(_casts)} arguments "
+                 "(extract_dir out_dir min_samples min_purity), got "
+                 f"{len(_argv)}: {_argv!r}")
     sys.exit(main(*(cast(a) for cast, a in zip(_casts, _argv))))

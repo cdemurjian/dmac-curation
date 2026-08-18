@@ -11,7 +11,10 @@ correct assays -- alternative labels, not contradictions: D.IMG images sit in
 one, and 145 D.IMG samples are registered in Histopathology.
 
 **THAT 45/51 WAS PRODUCED BY `scripts/measure_absence_vs_contradiction.py`, NOT
-BY THE MODULE UNDER TEST, AND ITS SCOPE IS NOT THIS MODULE'S.** That script types
+BY THE MODULE UNDER TEST, AND ITS SCOPE IS NOT THIS MODULE'S.** That script was
+DELETED 2026-08-18 (recoverable from git history) for being a second writer of
+`mode3-disposition.csv`; it is named here for provenance and not as something to
+run. It types
 samples by the uuid prefix in `samples.parquet`, drops membership rows whose
 assay has no junction row (the MAPPABLE-only definition of "registered", the same
 one that understated the Mode 2 ceiling by 227 and 1,098), and takes lineage over

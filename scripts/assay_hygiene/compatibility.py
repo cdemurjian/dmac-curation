@@ -24,7 +24,9 @@ it is the reason this module exists.
 Increment 1 reported 866 "contradictions". Reviewing the 51 that survived the
 first correction, 45 were found to name CORRECT assays -- **but that 45/51 was
 produced by `scripts/measure_absence_vs_contradiction.py`, NOT by this module,
-and its scope is not this module's.** That script types samples by the uuid
+and its scope is not this module's.** That script was DELETED 2026-08-18 and is
+recoverable from git history; it is named here for provenance, not as something
+to run. It types samples by the uuid
 prefix in `samples.parquet`, drops membership rows whose assay has no junction
 row (the MAPPABLE-only definition of "registered", the same one that understated
 the Mode 2 ceiling by 227 and 1,098), and takes lineage over `childof.parquet`
