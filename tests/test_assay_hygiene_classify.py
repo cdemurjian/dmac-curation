@@ -40,6 +40,7 @@ two DIFFER, proves the rule under test is the one running.
 import hashlib
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
@@ -816,10 +817,16 @@ def test_the_census_partitions_the_population_and_names_every_excluded_sample():
 def test_nothing_proposes_by_a_source_this_mode_did_not_use():
     """Mode 1's only evidence is the gated claim, and the row says so.
 
-    `BY_PRECEDENT` and `BY_BOTH` are declared for Mode 2, which is the reason
-    `PROPOSAL_SOURCES` is a closed tuple: a consumer must be able to ask "is this
-    one of the three" without restating the three, the way `PROVENANCES` and
-    `GATE_OUTCOMES` are enumerable. Mode 1 emits exactly one of them.
+    `BY_PRECEDENT`, `BY_BOTH` and `BY_LINEAGE_ONLY` are declared for Mode 2,
+    which is the reason `PROPOSAL_SOURCES` is a closed tuple: a consumer must be
+    able to ask "is this one of the four" without restating the four, the way
+    `PROVENANCES` and `GATE_OUTCOMES` are enumerable. Mode 1 emits exactly one of
+    them.
+
+    This docstring said "one of the three" for a round after the fourth member
+    landed -- the drift this family exists to prevent, in the test that owns it.
+    `test_every_proposal_source_is_in_the_closed_family` now derives the members
+    from the module so the count cannot be restated wrongly again.
     """
     _, _, _, _, _, findings = _pipeline()
     assert set(findings.proposed_by) == {X.BY_CLAIM}
@@ -2057,6 +2064,44 @@ def test_the_key_construction_speaks_the_language_mine_precedent_writes():
         findings.precedent_rate.dropna())
 
 
+def test_every_proposal_source_is_in_the_closed_family():
+    """A `BY_*` constant that never joins `PROPOSAL_SOURCES` must FAIL, not pass.
+
+    DERIVED FROM THE MODULE AND NOT HAND-LISTED, which is the whole point and is
+    the pattern `tests/test_assay_hygiene_schema.py::test_every_stage_c_family_is_closed`
+    already applies to `_schema`'s five families. `classify.py`'s family had only
+    a literal pin, so a fifth member declared beside the other four and never
+    added to the tuple would pass every test in this file -- and this round is
+    exactly that scenario, since it added one.
+
+    The `str` filter keeps the tuple itself out of its own membership check, as
+    the schema version's does.
+    """
+    family = {n: v for n, v in vars(X).items()
+              if n.startswith("BY_") and isinstance(v, str)}
+    assert family, "the derivation found nothing, so it proves nothing"
+    assert set(family.values()) == set(X.PROPOSAL_SOURCES), (
+        f"BY_* constants {sorted(family)} disagree with the closed tuple "
+        f"{X.PROPOSAL_SOURCES}")
+    assert len(set(X.PROPOSAL_SOURCES)) == len(X.PROPOSAL_SOURCES)
+    assert len(X.PROPOSAL_SOURCES) == 4
+
+    # THE WRONG RULE, run by hand: a literal pin alone. It passes on a family
+    # that has gained a member the tuple does not know about, which is what this
+    # test exists to stop.
+    assert set(family) == {"BY_CLAIM", "BY_PRECEDENT", "BY_BOTH",
+                           "BY_LINEAGE_ONLY"}
+
+    # no value collides with another closed family, checked against `_schema`'s
+    # own, since a value readable in the wrong column errors nowhere
+    others = (set(S.MODES) | set(S.GATE_OUTCOMES) | set(S.CLASSES)
+              | set(S.LINEAGE_RELATIONS) | set(S.COMPAT_BANDS)
+              | set(S.PROVENANCES)
+              | {S.A_NONE, S.A_ADD_PARENT, S.A_ADD_CHILD, S.A_ADD_TO_ASSAY,
+                 S.A_FLAG_ONLY})
+    assert not (set(X.PROPOSAL_SOURCES) & others)
+
+
 def test_the_fixture_world_carries_exactly_the_populations_its_docstring_states():
     """`_world2`'s hand-derived table, read off the world instead of trusted.
 
@@ -2439,6 +2484,46 @@ def test_the_real_extract_reproduces_the_ceiling_and_both_directions_separately(
     assert table.loc[(0.75, S.A_ADD_CHILD), "rows"] == 1340
     assert table.loc[(0.95, S.A_ADD_PARENT), "rows"] == 46
     assert table.loc[(0.95, S.A_ADD_CHILD), "rows"] == 371
+
+    # THE THREE FIGURES `main` PRINTS AS LITERALS INTO THE OPERATOR-FACING
+    # REPORT. It says the weak direction's 371 rows rest on 13 evidence groups,
+    # one of which keys 170 of them, against 46 rows on 2 -- and until this pin
+    # nothing checked any of the three. A hard-coded figure in a printed report
+    # with no test behind it is the same class as the stale fixture docstring
+    # this task already fixed, one layer out.
+    assert table.loc[(0.95, S.A_ADD_PARENT), "rule_groups"] == 2
+    assert table.loc[(0.95, S.A_ADD_CHILD), "rule_groups"] == 13
+    biggest = Counter(
+        zip(*(findings[(findings.action == S.A_ADD_CHILD)
+                       & findings.precedent_rate.notna()
+                       & (findings.precedent_rate >= 0.95)][c]
+              for c in ("precedent_n_both", "precedent_n_child_only",
+                        "precedent_n_parent_only")))).most_common(1)[0][1]
+    assert biggest == 170, "one evidence group keys 170 of the 371"
+    # ...and the numbers in `main`'s printed SENTENCE are those same measured
+    # values, read out of the source rather than eyeballed. This is what makes
+    # the pin cover the OPERATOR-FACING report and not merely the frame: an edit
+    # that changes the prose without re-measuring now fails here.
+    #
+    # The source is normalised first -- string concatenation and line wrapping
+    # split that sentence across four literals -- so the pattern matches the
+    # sentence a curator reads rather than the way it is spelled in the file.
+    printed = (REPO / "scripts" / "assay_hygiene" / "classify.py").read_text()
+    flat = re.sub(r'"\s*"', "", printed)
+    flat = re.sub(r"\s+", " ", flat)
+    claim = re.search(
+        r"the weak direction's ([\d,]+) rows rest on (\d+) groups, one of "
+        r"which keys (\d+) of them, against (\d+) rows on (\d+)", flat)
+    assert claim is not None, "main's printed sentence changed shape; re-pin it"
+    weak_rows, weak_groups, biggest_group, strong_rows, strong_groups = (
+        int(g.replace(",", "")) for g in claim.groups())
+    assert weak_rows == int(table.loc[(0.95, S.A_ADD_CHILD), "rows"]) == 371
+    assert weak_groups == int(table.loc[(0.95, S.A_ADD_CHILD), "rule_groups"]) == 13
+    assert biggest_group == biggest == 170
+    assert strong_rows == int(table.loc[(0.95, S.A_ADD_PARENT), "rows"]) == 46
+    assert strong_groups == int(
+        table.loc[(0.95, S.A_ADD_PARENT), "rule_groups"]) == 2
+
     # ...and the unmeasured rows survive nothing, including 0.0
     assert table.loc[(0.0, S.A_ADD_PARENT), "rows"] == 55007 - 5
     assert table.loc[(0.0, S.A_ADD_CHILD), "rows"] == 117331 - 5

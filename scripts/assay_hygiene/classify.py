@@ -75,14 +75,21 @@ from .precedent import assay_index, membership_index
 # --- what produced a proposal ------------------------------------------------
 #
 # A closed family that enumerates itself, the way `PROVENANCES` and
-# `GATE_OUTCOMES` do: a consumer must be able to ask "is this one of the three"
-# without restating the three, because a restatement is what drifts.
+# `GATE_OUTCOMES` do: a consumer must be able to ask "is this one of the four"
+# without restating the four, because a restatement is what drifts.
+#
+# IT SAID "THREE" FOR ONE ROUND AFTER THE FOURTH MEMBER LANDED, one line above
+# the tuple that already held four -- a restatement drifting from the thing it
+# restates, in the block whose subject is that exact hazard. That is why the
+# count is checked rather than written: `test_every_proposal_source_is_in_the_
+# closed_family` derives the family from `vars()` and fails on a `BY_*` constant
+# that never joins the tuple.
 #
 # `FINDING_COLUMNS.proposed_by` is spelled `proposed_` and not `decided_` under
 # the binding constraint, and these values inherit that: the column header is
 # where a reader forms their belief about what the pipeline already did.
 #
-# ALL THREE ARE DECLARED HERE THOUGH MODE 1 EMITS ONLY THE FIRST. Tasks 6 and 8
+# ALL FOUR ARE DECLARED HERE THOUGH MODE 1 EMITS ONLY THE FIRST. Tasks 6 and 8
 # extend this module, and the alternative is each of them inventing its own
 # spelling for one concept in one column -- two names one screen apart, which is
 # this branch's signature defect. Declaring the family before its second producer
@@ -628,9 +635,16 @@ SURVIVAL_COLUMNS = ["threshold", "action", "rows", "samples", "rule_groups",
 #     rows = rows_with_precedent + rows_without_precedent
 #
 # `rows_with_a_blocked_claim` OVERLAPS `rows` minus `rows_proposed_by_both` and
-# partitions nothing: a row whose claim the gate rejected is proposed BY_PRECEDENT
-# like any other, and this key exists so the rejected claim is counted rather than
-# silently unused. 4,255 rows on the real extract carry one.
+# partitions nothing: a rejected claim contributes NOTHING to `proposed_by`, so
+# such a row carries whatever its precedent evidence earns -- `BY_PRECEDENT` on a
+# hop with a rule, and `BY_LINEAGE_ONLY` on one without. This key exists so the
+# rejected claim is counted rather than silently unused. 4,255 rows on the real
+# extract carry one, and 2 of them are `BY_LINEAGE_ONLY`.
+#
+# THE COUNT DOES NOT MOVE WITH THAT SPLIT, because it is read off the GATE frame
+# and never off `proposed_by`. This comment said "proposed BY_PRECEDENT like any
+# other" for one round after `BY_LINEAGE_ONLY` landed, which was false on 2 rows
+# -- the key's own justification describing a value the rows do not carry.
 MODE2_CENSUS_KEYS = (
     "rows",
     "samples",
@@ -1191,10 +1205,13 @@ def mode2_census(
     `both_directions`, and that is asserted rather than assumed.
 
     `attached` IS TAKEN FOR ONE COUNT, `rows_with_a_blocked_claim`, and it is
-    taken rather than read back out of `evidence_summary`. A row whose claim the
-    gate rejected is BY_PRECEDENT like any other and carries no column saying a
-    claim was found and refused; the fact lives in the gate frame, so the census
-    reads the gate frame. Recovering it by matching a sentence would make an
+    taken rather than read back out of `evidence_summary`. A rejected claim
+    contributes nothing to `proposed_by`, so such a row carries whatever its
+    precedent evidence earns -- `BY_PRECEDENT` with a rule, `BY_LINEAGE_ONLY`
+    without, and 2 of the real extract's 4,255 are the latter -- and NO column
+    says a claim was found and refused. The fact lives in the gate frame, so the
+    census reads the gate frame, and the count is therefore unaffected by which
+    proposal source the row ends up with. Recovering it by matching a sentence would make an
     operator-facing prose string load-bearing, where an edit to the wording
     silently zeroes a reported population.
 
