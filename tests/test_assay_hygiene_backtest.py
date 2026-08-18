@@ -39,6 +39,7 @@ from assay_hygiene import _schema as S  # noqa: E402
 from assay_hygiene import audit as A  # noqa: E402
 from assay_hygiene import backtest as B  # noqa: E402
 from assay_hygiene import classify as X  # noqa: E402
+from assay_hygiene import mode2 as M2  # noqa: E402
 from assay_hygiene import gate as G  # noqa: E402
 from assay_hygiene import precedent as P  # noqa: E402
 
@@ -457,8 +458,8 @@ def test_the_cold_run_sees_no_held_out_membership_and_no_metadata_claim():
     # membership frame gives a materially different -- and deflated -- rate on
     # the world's top hop, so this test cannot pass under it
     kept_rows, _ = B.blind_membership(w["membership"], split.held_out)
-    cold = X.precedent_rules(P.mine_precedent(train, kept_rows, w["assays"]))
-    warm = X.precedent_rules(
+    cold = M2.precedent_rules(P.mine_precedent(train, kept_rows, w["assays"]))
+    warm = M2.precedent_rules(
         P.mine_precedent(w["edges"], kept_rows, w["assays"]))
     hop = (10, "D.IMG", "TIS", 11)
     assert cold[hop].propagation_rate == 0.95
@@ -855,7 +856,7 @@ def test_the_worlds_mined_rates_are_what_its_own_edge_counts_imply():
     """
     w, split, out = _run()
     kept_rows, _ = B.blind_membership(w["membership"], split.held_out)
-    rules = X.precedent_rules(P.mine_precedent(
+    rules = M2.precedent_rules(P.mine_precedent(
         B.training_edges(w["edges"], split.held_out), kept_rows, w["assays"]))
 
     for hop, counts in (((10, "D.IMG", "TIS", 11), (19, 1, 20)),

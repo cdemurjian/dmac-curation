@@ -37,6 +37,7 @@ asserts a count proves only that the code produced that count; a test that also
 computes what the rule it exists to reject would have produced, and asserts the
 two DIFFER, proves the rule under test is the one running.
 """
+import ast
 import hashlib
 import re
 import sys
@@ -55,6 +56,7 @@ from assay_hygiene import claims as C  # noqa: E402
 from assay_hygiene import classify as X  # noqa: E402
 from assay_hygiene import gate as G  # noqa: E402
 from assay_hygiene import lineage as L  # noqa: E402
+from assay_hygiene import mode2 as M2  # noqa: E402
 from assay_hygiene import precedent as P  # noqa: E402
 from assay_hygiene import vocabulary as V  # noqa: E402
 
@@ -852,17 +854,96 @@ def test_nothing_proposes_by_a_source_this_mode_did_not_use():
     assert not (set(X.PROPOSAL_SOURCES) & others)
 
 
-def test_the_module_is_read_only_and_names_every_file_it_opens():
-    """No write path, and no function whose name says it decides.
+PACKAGE = REPO / "scripts" / "assay_hygiene"
 
-    `stage0_apply` and `driver_stage0` carry live production Cypher. An import is
-    the only way a read-only module acquires a write path by accident, so their
-    absence is asserted rather than assumed. The filenames are extracted from the
-    source rather than searched for one at a time, so a further file added later
-    fails here and has to be named; searching for the absence of one known name
-    passes the moment someone spells it differently.
+# The two modules that own the live production write path. Every OTHER module in
+# the package must be free of them, and naming the pair here rather than in each
+# assertion is what lets the scan below cover files nobody has written yet.
+WRITERS = {"stage0_apply.py", "driver_stage0.py"}
+
+
+def _stage_c_sources() -> dict[str, str]:
+    """{filename: source} for stage C's own modules. DERIVED, never hand-listed.
+
+    THE GUARD READ ONE PATH UNTIL TASK 8 SPLIT MODE 2 OUT, at which point half
+    the code it was guarding moved to a file it did not open -- the exact way a
+    source-scanning test goes quietly blind. So the set is derived: follow
+    `classify.py`'s own relative imports and subtract the modules that belong to
+    an earlier stage and carry their own guards. A module added to stage C and
+    imported by `classify` joins this set with no edit here; one added and NOT
+    imported by anything is dead code, and the package-wide scan above still
+    covers it for the write path.
+
+    `EARLIER` is the hand-listed half and it is the safe half: forgetting to add
+    a name to it makes this test FAIL loudly on an unexpected module, where
+    forgetting to add one to a hand-listed stage C set would make it pass
+    silently on an unguarded one.
     """
-    src = (REPO / "scripts" / "assay_hygiene" / "classify.py").read_text()
+    EARLIER = {"_schema", "gate", "lineage", "audit", "precedent",
+               "compatibility", "vocabulary", "claims", "extract"}
+    src = (PACKAGE / "classify.py").read_text()
+    named = set(re.findall(r"^\s*from \. import (\w+)", src, re.M))
+    named |= set(re.findall(r"^\s*from \.(\w+) import", src, re.M))
+    own = (named - EARLIER) | {"classify"}
+    missing = sorted(m for m in own if not (PACKAGE / f"{m}.py").exists())
+    assert not missing, f"classify imports {missing}, which is not in {PACKAGE}"
+    return {f"{m}.py": (PACKAGE / f"{m}.py").read_text() for m in sorted(own)}
+
+
+def test_no_module_in_the_package_imports_the_writer_or_names_a_function_for_a_decision():
+    """The two package-wide invariants, scanned over the DIRECTORY.
+
+    `stage0_apply` and `driver_stage0` carry live production Cypher, and an
+    import is the only way a read-only module acquires a write path by accident.
+    Scanning the directory rather than one path means a module added tomorrow is
+    covered without anyone remembering to add it, which is the whole reason this
+    moved off a single `read_text` when Mode 2 was split out.
+
+    `decide_` is the naming half of "nothing decides, everything proposes". It
+    is checked package-wide for the same reason: the binding constraint is on
+    the package, not on one file.
+
+    THE IMPORT IS PARSED AND NOT GREPPED, which the single-file version could
+    afford not to do. Package-wide, a substring scan fails on `run_evidence.py`,
+    whose docstring NAMES both writers in order to say that nothing reaches
+    them -- so the crude test would forbid the very sentence a reader needs.
+    `ast` distinguishes an import from a mention; a comment cannot execute.
+    """
+    seen = sorted(p.name for p in PACKAGE.glob("*.py"))
+    assert "classify.py" in seen and "mode2.py" in seen, seen
+    assert WRITERS <= set(seen), seen
+    forbidden = {w[:-3] for w in WRITERS}
+
+    scanned = 0
+    for path in PACKAGE.glob("*.py"):
+        src = path.read_text()
+        assert not re.findall(r"^def decide_", src, re.M), path.name
+        if path.name in WRITERS:
+            continue
+        scanned += 1
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, ast.ImportFrom):
+                names = {a.name for a in node.names} | {node.module or ""}
+            elif isinstance(node, ast.Import):
+                names = {a.name.rsplit(".", 1)[-1] for a in node.names}
+            else:
+                continue
+            assert not (names & forbidden), f"{path.name} imports a writer"
+    assert scanned == len(seen) - len(WRITERS) > 10, scanned
+
+
+def test_stage_c_names_every_file_it_opens_and_writes_none_of_them():
+    """Every filename stage C touches, extracted from its source rather than searched.
+
+    Searching for the absence of one known name passes the moment someone
+    spells it differently, so the filenames are pulled out of the source and
+    compared as a SET -- a further file added later fails here and has to be
+    named.
+    """
+    sources = _stage_c_sources()
+    assert set(sources) == {"classify.py", "mode2.py"}, (
+        "stage C's module set changed; re-derive the guard rather than the pin")
+    src = "\n".join(sources.values())
 
     assert set(re.findall(r"[\w.-]+\.parquet", src)) == {
         "samples.parquet", "membership.parquet", "assays.parquet",
@@ -872,9 +953,7 @@ def test_the_module_is_read_only_and_names_every_file_it_opens():
         # another extract would report a real hop as never measured
         "edges.parquet"}
     assert set(re.findall(r"[\w.-]+\.csv", src)) == {"vocabulary.csv"}
-    assert "stage0_apply" not in src and "driver_stage0" not in src
     assert "to_csv" not in src and "to_parquet" not in src
-    assert not re.findall(r"^def decide_", src, re.M)
 
 
 def test_main_reports_the_whole_world_and_leaves_every_byte_on_disk_unchanged(
@@ -922,7 +1001,7 @@ def test_main_reports_the_whole_world_and_leaves_every_byte_on_disk_unchanged(
     assert _digests() == before
 
     printed = capsys.readouterr().out
-    for k in X.MODE1_CENSUS_KEYS + X.MODE2_CENSUS_KEYS:
+    for k in X.MODE1_CENSUS_KEYS + M2.MODE2_CENSUS_KEYS:
         assert k in printed
     assert "nothing was written" in printed
     # the census reaches the operator as numbers, not only as key names
@@ -934,7 +1013,7 @@ def test_main_reports_the_whole_world_and_leaves_every_byte_on_disk_unchanged(
     # ...and the two directions are printed apart at every threshold, never as
     # one figure
     for action in (S.A_ADD_PARENT, S.A_ADD_CHILD):
-        assert printed.count(action) >= len(X.SURVIVAL_THRESHOLDS)
+        assert printed.count(action) >= len(M2.SURVIVAL_THRESHOLDS)
     assert "survival by direction" in printed
     # the two Mode 2 rows this world produces
     assert "rows_add_child" in printed
@@ -1346,14 +1425,14 @@ def _pipeline2(w=None):
     bundle = dict(
         children_of=children_of, parents_of=parents_of, uuid_of=uuid_of,
         registered=A.registered_internal(w["membership"], w["assays"]),
-        rules=X.precedent_rules(w["precedent"]),
-        reg_projects=X.registration_projects(w["membership"], w["assays"]),
+        rules=M2.precedent_rules(w["precedent"]),
+        reg_projects=M2.registration_projects(w["membership"], w["assays"]),
         types=G.sample_type_index(w["nodes"]),
         type_reg=type_reg,
-        titles=X.assay_titles(w["assays"]),
+        titles=M2.assay_titles(w["assays"]),
         projects=X.project_index(w["samples"]),
     )
-    return w, bundle, X.mode2_findings(attached, **bundle)
+    return w, bundle, M2.mode2_findings(attached, **bundle)
 
 
 def _row(findings, sample_id, assay_id):
@@ -1366,7 +1445,7 @@ def _row(findings, sample_id, assay_id):
 
 def _census2(w, bundle, findings):
     """The Mode 2 census over a world, so no test rebuilds the two extra inputs."""
-    return X.mode2_census(
+    return M2.mode2_census(
         findings,
         L.mode2_ceiling(bundle["children_of"], bundle["parents_of"],
                         bundle["registered"]),
@@ -1444,7 +1523,7 @@ def test_add_parent_keys_on_the_propagation_rate_and_add_child_on_the_reverse_ra
     # the row can be audited against `precedent.csv` without this test's help
     assert up.precedent_direction == "propagation_rate"
     assert down.precedent_direction == "reverse_rate"
-    assert set(X.PRECEDENT_DIRECTIONS) <= set(S.PRECEDENT_COLUMNS)
+    assert set(M2.PRECEDENT_DIRECTIONS) <= set(S.PRECEDENT_COLUMNS)
 
     # READ OFF THE RULE FRAME, never off a literal
     up_rule = rules[(10, "TIS", "PAV", 13)]
@@ -1467,10 +1546,10 @@ def test_add_parent_keys_on_the_propagation_rate_and_add_child_on_the_reverse_ra
                 down_rule.propagation_rate, down_rule.reverse_rate}) == 4
 
     # the mapping has exactly one definition and it is the one the rows used
-    assert X.ACTION_PRECEDENT_DIRECTION == {
+    assert M2.ACTION_PRECEDENT_DIRECTION == {
         S.A_ADD_PARENT: "propagation_rate", S.A_ADD_CHILD: "reverse_rate"}
     for r in findings[findings.precedent_rate.notna()].itertuples():
-        assert r.precedent_direction == X.ACTION_PRECEDENT_DIRECTION[r.action]
+        assert r.precedent_direction == M2.ACTION_PRECEDENT_DIRECTION[r.action]
 
 
 def test_a_hop_with_no_precedent_rule_has_no_measured_basis_and_never_a_rate_of_zero():
@@ -1779,7 +1858,7 @@ def test_a_sample_with_no_resolvable_type_measures_neither_cell_and_is_counted()
 
     blinded = dict(bundle)
     blinded["types"] = {u: t for u, t in bundle["types"].items() if u != "TIS-200"}
-    out = X.mode2_findings(_attached2(w), **blinded)
+    out = M2.mode2_findings(_attached2(w), **blinded)
 
     row = _row(out, 200, 11)
     assert pd.isna(row.sample_type)
@@ -1873,7 +1952,7 @@ def test_the_mode_2_frame_is_the_shared_contract_and_is_totally_sorted():
     # the sort is TOTAL and not on `sample_id` alone: 280 carries two proposals
     # and they are reached 13 before 11
     assert emitted.index((280, 11)) < emitted.index((280, 13))
-    assert X.mode2_candidates(bundle["children_of"], bundle["parents_of"],
+    assert M2.mode2_candidates(bundle["children_of"], bundle["parents_of"],
                               bundle["registered"]) != emitted
 
 
@@ -1889,8 +1968,8 @@ def test_the_census_reconciles_the_emitted_rows_against_the_independent_ceiling(
     w, bundle, findings = _pipeline2()
     ceiling = L.mode2_ceiling(bundle["children_of"], bundle["parents_of"],
                               bundle["registered"])
-    census = X.mode2_census(findings, ceiling, _attached2(w))
-    assert set(census) == set(X.MODE2_CENSUS_KEYS)
+    census = M2.mode2_census(findings, ceiling, _attached2(w))
+    assert set(census) == set(M2.MODE2_CENSUS_KEYS)
 
     assert census["rows"] == 28
     assert census["samples"] == 26
@@ -1933,11 +2012,11 @@ def test_the_survival_table_reports_the_two_directions_apart_and_drops_no_eviden
     whatever this table says.
     """
     w, bundle, findings = _pipeline2()
-    table = X.precedent_survival(findings)
+    table = M2.precedent_survival(findings)
 
-    assert list(table.columns) == X.SURVIVAL_COLUMNS
+    assert list(table.columns) == M2.SURVIVAL_COLUMNS
     assert set(table.action) == {S.A_ADD_PARENT, S.A_ADD_CHILD}
-    assert len(table) == len(X.SURVIVAL_THRESHOLDS) * 2
+    assert len(table) == len(M2.SURVIVAL_THRESHOLDS) * 2
     # no row of the table pools the two directions
     assert table.action.isin((S.A_ADD_PARENT, S.A_ADD_CHILD)).all()
 
@@ -1950,7 +2029,7 @@ def test_the_survival_table_reports_the_two_directions_apart_and_drops_no_eviden
     # ...which is the assertion an unmeasured row defaulting to 0.0 would fail
     assert int(findings.precedent_rate.isna().sum()) == 1
 
-    for t in X.SURVIVAL_THRESHOLDS:
+    for t in M2.SURVIVAL_THRESHOLDS:
         for act in (S.A_ADD_PARENT, S.A_ADD_CHILD):
             hit = table[(table.threshold == t) & (table.action == act)].iloc[0]
             sub = findings[(findings.action == act)
@@ -1973,7 +2052,7 @@ def test_precedent_rules_refuses_a_null_key_a_groupby_would_drop_in_silence():
     one key means one of them would win by row order.
     """
     prec = _precedent2()
-    rules = X.precedent_rules(prec)
+    rules = M2.precedent_rules(prec)
     assert len(rules) == len(prec)
     # the junction-less assay's fallback id keys a rule like any other
     assert (20, "D.IMG", "TIS", 490) in rules
@@ -1981,12 +2060,12 @@ def test_precedent_rules_refuses_a_null_key_a_groupby_would_drop_in_silence():
     holed = prec.copy()
     holed.loc[holed.index[0], "internal_assay_id"] = None
     with pytest.raises(ValueError, match="internal_assay_id"):
-        X.precedent_rules(holed)
+        M2.precedent_rules(holed)
     # THE WRONG RULE, run by hand: groupby drops it and says nothing
     assert len(holed.groupby(S.RULE_KEY)) == len(prec) - 1
 
     with pytest.raises(ValueError, match="duplicate"):
-        X.precedent_rules(pd.concat([prec, prec.iloc[:1]], ignore_index=True))
+        M2.precedent_rules(pd.concat([prec, prec.iloc[:1]], ignore_index=True))
 
 
 def test_registration_projects_and_registered_internal_describe_one_registration_set():
@@ -2046,8 +2125,8 @@ def test_the_key_construction_speaks_the_language_mine_precedent_writes():
     """
     w, bundle, findings = _pipeline2()
     mined = P.mine_precedent(w["edges"], w["membership"], w["assays"])
-    live = dict(bundle, rules=X.precedent_rules(mined))
-    out = X.mode2_findings(_attached2(w), **live)
+    live = dict(bundle, rules=M2.precedent_rules(mined))
+    out = M2.mode2_findings(_attached2(w), **live)
 
     assert len(out) == 28
     unresolved = out[out.precedent_rate.isna()]
@@ -2056,7 +2135,7 @@ def test_the_key_construction_speaks_the_language_mine_precedent_writes():
 
     # the mined frame really is a different frame, or this proves nothing: it
     # carries none of the five decoys and its rates are its own
-    assert not (set(X.precedent_rules(mined)) & {
+    assert not (set(M2.precedent_rules(mined)) & {
         (99, "D.IMG", "TIS", 11), (10, "MUS", "TIS", 11),
         (10, "D.IMG", "PAV", 11), (10, "D.IMG", "TIS", 99),
         (10, "D.IMG", "TIS", 490)})
@@ -2225,10 +2304,10 @@ def test_the_survival_table_says_how_much_evidence_its_survivors_rest_on():
     printed table deferred the question to whoever held the parquet.
     """
     _, _, findings = _pipeline2()
-    table = X.precedent_survival(findings)
+    table = M2.precedent_survival(findings)
 
-    assert list(table.columns) == X.SURVIVAL_COLUMNS
-    assert "rule_groups" in X.SURVIVAL_COLUMNS
+    assert list(table.columns) == M2.SURVIVAL_COLUMNS
+    assert "rule_groups" in M2.SURVIVAL_COLUMNS
 
     for r in table.itertuples(index=False):
         sub = findings[(findings.action == r.action)
@@ -2270,14 +2349,14 @@ def test_a_world_with_no_lineage_at_all_yields_an_empty_mode_2_frame():
     assert list(findings.columns) == S.FINDING_COLUMNS
 
     census = _census2(w, bundle, findings)
-    assert set(census) == set(X.MODE2_CENSUS_KEYS)
+    assert set(census) == set(M2.MODE2_CENSUS_KEYS)
     assert set(census.values()) == {0}, "every population is zero and none is absent"
 
     # the curve still reports BOTH directions at EVERY threshold, at zero. A
     # table that reported nothing would be indistinguishable, in the operator's
     # report, from a direction nobody measured.
-    table = X.precedent_survival(findings)
-    assert len(table) == len(X.SURVIVAL_THRESHOLDS) * 2
+    table = M2.precedent_survival(findings)
+    assert len(table) == len(M2.SURVIVAL_THRESHOLDS) * 2
     assert set(table.action) == {S.A_ADD_PARENT, S.A_ADD_CHILD}
     assert set(table["rows"]) == {0} and set(table["of_rows"]) == {0}
 
@@ -2291,9 +2370,13 @@ def test_nothing_in_mode_2_is_named_for_a_decision_or_reads_a_reporting_number()
     `test_the_two_reporting_numbers_gate_nothing` exists to catch, one module
     over.
     """
-    src = (REPO / "scripts" / "assay_hygiene" / "classify.py").read_text()
+    src = (PACKAGE / "mode2.py").read_text()
     assert not re.findall(r"^def decide_", src, re.M)
     assert "MIN_CO_REG_SUPPORT" not in src and "CO_OCCUR_BAND" not in src
+    # ...and the module Mode 2 was split out of stays clean of them too, so the
+    # split cannot be the thing that lets a reporting number into an emitter
+    assert "MIN_CO_REG_SUPPORT" not in (PACKAGE / "classify.py").read_text()
+    assert "CO_OCCUR_BAND" not in (PACKAGE / "classify.py").read_text()
 
     # THE SURVIVAL THRESHOLDS ARE REPORTING AND THE EMITTER NEVER SEES THEM.
     # `mode2_findings` is the function that decides which rows exist, and a
@@ -2436,19 +2519,19 @@ def test_the_real_extract_reproduces_the_ceiling_and_both_directions_separately(
     type_reg = G.type_registration_index(r["membership"], r["assays"], r["nodes"])
     gated = G.gate_claims(r["claims"], r["vocabulary"], type_reg,
                           G.sample_type_index(r["nodes"]))
-    findings = X.mode2_findings(
+    findings = M2.mode2_findings(
         X.attach_gate(r["claims"], gated),
         children_of=children_of, parents_of=parents_of, uuid_of=uuid_of,
         registered=registered,
-        rules=X.precedent_rules(
+        rules=M2.precedent_rules(
             P.mine_precedent(r["edges"], r["membership"], r["assays"])),
-        reg_projects=X.registration_projects(r["membership"], r["assays"]),
+        reg_projects=M2.registration_projects(r["membership"], r["assays"]),
         types=G.sample_type_index(r["nodes"]),
         type_reg=type_reg,
-        titles=X.assay_titles(r["assays"]),
+        titles=M2.assay_titles(r["assays"]),
         projects=X.project_index(r["samples"]),
     )
-    census = X.mode2_census(findings, ceiling, X.attach_gate(r["claims"], gated))
+    census = M2.mode2_census(findings, ceiling, X.attach_gate(r["claims"], gated))
 
     # THE EMITTED SPLIT, never pooled
     assert census["rows_add_parent"] == 55007
@@ -2477,7 +2560,7 @@ def test_the_real_extract_reproduces_the_ceiling_and_both_directions_separately(
                                       r["assays"])) == 6242
 
     # SURVIVAL, the two directions apart at every threshold
-    table = X.precedent_survival(findings).set_index(["threshold", "action"])
+    table = M2.precedent_survival(findings).set_index(["threshold", "action"])
     assert table.loc[(0.5, S.A_ADD_PARENT), "rows"] == 8170
     assert table.loc[(0.5, S.A_ADD_CHILD), "rows"] == 2067
     assert table.loc[(0.75, S.A_ADD_PARENT), "rows"] == 2171
@@ -2529,7 +2612,7 @@ def test_the_real_extract_reproduces_the_ceiling_and_both_directions_separately(
     assert table.loc[(0.0, S.A_ADD_CHILD), "rows"] == 117331 - 5
 
     # THE FLAGSHIP DATUM, read off the mined rules rather than quoted
-    rules = X.precedent_rules(
+    rules = M2.precedent_rules(
         P.mine_precedent(r["edges"], r["membership"], r["assays"]))
     assert round(rules[(2, "TIS", "PAV", 74)].propagation_rate, 3) == 0.931
     assert round(rules[(2, "TIS", "PAV", 56)].reverse_rate, 3) == 0.006

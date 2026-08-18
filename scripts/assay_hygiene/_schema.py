@@ -311,7 +311,7 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 #   -- so a row carrying a bare rate cannot be audited. Its VALUE is the name of
 #   the `PRECEDENT_COLUMNS` column the rate was read from, so a reader can join
 #   the row back to `precedent.csv` and check the number without consulting any
-#   code. `classify.ACTION_PRECEDENT_DIRECTION` is the one place the mapping
+#   code. `mode2.ACTION_PRECEDENT_DIRECTION` is the one place the mapping
 #   from action to column lives.
 FINDING_COLUMNS = [
     "sample_id", "uuid", "sample_type", "project_ids",

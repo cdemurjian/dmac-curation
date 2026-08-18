@@ -127,6 +127,7 @@ import pandas as pd
 
 from . import _schema as S
 from . import classify as X
+from . import mode2 as M2
 from . import gate as G
 from . import lineage as L
 from . import precedent as B
@@ -139,7 +140,7 @@ from .audit import registered_internal
 # against any of them, and a test asserts the band table's row count equals the
 # scored population exactly.
 #
-# DISJOINT AND EXHAUSTIVE, where `classify.SURVIVAL_THRESHOLDS` is cumulative,
+# DISJOINT AND EXHAUSTIVE, where `mode2.SURVIVAL_THRESHOLDS` is cumulative,
 # and the difference is the whole point of this table. A cumulative `>= 0.5`
 # bucket mixes a rule at 0.50 with one at 1.00, and precision is precisely the
 # thing that differs between them -- 0.059 and 0.998 in the ADD_PARENT
@@ -150,11 +151,11 @@ from .audit import registered_internal
 # THE EDGES ARE `SURVIVAL_THRESHOLDS`' OWN VALUES so the two tables can be read
 # against each other. They are taken from that constant rather than re-typed:
 # two spellings of one list, one module apart, is this branch's signature defect.
-BAND_EDGES = tuple(sorted(X.SURVIVAL_THRESHOLDS)) + (1.0,)
+BAND_EDGES = tuple(sorted(M2.SURVIVAL_THRESHOLDS)) + (1.0,)
 
 # A ROW WITH NO MEASURED RATE IS ITS OWN BAND AND IS NEVER FILED UNDER 0.0.
 # 0.000 is a real rate meaning "observed on this hop, and never once
-# co-registered"; a null means nobody measured. `classify.precedent_survival`
+# co-registered"; a null means nobody measured. `mode2.precedent_survival`
 # keeps 0.0 in its threshold list for the same reason -- it is where absent
 # evidence visibly fails to count as a rate of zero.
 BAND_NO_RATE = "NO_RATE"
@@ -355,7 +356,7 @@ def check_split(split: Split, universe) -> None:
 
     Checked HERE, in the one function every entry point passes through, rather
     than only in a test, following `precedent.assay_index` and
-    `classify._proposal_source`. A caller who builds a `Split` by hand -- which
+    `mode2._proposal_source`. A caller who builds a `Split` by hand -- which
     is the supported way to run a stratified or hand-chosen hold-out -- gets the
     same guard as one who calls `split_by_sample`.
     """
@@ -716,15 +717,15 @@ def backtest(
     kept_rows, hidden_rows = blind_membership(membership, split.held_out)
     train = training_edges(edges, split.held_out)
     type_reg = G.type_registration_index(kept_rows, assays, nodes)
-    findings = X.mode2_findings(
+    findings = M2.mode2_findings(
         pd.DataFrame(columns=X.ATTACHED_COLUMNS),
         children_of=children_of, parents_of=parents_of, uuid_of=uuid_of,
         registered=registered_internal(kept_rows, assays),
-        rules=X.precedent_rules(B.mine_precedent(train, kept_rows, assays)),
-        reg_projects=X.registration_projects(kept_rows, assays),
+        rules=M2.precedent_rules(B.mine_precedent(train, kept_rows, assays)),
+        reg_projects=M2.registration_projects(kept_rows, assays),
         types=G.sample_type_index(nodes),
         type_reg=type_reg,
-        titles=X.assay_titles(assays),
+        titles=M2.assay_titles(assays),
         projects=X.project_index(samples),
     )
     leaked = set(findings.proposed_by) - {X.BY_PRECEDENT, X.BY_LINEAGE_ONLY}
