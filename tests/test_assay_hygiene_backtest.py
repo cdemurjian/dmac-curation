@@ -766,14 +766,23 @@ def test_a_band_says_how_much_independent_evidence_its_rows_rest_on():
     work" as the explanation, so the column has to be on the table rather than
     left to whoever holds the parquet.
 
+    A GROUP COUNT IS NOT AN INDEPENDENCE CLAIM, and 118 must not be read as the
+    discount on 19,337. Those groups are heavily unequal -- the top two key
+    10,163 rows, 52.6%, and the top three 11,720, 60.6% -- and the largest is the
+    SAME triple `(22615, 0, 34)` that tops the ADD_PARENT band, so the two
+    directions' top bands share their biggest single piece of evidence.
+    `largest_group_rows` is on the table for exactly this reason: it is what lets
+    a reader take the count apart instead of trusting it.
+
     THE TRIPLE IS A PROXY AND IT IS LOOSE IN GENERAL. Two rules with identical
     counts collapse into one group, so it is a LOWER bound on the rules behind a
     band. Measured over the live extract it is EXACT at the 0.95 cut -- 15
     qualifying reverse rules occupy 15 distinct triples and 5 propagation rules 5
     -- and loose across the whole mined set, where the 961 mined rules occupy
-    537 distinct triples, 55.9%, so 44.1% of them share a triple with another
-    rule. Neither figure has been re-measured on a BLINDED world, so it is read
-    here as a lower bound and nothing else.
+    537 distinct triples, an excess of 424 or 44.1%. The share of rules that
+    actually SHARE a triple is the larger figure, 561 or 58.4%. Neither has been
+    re-measured on a BLINDED world, so it is read here as a lower bound and
+    nothing else.
     """
     _, _, out = _run()
 

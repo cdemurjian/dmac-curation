@@ -19,8 +19,9 @@ and `backtest` filters not one proposal by a rate.
         python -m assay_hygiene.backtest
 
 THE SPLIT IS BY SAMPLE AND NEVER BY EDGE. A sample fans out to many edges -- one
-sample of the real extract has 1,528 children -- so an edge-level split puts the
-same sample in both halves and scores answers the run was trained on.
+(sample, assay) pair of the real extract is supported by 1,526 lineage
+neighbours, and the largest single child set is 1,528 -- so an edge-level split
+puts the same sample in both halves and scores answers the run was trained on.
 The spec records this as a mistake already made once on this project.
 `check_split` refuses a sample appearing in both halves, and refuses one
 appearing in neither, because an unassigned sample is silently treated as kept
@@ -84,9 +85,23 @@ THE CURVE CUTS AGAINST THE SPEC'S DEMOTION OF `A_ADD_CHILD`, AND ONLY IN ITS TOP
 BAND. At equal precedent rate the two directions recover a curator's assay at
 indistinguishable precision -- 0.998 against 0.997 at `[0.95,1.00]` over 4,151
 and 19,337 proposals, and the demoted direction's top band is NOT one hop doing
-the work: its 19,337 rows rest on 118 evidence groups, and dropping the largest
-leaves 13,649 rows still recovering at 0.996. So `reverse_rate` at a given value
-is as good a guide to reading order as `propagation_rate` at that value.
+the work: drop its largest evidence group and the remaining 13,649 rows still
+recover at 0.996. So `reverse_rate` at a given value is as good a guide to
+reading order as `propagation_rate` at that value.
+
+THAT CLAIM IS NARROW ON PURPOSE, AND `118 EVIDENCE GROUPS` MUST NOT BE READ AS
+THE DISCOUNT. The top band's 118 groups are heavily unequal: the largest keys
+5,688 rows, 29.4%, the top two 10,163, 52.6%, and the top three 11,720, 60.6%.
+Worse for any independence reading, the largest group is the SAME triple
+`(22615, 0, 34)` that tops the ADD_PARENT band, where it keys 617 of 4,151 -- so
+the two directions' top bands are not independent evidence of each other. What
+survives is only what was measured: the band is not ONE hop.
+
+THE TOP BAND IS NOT THIN, WHICH IS A DIFFERENT QUESTION AND WAS ASKED
+SEPARATELY. Row-weighted, the demoted direction's `[0.95,1.00]` rows sit on a
+median direction denominator of 17,720 with 117 of 19,337 below 30; the mirror's
+sit on 1,341 with 130 of 4,151 below 30. Neither band rests on thin evidence,
+and the demoted one rests on the thicker.
 
 What the demotion does survive on is the direction's BULK. In `[0.00,0.50)` the
 demoted direction recovers 210 of 18,996 against 519 of 8,806, five times worse,
@@ -584,12 +599,14 @@ def recovery_bands(
     number whose job is to discount a row count. Measured on the LIVE extract it
     is exact at the 0.95 cut -- 15 qualifying reverse rules occupy 15 distinct
     triples and 5 propagation rules 5 -- and loose across the whole mined set,
-    where the 961 mined rules occupy 537 distinct triples, 55.9%, so 44.1% of
-    them share a triple with another rule. The figure this task inherited read
-    "961 mined rules collapse to 537 triples, 44%", which states 537 as 44% of
-    961 and is wrong in that reading; 44% is the COLLAPSE rate, re-measured
-    2026-08-18. Neither figure has been re-measured on a blinded world, so it is
-    read here as a lower bound only.
+    where the 961 mined rules occupy 537 distinct triples. Re-measured
+    2026-08-18, the inherited "961 mined rules collapse to 537 triples, 44%" is
+    EXACT: the excess is 961 - 537 = 424, which is 44.1%. The number that
+    answers "how much of the mined set is affected" is a different one and is
+    larger -- 561 rules, 58.4%, actually share a triple with another, over 137
+    multi-rule groups whose largest holds 32. Neither figure has been
+    re-measured on a blinded world, so `rule_groups` is read here as a lower
+    bound only.
 
     THE `NO_RATE` BAND REPORTS ZERO GROUPS AND NOT ONE. Those rows carry a null
     triple, and `drop_duplicates` treats two nulls as equal, so the natural
