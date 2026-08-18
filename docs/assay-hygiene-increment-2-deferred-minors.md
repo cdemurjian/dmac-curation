@@ -14,7 +14,7 @@ WHOLE-BRANCH REVIEW IS POINTED AT THIS LIST.
 
 **52 deferred minors. 16 cross-task carries.**
 
-**Status 2026-08-18:** 11 closed by the final review (marked `[x]` with the
+**Status 2026-08-18:** 16 closed by the final review (marked `[x]` with the
 commit that closed them). Four were already closed by later tasks and the
 ledger never recorded it -- which is itself the argument for extracting this
 list rather than trusting the ledger's open/closed state.
@@ -26,9 +26,12 @@ list rather than trusting the ledger's open/closed state.
 - [ ] (deferred; ledger:80) per-index pairing loop at test_..._schema.py:227-236 is self-fulfilling; only the length check is load-bearing. Real producer does not exist yet; audit.py:195-196 already ships the ";" join and nothing asserts a title contains no ";".
 - [ ] (deferred; ledger:83) test_..._schema.py:823 hardcodes comet = 11 where siblings derive it via _internal().
 - [ ] (deferred; ledger:84) grain-change rationale restated in 3 places; restatements drift.
-- [ ] (deferred; ledger:85) _string_constants closure compares sets, so two constants in one family sharing a value pass. One-line fix: len(family) == len(set(family.values())).
-- [ ] (deferred, new; ledger:93) the Finding-2 reader scan at test_..._schema.py:718-724 passes vacuously if the package path does not resolve (glob on a missing dir yields empty); a module-level import would fail first today, so not silently wrong now. One-line fix: assert (package/"_schema.py").exists().
-- [ ] (deferred, new; ledger:96) that same glob("*.py") is non-recursive and skips _schema.py, so a gating comparison inside the declaring module or a future subpackage would not be seen.
+- [x] (deferred; ledger:85) _string_constants closure compares sets, so two constants in one family sharing a value pass. One-line fix: len(family) == len(set(family.values())).
+      **RESOLVED 2026-08-18 (d513c11): a per-family duplicate-value assertion added. Verified by mutation -- `MODE_THREE = "MODE_3"` passes the old set comparison and fails the new one.**
+- [x] (deferred, new; ledger:93) the Finding-2 reader scan at test_..._schema.py:718-724 passes vacuously if the package path does not resolve (glob on a missing dir yields empty); a module-level import would fail first today, so not silently wrong now. One-line fix: assert (package/"_schema.py").exists().
+      **RESOLVED (no work needed): the vacuous-path case is already guarded by the `(package / 'compatibility.py').exists()` assertion below the scan. Verified 2026-08-18.**
+- [x] (deferred, new; ledger:96) that same glob("*.py") is non-recursive and skips _schema.py, so a gating comparison inside the declaring module or a future subpackage would not be seen.
+      **RESOLVED 2026-08-18 (d513c11): `rglob` plus a module-count floor, so a subpackage reader is seen and a glob that stops matching is loud.**
 - [ ] (deferred, new; ledger:98) test_assay_hygiene_claims.py _fixture_claims() has no pin on its own output row count; now guarded upstream by the samples count pin.
 
 ### Task 2
@@ -85,7 +88,8 @@ list rather than trusting the ledger's open/closed state.
 
 ### Task 6
 
-- [ ] (deferred; ledger:715) two tautological loop assertions and C5's overclaim; six pooled census keys (deliberate, argued, but rows_without_precedent=10 hides a per-direction fact); 117,331 called a ceiling twice when the ceiling is 117,463; 137-char line; "None" rendered as a literal title; claim_of[pair] takes the last writer with no assertion where precedent_rules RAISES on the analogous duplicate; harness has no n_fail ceiling so a mutation breaking every test still scores CAUGHT; schema test:79 still says 34 columns.
+- [x] (deferred; ledger:715) two tautological loop assertions and C5's overclaim; six pooled census keys (deliberate, argued, but rows_without_precedent=10 hides a per-direction fact); 117,331 called a ceiling twice when the ceiling is 117,463; 137-char line; "None" rendered as a literal title; claim_of[pair] takes the last writer with no assertion where precedent_rules RAISES on the analogous duplicate; harness has no n_fail ceiling so a mutation breaking every test still scores CAUGHT; schema test:79 still says 34 columns.
+      **PARTIALLY RESOLVED 2026-08-18 (d513c11): the '117,331 called a ceiling' error and the '34 columns' contradiction are fixed. The other sub-items in this bullet (pooled census keys, 137-char line, `None` as a literal title, claim_of[pair] last-writer, harness n_fail ceiling) remain OPEN.**
 - [ ] (deferred, new; ledger:769) classify.py:1303 carries an unpinned "one keying 42", the ADD_PARENT counterpart of the 170, one layer out from the printed sentence. Correct today; last figure of the family with no test behind it.
 
 ### Task 7
@@ -135,7 +139,8 @@ list rather than trusting the ledger's open/closed state.
 
 ### Task 7
 
-- [ ] (ledger:815) CARRY TO TASK 8: _proposal_source's refusal is safe live and unsafe against a smaller rule set (fires 6/4/23 at 20%/seed-7/50% hold-outs) — exactly the configuration that would close the unmeasured-vocabulary concern — and NOTHING in Task 7 pins it. No test asserts the raise fires under a reduced rule set. Task 8 inherits a measured claim with no regression guard.
+- [x] (ledger:815) CARRY TO TASK 8: _proposal_source's refusal is safe live and unsafe against a smaller rule set (fires 6/4/23 at 20%/seed-7/50% hold-outs) — exactly the configuration that would close the unmeasured-vocabulary concern — and NOTHING in Task 7 pins it. No test asserts the raise fires under a reduced rule set. Task 8 inherits a measured claim with no regression guard.
+      **RESOLVED by Task 8: `test_the_proposal_source_refusal_fires_under_a_reduced_rule_set` ships at tests/test_assay_hygiene_classify.py:3507. Verified 2026-08-18.**
 
 ### Task 8
 
