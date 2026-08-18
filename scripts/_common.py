@@ -12,6 +12,8 @@ varies per project lives in the project's lockfile and reaches scripts via
 
 Provides:
   - ``mint_uid(sample_type, lab, date, n)`` -> canonical ``<TYPE>-YYMMDD<LAB>-N``
+  - ``join_uids(uids)`` -> ``"A;B"`` for Parent-style cells (no space; NExtSEEK
+    canonicalises to this form, so emitting ``"; "`` breaks round-trip diffs)
   - ``placeholder(what)`` -> the greppable ``*** PLACEHOLDER: ... ***`` marker
   - ``sampletype_schema(sampletype, catalog=None)`` -> the catalog record
   - ``schema_column_order(schema, samples)`` -> UID, schema fields, then extras
@@ -41,6 +43,19 @@ def placeholder(what: str) -> str:
 # ---------------------------------------------------------------------------
 # UID minting
 # ---------------------------------------------------------------------------
+def join_uids(uids) -> str:
+    """Join UIDs for a ``Parent``-style cell: semicolon, NO space.
+
+    NExtSEEK canonicalises multi-value UID lists to ``"A;B"`` on insert. Emitting
+    ``"; "`` uploads fine but comes back different, so every multi-parent row
+    reports a false diff in ``/curate-validate``. Build scripts should route all
+    UID-list cells through here so the sheet matches what the DB will store.
+
+    Blank/None entries are dropped; order is preserved.
+    """
+    return ";".join(str(u).strip() for u in uids if u is not None and str(u).strip())
+
+
 def mint_uid(sample_type: str, lab: str, date: str, n: int) -> str:
     """Canonical 4-arg UID minter: ``mint_uid('RNA', 'KAM', '260527', 1)``
     -> ``'RNA-260527KAM-1'``.
