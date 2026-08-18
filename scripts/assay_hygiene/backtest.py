@@ -55,10 +55,10 @@ here may be a genuine missing registration the pipeline correctly found, since a
 curator's assay set is not known to be complete -- that is the premise of Modes 1
 and 2. Every precision this module reports is therefore a LOWER BOUND.
 
-MEASURED OVER THE REAL EXTRACT 2026-08-17, at a 20% hold-out on seed 0. 32,793
-of 163,816 samples held out, 42,867 of 214,296 membership rows hidden, 509,875
-of 794,593 edges in the training set, 36,090 curator-assigned pairs to recover,
-59,182 proposals scored:
+MEASURED 2026-08-18 OVER THE 2026-08-14 EXTRACT, at a 20% hold-out on seed 0.
+32,793 of 163,816 samples held out, 42,867 of 214,296 membership rows hidden,
+509,875 of 794,593 edges in the training set, 36,090 curator-assigned pairs to
+recover, 59,182 proposals scored:
 
     band          ADD_PARENT                     ADD_CHILD
                   rows   correct  precision      rows   correct  precision
@@ -68,6 +68,17 @@ of 794,593 edges in the training set, 36,090 curator-assigned pairs to recover,
     [0.75,0.90)   1,814    1,529     0.843         949      815     0.859
     [0.90,0.95)   1,626    1,548     0.952         277      263     0.949
     [0.95,1.00]   4,151    4,143     0.998      19,337   19,270     0.997
+
+STABLE ACROSS THE SPLIT, so the curve is not an artifact of one hold-out. Re-run
+at seed 7 and at fractions 0.1 and 0.5, the `[0.95,1.00]` precision reads
+0.997 / 0.997, 0.999 / 0.997 and 0.998 / 0.996 (ADD_PARENT / ADD_CHILD).
+
+AND THE RATE IS WELL CALIBRATED OUT OF SAMPLE, IN BOTH DIRECTIONS, which is the
+strongest form of the finding: every band's measured precision falls inside the
+band's own interval, the one recurring exception being `[0.90,0.95)` ADD_PARENT
+at 0.952 / 0.965 / 0.960 across the three configurations, up to 1.5 points above
+the band's top edge. A `reverse_rate` of 0.97 means what a `propagation_rate` of
+0.97 means.
 
 THE CURVE CUTS AGAINST THE SPEC'S DEMOTION OF `A_ADD_CHILD`, AND ONLY IN ITS TOP
 BAND. At equal precedent rate the two directions recover a curator's assay at

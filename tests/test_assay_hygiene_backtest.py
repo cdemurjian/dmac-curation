@@ -314,10 +314,11 @@ def test_a_sample_on_both_sides_of_the_split_is_refused_and_an_edge_split_makes_
 
     A sample fans out to many edges, so splitting the EDGE frame assigns the same
     sample to both halves and the run scores answers it was trained on. The wrong
-    rule is built here by hand -- half the edges to one side, half to the other,
-    each edge's endpoints following it -- and the overlap it produces is measured
-    rather than asserted, so this test cannot pass on a world where the two
-    halves happen to be disjoint.
+    rule is built here by hand, and it is THIS MODULE'S OWN SPLITTER applied to
+    the wrong unit -- the edge frame's row positions instead of the sample ids --
+    with each edge's endpoints following it. The overlap it produces is measured
+    rather than assumed, so this test cannot pass on a world whose two halves
+    happen to come out disjoint.
     """
     w = _world()
     universe = B.sample_universe(w["samples"], w["membership"], w["edges"])
