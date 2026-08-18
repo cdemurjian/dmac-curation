@@ -268,17 +268,59 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 #   alt-label id should demote it is a classification ruling and Tasks 5 and 6
 #   own classification; this layer owes them the evidence and its measured size,
 #   not a fourth bucket named for what someone assumed was in it.
+# `type_registrations` counts the samples of THIS row's `sample_type` already
+#   registered in the proposed assay, and it carries the same name and the same
+#   meaning as `gate.GATE_COLUMNS`' column of that spelling -- one concept, one
+#   name, the call `registered_internal_assay_titles` makes against
+#   `AUDIT_COLUMNS`. It sits with the `vocab_*` block because both are the
+#   GATE's evidence, and it is the only member of that block a row with no claim
+#   still carries.
+#
+#   A COUNT AND NEVER A BOOLEAN, and ZERO IS THE FINDING. A row reading 0 would
+#   create a (sample type, assay) pair that exists NOWHERE in the database --
+#   measured 2026-08-17 over the emitted Mode 2 rows, 30,496 of 55,007
+#   ADD_PARENT rows (55.4%) and 73,195 of 117,331 ADD_CHILD rows (62.4%). A
+#   boolean would collapse "joins five existing registrations" with "joins
+#   5,000", and a curator triages on the difference.
+#
+#   IT IS THE SAME CELL `gate.type_registration_index` RULES REACHABILITY ON,
+#   and the two rules differ in what they DO with an empty one. A CLAIM resting
+#   on an empty cell is blocked `GATE_UNREACHABLE`, because the vocabulary is
+#   the only evidence behind it. A MODE 2 row is flagged and still emitted,
+#   because its evidence is a neighbour's actual registration, which the gate
+#   has no opinion about. Blocking here would silently delete the proposals the
+#   design exists to surface.
+#
+#   NULL means the sample's TYPE could not be resolved, which is a third state
+#   and not a zero: `type_reg.get((None, assay))` misses exactly as an empty
+#   cell does, so a missing type reported as 0 would assert the strongest
+#   negative flag the row can carry about a type nobody knows. 0 rows on the
+#   real extract, where every edge endpoint carries a node row.
+# `lineage_n_supports` is how many lineage neighbours register the proposed
+#   assay, from `lineage.lineage_supports`, and it rides behind
+#   `lineage_neighbour_uuid` because it is the check on it: the row NAMES one
+#   neighbour and this says how many there were. A `(sample, assay)` pair is ONE
+#   membership write however many neighbours support it, so the row is emitted
+#   once; without this column a proposal backed by 1,526 neighbours -- the real
+#   extract's maximum -- reads exactly like one backed by a single edge. 31,180
+#   of the 172,338 emitted rows carry more than one.
+#
+#   NULL on a mode that never ran the lineage test, which is Mode 1.
 # `precedent_direction` says which of stage B's two rates `precedent_rate`
 #   holds. They differ -- 0.931 against 0.006 on the hop that justified Mode 2
-#   -- so a row carrying a bare rate cannot be audited.
+#   -- so a row carrying a bare rate cannot be audited. Its VALUE is the name of
+#   the `PRECEDENT_COLUMNS` column the rate was read from, so a reader can join
+#   the row back to `precedent.csv` and check the number without consulting any
+#   code. `classify.ACTION_PRECEDENT_DIRECTION` is the one place the mapping
+#   from action to column lives.
 FINDING_COLUMNS = [
     "sample_id", "uuid", "sample_type", "project_ids",
     "registered_internal_assay_ids", "registered_internal_assay_titles",
     "proposed_internal_assay_id", "proposed_internal_assay_title",
     "mode", "classification", "gate",
     "claim_tier", "contested", "source_field", "raw_value",
-    "vocab_support", "vocab_purity", "vocab_provenance",
-    "lineage", "lineage_neighbour_uuid",
+    "vocab_support", "vocab_purity", "vocab_provenance", "type_registrations",
+    "lineage", "lineage_neighbour_uuid", "lineage_n_supports",
     "co_reg_rate", "co_reg_pop", "co_reg_registered_internal_assay_id",
     "co_reg_alt_label_internal_assay_id", "co_reg_alt_label_pop",
     "compat_band",

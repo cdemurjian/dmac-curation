@@ -86,6 +86,18 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
     `test_a_co_registration_rate_names_the_registration_it_was_measured_against`
     and `test_a_best_of_rate_carries_the_well_supported_zero_it_beat`.
 
+    36 and not 34 since Mode 2 was written, the same day and by the same rule:
+    the moment before a column's first consumer exists is the one moment it
+    costs nothing, and both were required by a Mode 2 row rather than invented
+    for it. `type_registrations` is the reachability cell -- ZERO means the
+    proposal would create a (sample type, assay) pair existing nowhere, which
+    55.4% of ADD_PARENT and 62.4% of ADD_CHILD rows do -- and it is filled by
+    Mode 1 as well, because the gate measured it there too. `lineage_n_supports`
+    is how many neighbours back a proposal that is emitted ONCE because it is
+    one write; 31,180 of the 172,338 rows carry more than one, up to 1,526.
+    See `test_a_row_creating_a_type_assay_pair_existing_nowhere_is_flagged_on_the_row`
+    and `test_a_pair_reachable_from_two_neighbours_is_one_row_carrying_two_supports`.
+
     `project_ids` is PLURAL and was `project_id` until 2026-08-17, renamed when
     the first emitter was written and measured the value: 1,052 of Mode 1's
     6,242 population samples hold more than one project id and 34 hold a
@@ -102,8 +114,8 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
         "proposed_internal_assay_id", "proposed_internal_assay_title",
         "mode", "classification", "gate",
         "claim_tier", "contested", "source_field", "raw_value",
-        "vocab_support", "vocab_purity", "vocab_provenance",
-        "lineage", "lineage_neighbour_uuid",
+        "vocab_support", "vocab_purity", "vocab_provenance", "type_registrations",
+        "lineage", "lineage_neighbour_uuid", "lineage_n_supports",
         "co_reg_rate", "co_reg_pop", "co_reg_registered_internal_assay_id",
         "co_reg_alt_label_internal_assay_id", "co_reg_alt_label_pop",
         "compat_band",
