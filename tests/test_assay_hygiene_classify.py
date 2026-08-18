@@ -501,6 +501,12 @@ def test_mode_1_asserts_nothing_about_the_tests_it_never_ran():
     """
     _, _, _, _, _, findings = _pipeline()
 
+    # NON-VACUITY FIRST. Every assertion below passes on an EMPTY frame -- the 14
+    # `isna().all()` calls, the `== ""`, and both closed-family intersections are
+    # all vacuously true of no rows -- so this test owns five mutations that fire
+    # only because the world emits rows. `_world`'s docstring derives the 8.
+    assert len(findings) == 8
+
     not_run = ["classification", "lineage", "lineage_neighbour_uuid",
                "co_reg_rate", "co_reg_pop",
                "co_reg_registered_internal_assay_id",
@@ -675,6 +681,64 @@ def test_attach_gate_raises_rather_than_silently_pairing_two_different_runs():
     drifted.loc[drifted.index[0], "raw_value"] = "something else entirely"
     with pytest.raises(ValueError, match="raw_value"):
         X.attach_gate(claims, drifted)
+
+    # A COLUMN THE FRAMES SHARE BEYOND THE TWO CONTRACTS is checked too, and
+    # this is the case a contract-derived loop would miss. `sample_type` belongs
+    # to `GATE_COLUMNS` alone, so a caller who pre-joined it onto the claims
+    # frame creates a shared column no constant names; `reindex` would then hand
+    # back the CLAIM frame's value and discard the gate's, silently, which is
+    # the same shape as the `GATE_COLUMNS` widening the pin test describes.
+    prejoined = claims.assign(sample_type="WRONG")
+    with pytest.raises(ValueError, match="sample_type"):
+        X.attach_gate(prejoined, gated)
+
+
+def test_attach_gate_pins_both_of_the_contracts_it_computes():
+    """`ATTACHED_COLUMNS` and `_SHARED_PAYLOAD` are COMPUTED, so they are pinned.
+
+    Neither is written down anywhere else, and the change that breaks them is
+    already contemplated: `gate.py` reserves widening `GATE_COLUMNS` in
+    increment 3. Should it gain a name `CLAIM_COLUMNS` already carries, the
+    comprehension building `ATTACHED_COLUMNS` emits that name once, `merge`
+    suffixes the gate's copy `_gate`, and `reindex` discards it -- so the CLAIM
+    frame's value would win silently, for a column whose only job is to prove the
+    two frames describe one run.
+
+    Two assertions close that and they differ in kind. The literal pin makes the
+    widening VISIBLE: a new column fails here and has to be named. The derivation
+    makes it SAFE: `_SHARED_PAYLOAD` is computed from the two contracts, so a
+    newly shared name joins the payload check without anyone remembering to
+    extend a list -- the same argument `EVIDENCE_PROVENANCES` makes against
+    `p != P_PROPOSED`, and `blocks_mode` against three inequalities.
+    """
+    assert X.ATTACHED_COLUMNS == [
+        # the claim's own columns, first and unrenamed
+        "sample_id", "uuid", "internal_assay_id", "internal_assay_title",
+        "tier", "source_field", "raw_value", "contested", "source_provenance",
+        # ...then everything the gate adds
+        "sample_type", "gate", "gate_failures", "gate_reason",
+        "vocab_support", "vocab_n_samples", "vocab_purity", "vocab_provenance",
+        "term_family", "family_internal_assay_ids", "type_registrations",
+    ]
+    assert len(set(X.ATTACHED_COLUMNS)) == len(X.ATTACHED_COLUMNS) == 20
+
+    # NOTHING EITHER CONTRACT CARRIES IS LOST IN THE JOIN. This is the assertion
+    # a dropped gate column fails, and it is a SET EQUALITY rather than a length,
+    # because a widening that both adds and drops a column keeps the count.
+    assert set(X.ATTACHED_COLUMNS) == set(S.CLAIM_COLUMNS) | set(G.GATE_COLUMNS)
+
+    # the derivation, and separately what it yields today
+    assert X._SHARED_PAYLOAD == sorted(
+        (set(S.CLAIM_COLUMNS) & set(G.GATE_COLUMNS))
+        - {"sample_id", "internal_assay_id"})
+    assert X._SHARED_PAYLOAD == [
+        "internal_assay_title", "raw_value", "source_field", "uuid"]
+
+    # the merge key is subtracted because `merge` does not suffix it, and it is
+    # the one list the key, the payload and this pin are all built from
+    assert X._MERGE_KEY == ["sample_id", "internal_assay_id"]
+    assert not (set(X._SHARED_PAYLOAD) & set(X._MERGE_KEY))
+    assert set(X._MERGE_KEY) <= set(S.CLAIM_COLUMNS) & set(G.GATE_COLUMNS)
 
 
 def test_the_census_partitions_the_population_and_names_every_excluded_sample():

@@ -100,11 +100,32 @@ ATTACHED_COLUMNS = S.CLAIM_COLUMNS + [
     c for c in G.GATE_COLUMNS if c not in S.CLAIM_COLUMNS
 ]
 
-# The identity columns both frames carry, which the join checks rather than
+# The pair the two frames are joined on. Named, because `_SHARED_PAYLOAD` below
+# is defined by subtracting it and `attach_gate` merges on it: three spellings of
+# one list is how the payload check and the merge drift apart.
+_MERGE_KEY = ["sample_id", "internal_assay_id"]
+
+# The identity columns both frames carry, which the join CHECKS rather than
 # assumes. They are not part of the key: a disagreement on them means the two
 # frames describe different runs, and merging ON them would silently drop the
 # disagreeing rows instead of reporting them.
-_SHARED_PAYLOAD = ["uuid", "internal_assay_title", "source_field", "raw_value"]
+#
+# DERIVED FROM THE TWO CONTRACTS AND NEVER HAND-LISTED, because the change that
+# breaks a hand-listed version is already scheduled. `gate.py:749-754`
+# contemplates widening `GATE_COLUMNS` in increment 3. Should it gain a name
+# `CLAIM_COLUMNS` already carries, the comprehension above emits that name ONCE,
+# `merge` suffixes the gate's copy `_gate`, and `reindex` discards it -- so the
+# CLAIM frame's value would win silently, with no payload check, for a column
+# whose whole purpose is to prove the two frames describe one run. Derivation
+# admits the new name to the check automatically, which is the only version of
+# this that survives an edit made a task from here.
+#
+# `attach_gate` additionally reads the columns the FRAMES share, which is a
+# superset when a caller hands in a pre-joined column, and
+# `test_attach_gate_pins_both_of_the_contracts_it_computes` pins that on the
+# declared frames the two agree and names today's four members.
+_SHARED_PAYLOAD = sorted(
+    (set(S.CLAIM_COLUMNS) & set(G.GATE_COLUMNS)) - set(_MERGE_KEY))
 
 # Every key `mode1_census` returns, in report order, declared for the reason
 # `CENSUS_KEYS`, `INTEGRITY_KEYS` and `CEILING_KEYS` are: the report prints them
@@ -268,11 +289,13 @@ def attach_gate(claims: pd.DataFrame, gated: pd.DataFrame) -> pd.DataFrame:
 
     The shared identity columns are CHECKED rather than joined on. Merging on
     `raw_value` too would look stricter and would in fact drop the disagreeing
-    rows instead of naming them.
+    rows instead of naming them. Which columns those are is DERIVED -- see
+    `_SHARED_PAYLOAD` for the scheduled `GATE_COLUMNS` widening that a hand-
+    listed version would let through as a silent claim-side win.
 
     Neither input frame is mutated.
     """
-    key = ["sample_id", "internal_assay_id"]
+    key = _MERGE_KEY
     for name, frame in (("claims", claims), ("gate", gated)):
         dup = frame.duplicated(key)
         if dup.any():
@@ -301,7 +324,11 @@ def attach_gate(claims: pd.DataFrame, gated: pd.DataFrame) -> pd.DataFrame:
         )
 
     out = claims.merge(gated, on=key, how="inner", suffixes=("", "_gate"))
-    for col in _SHARED_PAYLOAD:
+    # Read off the FRAMES rather than off the contracts, so a caller handing in
+    # a pre-joined column gets it checked too instead of having the claim side
+    # win by `reindex`. On the declared frames this equals `_SHARED_PAYLOAD`,
+    # which is pinned.
+    for col in sorted((set(claims.columns) & set(gated.columns)) - set(key)):
         left = out[col].where(out[col].notna(), "").astype(str)
         right = out[col + "_gate"].where(
             out[col + "_gate"].notna(), "").astype(str)
