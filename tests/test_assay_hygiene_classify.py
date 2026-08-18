@@ -54,6 +54,7 @@ from assay_hygiene import _schema as S  # noqa: E402
 from assay_hygiene import audit as A  # noqa: E402
 from assay_hygiene import claims as C  # noqa: E402
 from assay_hygiene import classify as X  # noqa: E402
+from assay_hygiene import compatibility as CP  # noqa: E402
 from assay_hygiene import gate as G  # noqa: E402
 from assay_hygiene import lineage as L  # noqa: E402
 from assay_hygiene import mode2 as M2  # noqa: E402
@@ -932,13 +933,20 @@ def test_no_module_in_the_package_imports_the_writer_or_names_a_function_for_a_d
     assert scanned == len(seen) - len(WRITERS) > 10, scanned
 
 
-def test_stage_c_names_every_file_it_opens_and_writes_none_of_them():
+def test_stage_c_names_every_file_it_opens_and_the_two_it_writes():
     """Every filename stage C touches, extracted from its source rather than searched.
 
     Searching for the absence of one known name passes the moment someone
     spells it differently, so the filenames are pulled out of the source and
     compared as a SET -- a further file added later fails here and has to be
     named.
+
+    STAGE C WRITES TWO FILES AND IT DID NOT UNTIL TASK 8. Task 5 shipped this
+    guard as `"to_csv" not in src`, on the stated ground that the findings file
+    belongs to the task that emits every mode at once. This is that task, so the
+    guard changes from "writes nothing" to "writes exactly these two, both csv,
+    both from `main`". That is not a weaker assertion: an unnamed third file now
+    fails here, and so does a `to_csv` anywhere but in `main`.
     """
     sources = _stage_c_sources()
     assert set(sources) == {"classify.py", "mode2.py"}, (
@@ -952,20 +960,27 @@ def test_stage_c_names_every_file_it_opens_and_writes_none_of_them():
         # frame rather than reading `precedent.csv` beside it: rules mined from
         # another extract would report a real hop as never measured
         "edges.parquet"}
-    assert set(re.findall(r"[\w.-]+\.csv", src)) == {"vocabulary.csv"}
-    assert "to_csv" not in src and "to_parquet" not in src
+    assert set(re.findall(r"[\w.-]+\.csv", src)) == {
+        "vocabulary.csv", "findings.csv", "mode3-disposition.csv"}
+    assert "to_parquet" not in src, "nothing here rewrites an input"
+    # THE TWO WRITES ARE IN `main` AND NOWHERE ELSE, so every frame-building
+    # function stays callable by Task 9's driver without producing a file.
+    for name, text in sources.items():
+        for chunk in text.split("\ndef ")[1:]:
+            if "to_csv" in chunk:
+                assert chunk.startswith("main("), f"{name} writes outside main"
 
 
-def test_main_reports_the_whole_world_and_leaves_every_byte_on_disk_unchanged(
+def test_main_writes_exactly_two_artifacts_and_leaves_every_other_byte_unchanged(
         tmp_path, capsys):
-    """A full `main` run over the fixture: nothing created, nothing modified.
+    """A full `main` run over the fixture: two files created, nothing modified.
 
-    Asserted by hashing BOTH directories before and after, rather than by
-    checking for one filename. Stage C's unified artifact belongs to the task
-    that emits every mode at once, so a Mode-1-only file written here would put
-    two files with one name in the operator's directory -- and "it wrote no file"
-    is a claim that has to be checked against the directory, not against the
-    absence of a `to_csv` call, which the guard above already covers separately.
+    Asserted by hashing BOTH directories before and after and DIFFING the two
+    maps, rather than by checking for one filename. "It wrote exactly these two"
+    is a claim about the directory and not about the absence of a `to_csv` call,
+    which the guard above covers separately -- and the half that matters most is
+    that every INPUT byte is identical afterwards, since this pass reads the
+    extract a production writer also reads.
 
     BOTH MODES RUN, over one world. Mode 1's world carries no edges of its own --
     its population is samples registered in nothing and no edge could change a
@@ -998,12 +1013,30 @@ def test_main_reports_the_whole_world_and_leaves_every_byte_on_disk_unchanged(
 
     before = _digests()
     assert X.main(str(extract), str(out)) == 0
-    assert _digests() == before
+    after = _digests()
+
+    # exactly two new files, both named, both under `out_dir`
+    assert set(after) - set(before) == {"out/findings.csv",
+                                        "out/mode3-disposition.csv"}
+    # ...and every byte that was there before is unchanged, inputs included
+    assert {k: v for k, v in after.items() if k in before} == before
+
+    findings = pd.read_csv(out / "findings.csv")
+    assert list(findings.columns) == S.FINDING_COLUMNS
+    assert len(findings[findings["mode"] == S.MODE_3]) == 0
+    disposition = pd.read_csv(out / "mode3-disposition.csv")
+    assert list(disposition.columns) == X.DISPOSITION_COLUMNS
 
     printed = capsys.readouterr().out
-    for k in X.MODE1_CENSUS_KEYS + M2.MODE2_CENSUS_KEYS:
+    for k in (X.MODE1_CENSUS_KEYS + M2.MODE2_CENSUS_KEYS
+              + X.FINDINGS_CENSUS_KEYS):
         assert k in printed
-    assert "nothing was written" in printed
+    # the two artifacts are NAMED in what the operator reads, and the claim
+    # about writes is scoped to this run rather than to the package
+    assert "findings.csv" in printed and "mode3-disposition.csv" in printed
+    assert "no database" in printed
+    # MODE 3 IS REPORTED AS UNDETECTED AND NEVER AS SMALL
+    assert "no detector" in printed
     # the census reaches the operator as numbers, not only as key names
     assert "10" in printed and "999" in printed
     # THE WORD CEILING RIDES WITH THE MODE 2 NUMBERS, wherever they appear: an
@@ -2616,3 +2649,1018 @@ def test_the_real_extract_reproduces_the_ceiling_and_both_directions_separately(
         P.mine_precedent(r["edges"], r["membership"], r["assays"]))
     assert round(rules[(2, "TIS", "PAV", 74)].propagation_rate, 3) == 0.931
     assert round(rules[(2, "TIS", "PAV", 56)].reverse_rate, 3) == 0.006
+
+
+# --- Task 8: the precedence, the compatibility lane and the unified pass ------
+#
+# A THIRD WORLD, and the reason is arithmetic rather than taste.
+# `compatibility.compat_band` reads a rate only over `MIN_CO_REG_SUPPORT` = 30
+# samples of the type, and `_world2`'s largest reachability cell is 10. Every
+# band it can produce there is `BAND_NO_SUPPORT`, so a world that reaches the
+# other three bands has to carry populations an order of magnitude larger --
+# and growing `_world2` to 44 registered TIS samples would move every count in
+# its hand-derived census table.
+#
+# THE RATES ARE READ OFF THE WORLD AND NEVER HARD-CODED HERE. `_world3`'s
+# denominators are the whole of `pop(TIS, 11)`, which grows by one every time a
+# TIS sample registered in 11 is added for some unrelated reason. A fixture
+# asserting `rate == 0.75` would then fail for a reason that has nothing to do
+# with the rule under test, and -- worse -- a fixture asserting it in a
+# DOCSTRING would drift silently. The tests assert the BAND, which is stable
+# under any denominator that keeps the rate on its own side of the boundary,
+# and `test_world_3_carries_exactly_the_cells_and_rates_its_docstring_states`
+# pins the cells themselves.
+
+
+def _world3():
+    """One synthetic world for the precedence. Every count here is derived here.
+
+    Assays 11..16 are junctioned in project 10 (seek 1011..1016).
+
+    THE BACKGROUND EXISTS TO REACH THREE OF THE FOUR COMPATIBILITY BANDS, which
+    needs populations over `MIN_CO_REG_SUPPORT` = 30:
+
+         1..40   TIS in 11    of which  1..30 are ALSO in 12
+                                        1..10 are ALSO in 14
+                                        none is in 13
+        41..75   TIS in 13    35 samples, so `(TIS, 13)` is a reachable cell
+                              and a zero rate against it is a MEASURED zero
+       200..204  MUS in 11    5 samples -- deliberately under the floor
+       205..209  MUS in 12    5 samples, so `(MUS, 12)` is reachable
+
+    The four compatibility subjects, each registered in 11 ALONE, each claiming
+    an assay it does not hold, none of them carrying an edge:
+
+        600  Type alpha  -> 12   rate over pop(TIS,11)  BAND_ROUTINE
+        601  Type beta   -> 13   a measured 0.0         BAND_NEVER
+        602  Type gamma  -> 14   between 0 and 0.5      BAND_SOMETIMES
+        200  Type alpha  -> 12   MUS, pop 5             BAND_NO_SUPPORT
+
+    600 and 200 make the same claim and land in different bands, and 602 and 200
+    land in different BANDS and the same CLASS. Both pairs are deliberate: a
+    world where band and class move together cannot show that
+    `BAND_ESTABLISHES` is being consulted.
+
+    THE FOUR PRECEDENCE CASES, one per adjacent pair in `PRECEDENCE`, because a
+    declared order that changes no answer when reordered is a comment:
+
+        (700, 15)  GATE over LINEAGE.  700 is A.SPC registered in 16 and claims
+                   15 through `Type: spectra`; NO A.SPC sample is registered in
+                   15 anywhere, so the gate rejects the claim -- while 700's
+                   PARENT 701 is a D.SPC registered in 15, so a lineage
+                   neighbour does carry the pair. This is the shape of the 24
+                   FlowJo / mass-spectra rows the spec calls the third design
+                   error, where the analysis sample claims the MEASUREMENT
+                   assay its data parent holds.
+        (730, 15)  GATE over MODE 1.   730 is A.SPC registered in NOTHING and
+                   makes the same rejected claim, and its parent 731 is a second
+                   D.SPC registered in 15. Without this row the first swap
+                   changes nothing: 700 is registered, so Mode 1 declines it for
+                   a second reason. Its EDGE is here for a different reason
+                   again -- without it `lineage_refused_by_the_gate` and
+                   `lineage_taken_by_mode_1` would both read 1, and two buckets
+                   holding the same value cannot discriminate a rule that
+                   confuses them.
+        (710, 12)  MODE 1 over LINEAGE. 710 is registered in nothing, claims 12,
+                   and its parent 711 registers 12. Both steps want the key.
+        (720, 12)  LINEAGE over COMPAT. 720 is TIS in 11, claims 12, and its
+                   parent 721 registers 12. Both steps want the key.
+
+    The lineage lane offers SIX candidate pairs over the four edges, and two of
+    them carry no claim at all:
+
+        (700, 15) ADD_CHILD    (701, 16) ADD_PARENT   (710, 12) ADD_CHILD
+        (720, 12) ADD_CHILD    (721, 11) ADD_PARENT   (730, 15) ADD_CHILD
+
+    ...of which the precedence keeps 3, the gate refuses 2 and Mode 1 takes 1.
+
+    THE INPUT AND THE STEPS, hand-traced and re-derived by
+    `test_the_classes_partition_every_claim_backed_absence_and_every_lineage_pair`:
+
+        input keys                        10
+          PRE_GATE                         2   (700,15) (730,15)
+          PRE_MODE_1                       1   (710,12)
+          PRE_LINEAGE                      3   (701,16) (720,12) (721,11)
+          PRE_COMPAT                       4   (600,12) (601,13) (602,14) (200,12)
+          PRE_MODE_3                       0
+
+        emitted rows                       8
+          MODE_1                           1   (710,12)
+          MODE_2                           4   3 lineage + (600,12)
+          no mode                          3   (601,13) (602,14) (200,12)
+          MODE_3                           0
+
+        CLS_ABSENCE_LINEAGE                3
+        CLS_ABSENCE_COMPAT                 1
+        CLS_ALT_LABEL                      1
+        CLS_UNRESOLVED                     2
+        no classification (Mode 1)         1
+
+    ALSO: 620 is TIS in 11 and claims 11, which it already holds. It is an
+    absence of nothing, it is in no input key, and it is counted by name --
+    123,439 claims on the real extract are this shape, which is 89% of them.
+    """
+    nodes, membership, samples, edges = [], [], [], []
+    known: dict[int, str] = {}
+
+    def add(sid, stype, assay_ids=(), meta="{}", projects="3"):
+        known[sid] = stype
+        nodes.append((f"{stype}-{sid}", sid, stype))
+        samples.append((sid, f"{stype}-{sid}", meta, None, projects))
+        for a in assay_ids:
+            membership.append((sid, a))
+
+    def edge(child, parent):
+        edges.append((child, parent, f"{known[child]}-{child}",
+                      f"{known[parent]}-{parent}", known[child], known[parent],
+                      None, None, None))
+
+    for sid in range(1, 41):
+        held = [11 + SEEK_OFFSET]
+        if sid <= 30:
+            held.append(12 + SEEK_OFFSET)
+        if sid <= 10:
+            held.append(14 + SEEK_OFFSET)
+        add(sid, "TIS", held)
+    for sid in range(41, 76):
+        add(sid, "TIS", [13 + SEEK_OFFSET])
+    for sid in range(200, 205):
+        add(sid, "MUS", [11 + SEEK_OFFSET],
+            meta='{"Type": "alpha"}' if sid == 200 else "{}")
+    for sid in range(205, 210):
+        add(sid, "MUS", [12 + SEEK_OFFSET])
+
+    add(600, "TIS", [11 + SEEK_OFFSET], meta='{"Type": "alpha"}')
+    add(601, "TIS", [11 + SEEK_OFFSET], meta='{"Type": "beta"}')
+    add(602, "TIS", [11 + SEEK_OFFSET], meta='{"Type": "gamma"}')
+    # claims an assay it ALREADY HOLDS: an absence of nothing
+    add(620, "TIS", [11 + SEEK_OFFSET], meta='{"Type": "delta"}')
+
+    add(700, "A.SPC", [16 + SEEK_OFFSET], meta='{"Type": "spectra"}')
+    add(701, "D.SPC", [15 + SEEK_OFFSET])
+    add(730, "A.SPC", meta='{"Type": "spectra"}')
+    add(731, "D.SPC", [15 + SEEK_OFFSET])
+    add(710, "TIS", meta='{"Type": "alpha"}')
+    add(711, "TIS", [12 + SEEK_OFFSET])
+    add(720, "TIS", [11 + SEEK_OFFSET], meta='{"Type": "alpha"}')
+    add(721, "TIS", [12 + SEEK_OFFSET])
+
+    for c, p in ((700, 701), (710, 711), (720, 721), (730, 731)):
+        edge(c, p)
+
+    assays = pd.DataFrame(
+        [(a + SEEK_OFFSET, f"Assay {a}", 3, 2, 1, 10, "P", a, f"Assay {a}")
+         for a in range(11, 17)],
+        columns=S.ASSAY_COLUMNS,
+    )
+    vocabulary = pd.DataFrame(
+        [("Type", "alpha", 12, "Assay 12", 900, 50, 0.99, S.P_LEARNED),
+         ("Type", "beta", 13, "Assay 13", 800, 45, 0.98, S.P_LEARNED),
+         ("Type", "gamma", 14, "Assay 14", 700, 40, 0.97, S.P_LEARNED),
+         # beyond reproach as a MAPPING, so the only thing that can stop a claim
+         # resting on it is reachability -- which is the point of (700,15)
+         ("Type", "spectra", 15, "Assay 15", 600, 35, 0.96, S.P_LEARNED),
+         ("Type", "delta", 11, "Assay 11", 500, 30, 0.95, S.P_LEARNED)],
+        columns=S.VOCAB_COLUMNS,
+    )
+    # Only the hop a REACHING claim rides on needs a rule: `_proposal_source`
+    # refuses the (no rule, gated claim) combination, and (720,12) is the one
+    # row in this world that is both claim-backed and lineage-backed.
+    precedent = pd.DataFrame(
+        [_rule(10, "TIS", "TIS", 12, "Assay 12", 9, 1, 81),
+         _rule(10, "TIS", "TIS", 11, "Assay 11", 4, 16, 1)],
+        columns=S.PRECEDENT_COLUMNS,
+    )
+    return {
+        "nodes": pd.DataFrame(nodes, columns=S.NODES_COLUMNS),
+        "membership": pd.DataFrame(membership, columns=S.MEMBERSHIP_COLUMNS),
+        "samples": pd.DataFrame(samples, columns=S.SAMPLE_COLUMNS),
+        "edges": pd.DataFrame(edges, columns=S.EDGE_COLUMNS),
+        "assays": assays,
+        "vocabulary": vocabulary,
+        "precedent": precedent,
+    }
+
+
+def _pipeline3(w=None):
+    """The whole unified pass over a world. -> (w, parts).
+
+    One helper, so no test rebuilds the wiring and a test naming a behaviour
+    cannot exercise a different composition of the stages than its siblings.
+    """
+    w = w or _world3()
+    attached = _attached2(w)
+    type_reg = G.type_registration_index(w["membership"], w["assays"], w["nodes"])
+    registered = A.registered_internal(w["membership"], w["assays"])
+    children_of, parents_of, uuid_of, _ = L.lineage_index(
+        w["edges"], w["samples"], w["membership"])
+    candidates = M2.mode2_candidates(children_of, parents_of, registered)
+    population = X.unregistered_samples(w["samples"], w["membership"], w["assays"])
+    projects = X.project_index(w["samples"])
+    titles = M2.assay_titles(w["assays"])
+    table = CP.co_registration(w["membership"], w["assays"], w["nodes"])
+
+    keys = X.absence_keys(attached, population=population,
+                          registered=registered, candidates=candidates)
+    steps = X.precedence_steps(keys)
+    m1 = X.mode1_findings(attached, population, projects)
+    m2 = M2.mode2_findings(
+        attached, children_of=children_of, parents_of=parents_of,
+        uuid_of=uuid_of, registered=registered,
+        rules=M2.precedent_rules(w["precedent"]),
+        reg_projects=M2.registration_projects(w["membership"], w["assays"]),
+        types=G.sample_type_index(w["nodes"]), type_reg=type_reg,
+        titles=titles, projects=projects)
+    compat = X.compat_findings(attached, steps=steps, registered=registered,
+                               table=table, titles=titles, projects=projects)
+    lanes = {X.PRE_MODE_1: m1, X.PRE_LINEAGE: m2, X.PRE_COMPAT: compat,
+             X.PRE_MODE_3: X.mode3_findings()}
+    findings = X.unify_findings(steps, lanes)
+    census = X.findings_census(keys, steps, findings, lanes,
+                               agreeing=X.claims_agreeing_with_a_registration(
+                                   attached, registered))
+    return w, {"attached": attached, "registered": registered,
+               "candidates": candidates, "population": population,
+               "keys": keys, "steps": steps, "table": table, "titles": titles,
+               "projects": projects, "lanes": lanes, "findings": findings,
+               "census": census}
+
+
+def _key_step(parts, sample_id, assay_id):
+    """The precedence step for one key, or a readable failure."""
+    key = (sample_id, assay_id)
+    assert key in parts["steps"], f"{key} is not an input key"
+    return parts["steps"][key]
+
+
+def _found(findings, sample_id, assay_id):
+    """The one unified row for a (sample, proposed assay), or a readable failure."""
+    hit = findings[(findings.sample_id == sample_id)
+                   & (findings.proposed_internal_assay_id == assay_id)]
+    assert len(hit) == 1, f"expected exactly one ({sample_id}, {assay_id}) row"
+    return hit.iloc[0]
+
+
+def test_world_3_carries_exactly_the_cells_and_rates_its_docstring_states():
+    """The fixture's own table, read off the world instead of trusted.
+
+    THE ONE TEST THAT CAN FAIL A STALE `_world3` DOCSTRING, for the reason
+    `test_the_fixture_world_carries_exactly_the_populations_its_docstring_states`
+    exists one world over: every other test here asserts a band or a step that
+    the docstring merely explains, so the explanation can drift from the data
+    without a single failure -- and in `_world2` it did, twice.
+
+    The RATES are derived here and not stated in the docstring, because their
+    denominator is the whole of `pop(TIS, 11)` and grows with any TIS sample
+    added to 11 for an unrelated reason. What the docstring states is which side
+    of a boundary each rate falls on, and that is what is asserted.
+    """
+    w = _world3()
+    cells = G.type_registration_index(w["membership"], w["assays"], w["nodes"])
+    assert cells == {
+        ("TIS", 11): 45, ("TIS", 12): 32, ("TIS", 13): 35, ("TIS", 14): 10,
+        ("MUS", 11): 5, ("MUS", 12): 5,
+        ("A.SPC", 16): 1, ("D.SPC", 15): 2,
+    }
+    # the cell the whole (700,15) case rests on is ABSENT rather than zero,
+    # which is what makes its claim GATE_UNREACHABLE
+    assert ("A.SPC", 15) not in cells
+
+    table = CP.co_registration(w["membership"], w["assays"], w["nodes"])
+    routine = table[("TIS", 11, 12)]
+    never = table[("TIS", 11, 13)]
+    sometimes = table[("TIS", 11, 14)]
+    no_support = table[("MUS", 11, 12)]
+    assert CP.compat_band(*routine) == S.BAND_ROUTINE
+    assert CP.compat_band(*never) == S.BAND_NEVER
+    assert CP.compat_band(*sometimes) == S.BAND_SOMETIMES
+    assert CP.compat_band(*no_support) == S.BAND_NO_SUPPORT
+    # ...and all four are genuinely different bands, so a world where the band
+    # never moves cannot pass this file
+    assert len({CP.compat_band(*c) for c in
+                (routine, never, sometimes, no_support)}) == 4
+    # the zero is MEASURED and the unread one is not: both rates are 0.0 and
+    # only the support tells them apart, which is the distinction
+    # `BAND_NO_SUPPORT` exists for
+    assert never[0] == no_support[0] == 0.0
+    assert never[1] >= S.MIN_CO_REG_SUPPORT > no_support[1]
+
+
+def test_the_precedence_is_a_declared_order_and_every_adjacent_swap_moves_a_key():
+    """`PRECEDENCE` is data, and reordering it changes a measured answer.
+
+    THE POINT OF THE TASK, in one test. An `if` chain in `precedence_step` would
+    encode the same order and could be reordered by a later edit with nothing
+    failing; a declared tuple that three of its four adjacent swaps demonstrably
+    move cannot.
+
+    The fourth swap moves nothing, and that is the finding rather than a gap:
+    `PRE_MODE_3` claims no key under any evidence at all, because Mode 3 has no
+    detector. The exhaustive check below proves that over all sixteen possible
+    evidence tuples rather than over this world's ten.
+    """
+    _, parts = _pipeline3()
+    keys = parts["keys"]
+    assert X.PRECEDENCE == (X.PRE_GATE, X.PRE_MODE_1, X.PRE_LINEAGE,
+                            X.PRE_COMPAT, X.PRE_MODE_3)
+    assert len(set(X.PRECEDENCE)) == len(X.PRECEDENCE) == 5
+
+    moved = []
+    for i in range(len(X.PRECEDENCE) - 1):
+        wrong = list(X.PRECEDENCE)
+        wrong[i], wrong[i + 1] = wrong[i + 1], wrong[i]
+        n = sum(1 for e in keys.values()
+                if X.precedence_step(e) != X.precedence_step(e, tuple(wrong)))
+        moved.append(n)
+    # GATE over MODE 1, MODE 1 over LINEAGE, LINEAGE over COMPAT, and the fourth
+    assert moved == [1, 1, 1, 0], moved
+
+    # ...and each of the three is a NAMED key rather than an anonymous count
+    assert _key_step(parts, 730, 15) == X.PRE_GATE
+    assert _key_step(parts, 710, 12) == X.PRE_MODE_1
+    assert _key_step(parts, 720, 12) == X.PRE_LINEAGE
+
+    # MODE 3 CLAIMS NO KEY UNDER ANY EVIDENCE. Sixteen tuples, exhaustively, so
+    # this is a proof rather than an observation about one world.
+    reached = set()
+    for bits in range(16):
+        e = X.Evidence(*(bool(bits >> b & 1) for b in range(4)))
+        if e.claim_reaches and not e.claim:
+            continue                      # not a state the input can produce
+        try:
+            reached.add(X.precedence_step(e))
+        except ValueError:
+            reached.add(None)             # no evidence at all: not an input key
+    assert X.PRE_MODE_3 not in reached
+    assert reached == {None, X.PRE_GATE, X.PRE_MODE_1, X.PRE_LINEAGE,
+                       X.PRE_COMPAT}
+
+
+def test_a_gate_rejected_claim_reaches_no_mode_even_when_a_lineage_neighbour_carries_the_pair():
+    """The regression for the third design error. (700,15) is the 24's shape.
+
+    Measured over the real extract: all 24 of the FlowJo and mass-spectra flags
+    the spec names ARE lineage candidates -- a D.FLOW or D.SPC data parent
+    registers the measurement assay the analysis child claims -- so under
+    increment 1's precedence, where lineage fired first and nothing tested the
+    vocabulary, all 24 were filed `ABSENCE_LINEAGE` and routed to Mode 2 as
+    write candidates. `mode3-disposition.csv` files them inside the 351.
+
+    Under this precedence the gate claims the key outright and it reaches no
+    mode: no row is emitted for it at all. That is stronger than leaving the
+    claim block null on a row the neighbour justifies, and it is what the
+    spec asks for -- the 24 must be pulled out BY THE VOCABULARY GATE and not
+    by the lineage test.
+
+    The wrong rule -- lineage first, the gate consulted afterwards or not at all
+    -- is run by hand and asserted to give a DIFFERENT answer.
+    """
+    _, parts = _pipeline3()
+    findings, attached = parts["findings"], parts["attached"]
+
+    # the claim exists, names 15, and the gate rejects it on REACHABILITY: no
+    # A.SPC sample is registered in 15 anywhere
+    claim = attached[(attached.sample_id == 700)
+                     & (attached.internal_assay_id == 15)]
+    assert len(claim) == 1
+    assert claim.iloc[0].gate == S.GATE_UNREACHABLE
+    assert G.blocks_mode(claim.iloc[0].gate)
+
+    # ...and a lineage neighbour DOES carry the pair, so this is the "even when"
+    assert (700, 15) in set(parts["candidates"])
+    assert X.Evidence(True, False, False, True) == parts["keys"][(700, 15)]
+
+    # the key is the gate's, and NOTHING is emitted for it
+    assert _key_step(parts, 700, 15) == X.PRE_GATE
+    assert len(findings[(findings.sample_id == 700)
+                        & (findings.proposed_internal_assay_id == 15)]) == 0
+    # nor does the raw value that produced it reach any row anywhere
+    assert "spectra" not in set(findings.raw_value.dropna())
+
+    # THE WRONG RULE, run by hand: lineage before the gate. The lineage LANE
+    # offers the row, and only the precedence refuses it.
+    lineage_lane = parts["lanes"][X.PRE_LINEAGE]
+    offered = lineage_lane[(lineage_lane.sample_id == 700)
+                           & (lineage_lane.proposed_internal_assay_id == 15)]
+    assert len(offered) == 1, "the lane must offer it or this proves nothing"
+    assert offered.iloc[0]["mode"] == S.MODE_2
+    assert offered.iloc[0].classification == S.CLS_ABSENCE_LINEAGE
+    wrong = list(X.PRECEDENCE)
+    wrong[0], wrong[2] = wrong[2], wrong[0]
+    assert X.precedence_step(parts["keys"][(700, 15)],
+                             tuple(wrong)) == X.PRE_LINEAGE
+
+
+def test_a_row_corroborated_by_lineage_is_mode_2_and_carries_no_error_class():
+    """(720,12): a neighbour holds it, so the absence is a missing registration.
+
+    `CLS_ABSENCE_LINEAGE` and not any contradiction class, and the distinction
+    is the operator's first correction: a PAV sample with tissue collected from
+    it belongs in Patient Visit AND Tissue Collection, one incoming and one
+    outgoing, so the absence of the second is a registration to add.
+
+    The row also outranks the compatibility lane, which is the third adjacent
+    swap: 720 is registered, carries a gate-passing claim and has a neighbour,
+    so both LINEAGE and COMPAT want the key.
+    """
+    _, parts = _pipeline3()
+    row = _found(parts["findings"], 720, 12)
+
+    assert _key_step(parts, 720, 12) == X.PRE_LINEAGE
+    assert row["mode"] == S.MODE_2
+    assert row.classification == S.CLS_ABSENCE_LINEAGE
+    assert row.classification in S.CLASSES
+    assert row.action == S.A_ADD_CHILD
+    assert row.lineage == S.LIN_PARENT
+    # the claim agrees, so the row says BOTH pieces of evidence produced it
+    assert row.proposed_by == M2.BY_BOTH
+    # ...and the co-registration test never ran, so it asserts nothing
+    assert pd.isna(row.compat_band) and pd.isna(row.co_reg_rate)
+
+    # THE WRONG RULE: compatibility before lineage. The pair `(TIS, 11, 12)`
+    # bands ROUTINE, so the row would read CLS_ABSENCE_COMPAT and lose the
+    # neighbour that actually settles it.
+    wrong = list(X.PRECEDENCE)
+    wrong[2], wrong[3] = wrong[3], wrong[2]
+    assert X.precedence_step(parts["keys"][(720, 12)],
+                             tuple(wrong)) == X.PRE_COMPAT
+    assert CP.compat_band(*parts["table"][("TIS", 11, 12)]) == S.BAND_ROUTINE
+
+
+def test_a_zero_co_registration_row_on_a_reachable_pair_is_an_alternative_label_and_proposes_nothing():
+    """(601,13): 13 is reachable for TIS and never once coexists with 11.
+
+    This is the operator's SECOND correction. 45 of the 51 flags that survived
+    increment 1's two tests are this: D.IMG images sit in 127 Tissue Imaging or
+    in 145 Histopathology and never in both, because a curator picks one, and
+    145 D.IMG samples are registered in Histopathology. Two names for one thing
+    is not an error, so the row proposes NOTHING -- no mode, no action, and no
+    proposal source, because nothing proposed it.
+
+    THE ZERO IS MEASURED AND THE ROW SAYS OVER WHAT. `co_reg_pop` rides beside
+    `co_reg_rate` for the reason `BAND_NO_SUPPORT` exists: a rate of 0.000 over
+    four samples is noise and would manufacture this finding out of an empty
+    population.
+    """
+    _, parts = _pipeline3()
+    row = _found(parts["findings"], 601, 13)
+
+    assert _key_step(parts, 601, 13) == X.PRE_COMPAT
+    assert row.compat_band == S.BAND_NEVER
+    assert row.classification == S.CLS_ALT_LABEL
+    assert row.co_reg_rate == 0.0
+    assert row.co_reg_pop >= S.MIN_CO_REG_SUPPORT
+    assert row.co_reg_registered_internal_assay_id == 11
+
+    # proposes nothing, and every column that would say otherwise is empty
+    assert pd.isna(row["mode"])
+    assert row.action == S.A_NONE
+    assert pd.isna(row.proposed_by)
+    # the lineage test RAN and found nothing, which is LIN_NONE and not null
+    assert row.lineage == S.LIN_NONE
+    assert row.lineage_n_supports == 0
+
+    # THE WRONG RULE: reading a zero as a contradiction. That is what increment
+    # 1 did and what `measure_absence_vs_contradiction.py` still does; the rate
+    # is identical and only the LABEL changed.
+    assert S.CLS_ALT_LABEL in S.CLASSES
+    assert "CONTRADICTION" not in S.CLASSES
+    assert CP.band_establishes(S.BAND_NEVER) == S.CLS_ALT_LABEL
+
+
+def test_cls_unresolved_is_its_own_class_and_is_folded_into_no_mode():
+    """(602,14) and (200,12): two BANDS, one CLASS, and neither reaches a mode.
+
+    `BAND_SOMETIMES` and `BAND_NO_SUPPORT` are different findings -- "they
+    coexist sometimes" against "the population was too small to read" -- and
+    both establish that neither test settles the row. `CLS_UNRESOLVED` is
+    reported at its own size rather than banded into a mode, because silently
+    absorbing what the pipeline cannot classify is how a bucket ends up named
+    for what someone assumed was in it, which has happened three times on this
+    branch.
+    """
+    _, parts = _pipeline3()
+    sometimes = _found(parts["findings"], 602, 14)
+    unread = _found(parts["findings"], 200, 12)
+
+    assert sometimes.compat_band == S.BAND_SOMETIMES
+    assert unread.compat_band == S.BAND_NO_SUPPORT
+    assert sometimes.compat_band != unread.compat_band
+    for row in (sometimes, unread):
+        assert row.classification == S.CLS_UNRESOLVED
+        assert pd.isna(row["mode"])
+        assert row.action == S.A_NONE
+        assert pd.isna(row.proposed_by)
+
+    # the unread one carries its population so the reader can see WHY it is
+    # unread, rather than being told a rate of zero
+    assert unread.co_reg_rate == 0.0
+    assert unread.co_reg_pop < S.MIN_CO_REG_SUPPORT
+    # ...and it is NOT the alternative-label finding, which is the whole reason
+    # `_schema` declares the two bands apart
+    assert unread.classification != S.CLS_ALT_LABEL
+
+    census = parts["census"]
+    assert census["rows_cls_unresolved"] == 2
+    assert census["rows_no_mode"] == 3
+
+
+def test_a_routinely_coexisting_pair_is_a_mode_2_candidate_and_says_it_is_unproven():
+    """(600,12): the pair coexists, so the absence is the anomaly. Unproven.
+
+    The spec routes this class to "Mode 2 candidate, unproven" -- 250 of the
+    866 -- and unproven is the operative word: there is no neighbour and so no
+    hop, which means there is no precedent rate behind it at all. The precedent
+    block is NULL rather than zero, on the same rule Mode 2 applies to a hop
+    with no rule: 0.000 is a measured rate and a null means nobody measured.
+    """
+    _, parts = _pipeline3()
+    row = _found(parts["findings"], 600, 12)
+
+    assert _key_step(parts, 600, 12) == X.PRE_COMPAT
+    assert row.compat_band == S.BAND_ROUTINE
+    assert row.classification == S.CLS_ABSENCE_COMPAT
+    assert row["mode"] == S.MODE_2
+    assert row.action == S.A_ADD_TO_ASSAY
+    assert row.proposed_by == X.BY_CLAIM
+    assert row.co_reg_rate >= S.CO_OCCUR_BAND
+    assert row.co_reg_registered_internal_assay_id == 11
+
+    # UNPROVEN: no hop, so no precedent, and the whole block is null
+    for col in ("precedent_rate", "precedent_direction", "precedent_n_both",
+                "precedent_n_child_only", "precedent_n_parent_only",
+                "lineage_neighbour_uuid"):
+        assert pd.isna(row[col]), col
+    assert row.lineage == S.LIN_NONE
+    assert "no lineage neighbour" in row.evidence_summary
+
+    # ...and the claim that produced it rides on the row, because the claim IS
+    # the proposal here
+    assert row.source_field == "Type" and row.raw_value == "alpha"
+    assert row.gate == S.GATE_PASS
+
+
+def test_mode_3_emits_zero_rows_because_no_detector_exists():
+    """Not small. UNDETECTED. The two are different findings and only one is true.
+
+    The operator's Mode 3 is "what samples have INCORRECT assays". The detector
+    built for it in increment 1 finds claims that disagree with registrations,
+    and measurement showed that population is alternative labels and vocabulary
+    defects with approximately zero genuine mis-registrations: of increment 1's
+    866 flags, 43 are gate rejects, 326 are lineage absences, 247 routinely
+    coexist, 205 are unresolved and 45 are alternative labels. Metadata
+    disagreeing with a registration is simply not evidence that the registration
+    is wrong.
+
+    So Mode 3 is what SURVIVES the subtraction, and nothing does. The frame is
+    empty and carries the full contract, because Task 9's report has to name the
+    mode in order to say it found nothing -- a mode absent from the artifact
+    reads as a mode nobody ran.
+    """
+    _, parts = _pipeline3()
+    findings = parts["findings"]
+
+    empty = X.mode3_findings()
+    assert len(empty) == 0
+    assert list(empty.columns) == S.FINDING_COLUMNS
+
+    assert len(findings[findings["mode"] == S.MODE_3]) == 0
+    assert parts["census"]["rows_mode_3"] == 0
+    assert parts["census"]["keys_mode_3"] == 0
+
+    # the mode is NAMED and never emitted, which is the ruling `_schema` records
+    assert S.MODE_3 in S.MODES
+    assert S.MODE_3 not in S.EMITTED_MODES
+    assert set(findings["mode"].dropna()) <= set(S.EMITTED_MODES)
+
+    # NO DETECTOR EXISTS, asserted off the source rather than off the output: a
+    # zero row count is also what a detector that ran and found nothing looks
+    # like, and those are the two findings this test exists to keep apart.
+    src = "\n".join(_stage_c_sources().values())
+    assert not re.findall(r"^def mode3_\w*detect", src, re.M)
+    body = src.split("def mode3_findings")[1].split("\ndef ")[0]
+    assert "no detector" in body
+
+
+def test_the_classes_partition_every_claim_backed_absence_and_every_lineage_pair():
+    """THE INPUT, defined: every (sample, assay) ABSENCE key from either source.
+
+    A key is in the input when the sample is NOT registered in the assay AND
+    either a metadata claim names the pair or a lineage neighbour registers it.
+    A claim naming an assay the sample already holds is an absence of nothing
+    and is in no key; 123,439 claims on the real extract are that shape, which
+    is 89% of the 138,007, and they are counted by name rather than dropped.
+
+    Every key gets exactly one step, the five steps sum to the input, and the
+    two that emit nothing -- `PRE_GATE` and `PRE_MODE_3` -- are the difference
+    between the input and the emitted rows. Every emitted row gets exactly one
+    classification or an explicit null, and those sum to the rows.
+    """
+    _, parts = _pipeline3()
+    keys, steps, findings, census = (parts["keys"], parts["steps"],
+                                     parts["findings"], parts["census"])
+
+    # THE INPUT, re-derived here from the two sources rather than taken
+    from_claims = {
+        (int(r.sample_id), int(r.internal_assay_id))
+        for r in parts["attached"].itertuples(index=False)
+        if int(r.internal_assay_id) not in parts["registered"].get(
+            int(r.sample_id), set())
+    }
+    from_lineage = set(parts["candidates"])
+    assert set(keys) == from_claims | from_lineage
+    assert len(keys) == 10
+    assert (620, 11) not in keys, "an absence of nothing is not an input key"
+
+    counts = Counter(steps.values())
+    assert dict(counts) == {X.PRE_GATE: 2, X.PRE_MODE_1: 1,
+                            X.PRE_LINEAGE: 3, X.PRE_COMPAT: 4}
+    assert sum(counts.values()) == len(keys) == census["input_keys"]
+    assert set(counts) <= set(X.PRECEDENCE)
+
+    # the emitted rows are the input minus the two steps that emit nothing
+    assert len(findings) == len(keys) - counts[X.PRE_GATE] == 8
+    assert census["rows"] == len(findings)
+    assert (census["input_keys"] - census["keys_refused_by_the_gate"]
+            - census["keys_mode_3"]) == census["rows"]
+
+    # ...and the modes partition the rows
+    assert (census["rows_mode_1"] + census["rows_mode_2"]
+            + census["rows_mode_3"] + census["rows_no_mode"]) == census["rows"]
+    assert (census["rows_mode_1"], census["rows_mode_2"],
+            census["rows_mode_3"], census["rows_no_mode"]) == (1, 4, 0, 3)
+
+    # ...and the CLASSES partition them too, with the unclassified counted
+    by_class = Counter(findings.classification.dropna())
+    assert dict(by_class) == {S.CLS_ABSENCE_LINEAGE: 3, S.CLS_ABSENCE_COMPAT: 1,
+                              S.CLS_ALT_LABEL: 1, S.CLS_UNRESOLVED: 2}
+    assert set(by_class) <= set(S.CLASSES)
+    assert (sum(by_class.values())
+            + census["rows_without_a_classification"]) == census["rows"]
+    assert census["rows_without_a_classification"] == 1   # Mode 1 asserts none
+
+
+def test_mode_1_takes_a_key_a_lineage_neighbour_also_offers_and_the_refusal_is_counted():
+    """(710,12) is wanted by two lanes, and nothing is dropped silently.
+
+    A sample registered in NOTHING can still hang off a neighbour that holds
+    something, so Mode 1's population and Mode 2's ceiling genuinely overlap:
+    2,405 of Mode 1's 6,242 samples reach a Mode 2 row on the real extract, and
+    753 (sample, assay) keys are wanted by both lanes. Adding a sample to an
+    assay is ONE membership write whichever lane argues for it, so one row is
+    emitted -- and the lane that lost is counted by name rather than being
+    quietly absent from a census that still reports the ceiling.
+    """
+    _, parts = _pipeline3()
+    row = _found(parts["findings"], 710, 12)
+
+    assert _key_step(parts, 710, 12) == X.PRE_MODE_1
+    assert row["mode"] == S.MODE_1
+    assert row.action == S.A_ADD_TO_ASSAY
+    assert row.proposed_by == X.BY_CLAIM
+    # Mode 1 asserts nothing about the tests it never ran, and that is unchanged
+    # by the unified pass: a null here can still be FILLED by a later task
+    # without contradicting a shipped value
+    assert pd.isna(row.classification) and pd.isna(row.lineage)
+
+    # both lanes offered the key
+    lineage_lane = parts["lanes"][X.PRE_LINEAGE]
+    assert len(lineage_lane[(lineage_lane.sample_id == 710)
+                            & (lineage_lane.proposed_internal_assay_id == 12)]) == 1
+    census = parts["census"]
+    assert census["lineage_taken_by_mode_1"] == 1
+    assert census["lineage_ceiling_offered"] == len(lineage_lane) == 6
+    assert (census["keys_lineage"] + census["lineage_refused_by_the_gate"]
+            + census["lineage_taken_by_mode_1"]) == census["lineage_ceiling_offered"]
+    # (700,15) and (730,15) -- a DIFFERENT number from the one above, so a rule
+    # that confused the two refusals could not pass this world
+    assert census["lineage_refused_by_the_gate"] == 2
+    assert census["lineage_refused_by_the_gate"] != census["lineage_taken_by_mode_1"]
+    # the two routes to the same population agree
+    assert census["keys_from_lineage"] == census["lineage_ceiling_offered"]
+
+
+def test_a_claim_agreeing_with_a_registration_proposes_nothing_and_is_counted_by_name():
+    """620 claims 11 and holds 11. There is no absence, so there is no key.
+
+    Nothing is dropped silently: the excluded pairs are returned by name, not
+    merely counted, following `registered_samples_absent_from_samples` and
+    `gate.untyped_registration_samples`. On the real extract this is 123,439 of
+    the 138,007 attached claims -- the single largest exclusion in stage C, and
+    the one whose silent growth would shrink every mode at once.
+    """
+    _, parts = _pipeline3()
+
+    agreeing = X.claims_agreeing_with_a_registration(parts["attached"],
+                                                     parts["registered"])
+    assert (620, 11) in agreeing
+    assert agreeing == sorted(agreeing), "the artifact must be stable across runs"
+    assert parts["census"]["claims_agreeing_with_a_registration"] == len(agreeing)
+
+    # ...and every one of them really does hold what it claims, read off the
+    # registrations rather than trusted
+    for sample_id, assay_id in agreeing:
+        assert assay_id in parts["registered"][sample_id]
+    # ...while no input key does
+    for sample_id, assay_id in parts["keys"]:
+        assert assay_id not in parts["registered"].get(sample_id, set())
+
+
+def test_the_unified_frame_is_the_shared_contract_totally_sorted_and_one_row_per_proposal():
+    """One row per (sample, proposed assay), whichever lane produced it.
+
+    THE KEY IS THE WRITE. Adding sample S to assay X is one membership row
+    however many lanes argue for it, so a curator reading `findings.csv` must
+    never meet the same proposal twice under two modes -- and the precedence is
+    what guarantees they do not.
+
+    Sorted on `(sample_id, proposed_internal_assay_id)`, a TOTAL order on this
+    output, because a curator diffs this artifact between runs and the three
+    lanes arrive in three different orders.
+    """
+    _, parts = _pipeline3()
+    findings = parts["findings"]
+
+    assert list(findings.columns) == S.FINDING_COLUMNS
+    assert len(S.FINDING_COLUMNS) == 36
+    keys = list(zip(findings.sample_id, findings.proposed_internal_assay_id))
+    assert len(keys) == len(set(keys))
+    assert keys == sorted(keys)
+    assert list(findings.index) == list(range(len(findings)))
+
+    # ...and the sort is not a no-op: the lanes really do arrive out of order
+    unsorted = pd.concat(
+        [parts["lanes"][s] for s in (X.PRE_MODE_1, X.PRE_LINEAGE, X.PRE_COMPAT)],
+        ignore_index=True)
+    raw = list(zip(unsorted.sample_id, unsorted.proposed_internal_assay_id))
+    assert raw != sorted(raw), "the lanes must arrive unsorted or this is vacuous"
+
+
+def test_a_lane_that_drops_or_duplicates_a_key_the_precedence_granted_it_fails_loudly():
+    """`unify_findings` asserts the partition rather than trusting the lanes.
+
+    TWO LANES OVER-OFFER BY DESIGN and one cannot. `mode1_findings` and
+    `mode2.mode2_findings` are CEILING emitters with their own published
+    figures, so they hand over every row their own rule produces and the
+    precedence FILTERS them -- 5 lineage rows offered here against 3 emitted.
+    The compatibility lane is built from `steps` and can only offer its own.
+
+    So a foreign key is filtered silently and correctly, and what must NOT be
+    silent is the other direction: a lane that fails to produce a row for a key
+    the precedence granted it, or that produces two. The first would leave a
+    proposal in no artifact at all, and the second would put one membership
+    write in front of a curator twice -- and both look, in a row count, exactly
+    like a slightly different population.
+    """
+    _, parts = _pipeline3()
+    steps, lanes = parts["steps"], dict(parts["lanes"])
+
+    # the ceiling lanes over-offer, and that is filtered rather than refused
+    assert len(lanes[X.PRE_LINEAGE]) == 6
+    assert len(parts["findings"][parts["findings"]["mode"] == S.MODE_2]) == 4
+    assert len(lanes[X.PRE_MODE_1]) == 1
+
+    # A LANE THAT DROPS ONE OF ITS OWN KEYS
+    short = dict(lanes)
+    short[X.PRE_COMPAT] = lanes[X.PRE_COMPAT].iloc[1:]
+    with pytest.raises(AssertionError, match="reach no row"):
+        X.unify_findings(steps, short)
+
+    # A LANE THAT EMITS ONE OF ITS OWN KEYS TWICE
+    doubled = dict(lanes)
+    doubled[X.PRE_COMPAT] = pd.concat(
+        [lanes[X.PRE_COMPAT], lanes[X.PRE_COMPAT].iloc[:1]], ignore_index=True)
+    with pytest.raises(AssertionError, match="twice"):
+        X.unify_findings(steps, doubled)
+
+    # ...and a lane keyed on a step that is not in the precedence at all, which
+    # would drop a whole mode and read exactly like a mode that found nothing
+    with pytest.raises(ValueError, match="PRECEDENCE"):
+        X.unify_findings(steps, {"PRE_INVENTED": lanes[X.PRE_COMPAT]})
+
+
+def test_the_disposition_carries_every_prior_flag_with_the_step_that_now_claims_it():
+    """Increment 1's output is superseded traceably rather than deleted.
+
+    Every flag it raised is re-emitted with `prior_verdict` beside the step and
+    classification this run gives it, so a curator who reviewed the 866 can see
+    what changed and why in the same row. The file is keyed by CLAIM, which is
+    what a flag is, while `findings.csv` is keyed by PROPOSAL -- so a flag the
+    gate refused has a disposition row and no finding row, which is precisely
+    the fact the file exists to carry.
+    """
+    w, parts = _pipeline3()
+    flags = A.audit_contradictions(
+        C.sample_claims(V.parse_metadata(w["samples"]),
+                        dict(zip(w["samples"].sample_id.astype(int),
+                                 w["samples"].uuid)),
+                        w["vocabulary"]),
+        w["membership"], w["assays"], w["nodes"])
+    assert len(flags) > 0, "the world must raise flags or this proves nothing"
+
+    out = X.mode3_disposition(flags, parts["steps"], parts["findings"],
+                              parts["attached"])
+    assert list(out.columns) == X.DISPOSITION_COLUMNS
+    assert len(out) == len(flags)
+    assert set(out.prior_verdict) == {S.V_MODE3_FLAG}
+    assert set(out.precedence_step) <= set(X.PRECEDENCE)
+    # NOT ONE of them is a Mode 3 row, which is the whole finding
+    assert not (set(out["mode"].dropna()) & {S.MODE_3})
+
+    # a gate-refused flag has a step and no finding, and says why
+    refused = out[out.precedence_step == X.PRE_GATE]
+    assert len(refused) >= 1
+    assert set(refused.gate) <= set(S.GATE_REJECTIONS)
+    assert refused.classification.isna().all()
+    assert refused["mode"].isna().all()
+
+    # ...and a flag that reached a row carries that row's own classification,
+    # read off `findings` rather than recomputed
+    for r in out[out.precedence_step != X.PRE_GATE].itertuples(index=False):
+        row = _found(parts["findings"], r.sample_id,
+                     r.claimed_internal_assay_id)
+        assert r.classification == row.classification or (
+            pd.isna(r.classification) and pd.isna(row.classification))
+        assert r.evidence_summary == row.evidence_summary
+
+
+def test_the_proposal_source_refusal_fires_under_a_reduced_rule_set():
+    """The guard has held on the real extract by luck of the data. Not here.
+
+    `_proposal_source` refuses the (no precedent rule, gated claim) combination
+    because no honest value exists for it, and that combination occurs 0 times
+    on the 2026-08-17 extract -- so every test of the raise until now had to
+    CONSTRUCT it by adding a claim. Task 7's backtest measured the same
+    combination arising 6, 4 and 23 times at its 20%, seed-7 and 50% hold-outs,
+    because a backtest mines its rules from TRAINING edges alone and a reduced
+    rule set is exactly what makes a hop rule-less.
+
+    So the guard is exercised from the other direction here: the claim stays put
+    and the RULE is removed, which is what any caller mining precedent over a
+    subset does.
+    """
+    w = _world3()
+    # (720,12) is the one row in this world that is both claim-backed and
+    # lineage-backed, and (10, TIS, TIS, 12) is the rule it reads
+    full = M2.precedent_rules(w["precedent"])
+    assert (10, "TIS", "TIS", 12) in full, "the fixture must carry the rule"
+    _, parts = _pipeline3(w)
+    assert _found(parts["findings"], 720, 12).proposed_by == M2.BY_BOTH
+
+    reduced = w["precedent"][
+        ~((w["precedent"].child_type == "TIS")
+          & (w["precedent"].parent_type == "TIS")
+          & (w["precedent"].internal_assay_id == 12))]
+    assert len(reduced) == len(w["precedent"]) - 1
+    w2 = dict(w, precedent=reduced)
+    with pytest.raises(ValueError, match="fifth member"):
+        _pipeline3(w2)
+
+
+def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness():
+    """Every figure the unified pass states, re-derived from the parquet.
+
+    THE INPUT IS 180,995 KEYS AND NOT 172,338 OR 138,007. It is the union of
+    every claim-backed absence with the whole lineage ceiling, and neither
+    number alone is it: 123,439 of the 138,007 attached claims name an assay the
+    sample already holds and raise no key at all.
+
+    THE MODE 2 COUNT IN `findings.csv` IS SMALLER THAN THE CEILING AND THE GAP
+    IS THE PRECEDENCE. The lineage lane offers 172,338 rows; the gate refuses
+    4,255 of them because a rejected claim names the same pair, and Mode 1 takes
+    753 more because the sample is registered in nothing and its own metadata
+    proposes the assay. Both are counted here rather than inferred from a
+    difference.
+
+    MODE 3 EMITS NOTHING and the 866 flags increment 1 raised are re-disposed:
+    43 gate rejects, 326 lineage absences, 247 routinely-coexisting pairs, 205
+    unresolved and 45 alternative labels. Not one is a contradiction.
+    """
+    r = _real2()
+    type_reg = G.type_registration_index(r["membership"], r["assays"], r["nodes"])
+    gated = G.gate_claims(r["claims"], r["vocabulary"], type_reg,
+                          G.sample_type_index(r["nodes"]))
+    attached = X.attach_gate(r["claims"], gated)
+    registered = A.registered_internal(r["membership"], r["assays"])
+    population = X.unregistered_samples(r["samples"], r["membership"],
+                                        r["assays"])
+    children_of, parents_of, uuid_of, _ = L.lineage_index(
+        r["edges"], r["samples"], r["membership"])
+    candidates = M2.mode2_candidates(children_of, parents_of, registered)
+    projects = X.project_index(r["samples"])
+    titles = M2.assay_titles(r["assays"])
+    table = CP.co_registration(r["membership"], r["assays"], r["nodes"])
+
+    keys = X.absence_keys(attached, population=population,
+                          registered=registered, candidates=candidates)
+    steps = X.precedence_steps(keys)
+    counts = Counter(steps.values())
+    assert len(keys) == 180995
+    assert counts[X.PRE_GATE] == 4567
+    assert counts[X.PRE_MODE_1] == 2166
+    assert counts[X.PRE_LINEAGE] == 167330
+    assert counts[X.PRE_COMPAT] == 6932
+    assert counts[X.PRE_MODE_3] == 0
+    assert sum(counts.values()) == len(keys)
+
+    # THE PRECEDENCE IS LOAD-BEARING ON THIS DATA, not only on the fixture
+    moved = []
+    for i in range(len(X.PRECEDENCE) - 1):
+        wrong = list(X.PRECEDENCE)
+        wrong[i], wrong[i + 1] = wrong[i + 1], wrong[i]
+        moved.append(sum(1 for e in keys.values()
+                         if X.precedence_step(e)
+                         != X.precedence_step(e, tuple(wrong))))
+    assert moved == [746, 753, 903, 0]
+
+    # ...and the THREE FIGURES THE MODULE DOCSTRING STATES are those same
+    # measured values, read out of the source rather than eyeballed. Task 6
+    # closed the identical gap for `main`'s printed sentence and it reopened
+    # here: a hard-coded figure in a docstring with no test behind it is the
+    # same class as the stale fixture docstring this branch has already paid
+    # for twice. The source is normalised first, since the sentence is wrapped
+    # across three literals.
+    flat = re.sub(r"\s+", " ", (PACKAGE / "classify.py").read_text())
+    claim = re.search(
+        r"([\d,]+) input keys: GATE with MODE 1 moves ([\d,]+) keys, MODE 1 "
+        r"with LINEAGE ([\d,]+), LINEAGE with COMPAT ([\d,]+)", flat)
+    assert claim is not None, "the docstring sentence changed shape; re-pin it"
+    stated = [int(g.replace(",", "")) for g in claim.groups()]
+    assert stated == [len(keys)] + moved[:3] == [180995, 746, 753, 903]
+
+    m1 = X.mode1_findings(attached, population, projects)
+    m2 = M2.mode2_findings(
+        attached, children_of=children_of, parents_of=parents_of,
+        uuid_of=uuid_of, registered=registered,
+        rules=M2.precedent_rules(
+            P.mine_precedent(r["edges"], r["membership"], r["assays"])),
+        reg_projects=M2.registration_projects(r["membership"], r["assays"]),
+        types=G.sample_type_index(r["nodes"]), type_reg=type_reg,
+        titles=titles, projects=projects)
+    compat = X.compat_findings(attached, steps=steps, registered=registered,
+                               table=table, titles=titles, projects=projects)
+    lanes = {X.PRE_MODE_1: m1, X.PRE_LINEAGE: m2, X.PRE_COMPAT: compat,
+             X.PRE_MODE_3: X.mode3_findings()}
+    findings = X.unify_findings(steps, lanes)
+    agreeing = X.claims_agreeing_with_a_registration(attached, registered)
+    census = X.findings_census(keys, steps, findings, lanes, agreeing=agreeing)
+
+    assert census["claims_agreeing_with_a_registration"] == 123439
+    assert len(attached) == 138007
+    assert census["rows"] == len(findings) == 176428
+    assert census["rows_mode_1"] == 2166
+    assert census["rows_mode_2"] == 168074 == 167330 + 744
+    assert census["rows_mode_3"] == 0
+    assert census["rows_no_mode"] == 6188
+    assert census["rows_cls_absence_lineage"] == 167330
+    assert census["rows_cls_absence_compat"] == 744
+    assert census["rows_cls_alt_label"] == 5181
+    assert census["rows_cls_unresolved"] == 1007
+    assert census["rows_without_a_classification"] == 2166
+
+    # THE CEILING IS A CEILING, and the precedence takes 5,008 off it
+    assert census["lineage_ceiling_offered"] == 172338
+    assert census["lineage_refused_by_the_gate"] == 4255
+    assert census["lineage_taken_by_mode_1"] == 753
+    assert census["keys_lineage"] == 172338 - 4255 - 753
+    assert census["keys_from_lineage"] == census["lineage_ceiling_offered"]
+    assert census["keys_from_a_claim"] == 14568 == 138007 - 123439
+
+    # ONE ROW PER PROPOSAL over the whole extract, which is what makes the
+    # artifact safe for a curator to approve row by row
+    pairs = list(zip(findings.sample_id, findings.proposed_internal_assay_id))
+    assert len(set(pairs)) == len(pairs)
+
+    # --- the 866, re-disposed -------------------------------------------------
+    flags = A.audit_contradictions(r["claims"], r["membership"], r["assays"],
+                                   r["nodes"])
+    assert len(flags) == 866
+    disposition = X.mode3_disposition(flags, steps, findings, attached)
+    assert len(disposition) == 866
+    lane = Counter(
+        s if s != X.PRE_COMPAT else c
+        for s, c in zip(disposition.precedence_step, disposition.classification))
+    assert lane[X.PRE_GATE] == 43
+    assert lane[X.PRE_LINEAGE] == 326
+    assert lane[S.CLS_ABSENCE_COMPAT] == 247
+    assert lane[S.CLS_UNRESOLVED] == 205
+    assert lane[S.CLS_ALT_LABEL] == 45
+    assert sum(lane.values()) == 866
+    assert lane[X.PRE_MODE_1] == 0, "a flagged sample is registered by definition"
+    assert not (set(disposition["mode"].dropna()) & {S.MODE_3})
+
+    # THE 24, which increment 1 filed inside its 351 ABSENCE_LINEAGE and which
+    # the spec says must be pulled out BY THE VOCABULARY GATE. All 24 are
+    # lineage candidates -- a D.FLOW or D.SPC data parent registers the
+    # measurement assay -- so the gate is the only thing that can stop them.
+    twenty_four = flags[
+        ((flags.sample_type == "A.FLOW") & (flags.claimed_internal_assay_id == 30))
+        | ((flags.sample_type == "A.SPC")
+           & (flags.claimed_internal_assay_id == 130))]
+    assert len(twenty_four) == 24
+    k24 = set(zip(twenty_four.sample_id.astype(int),
+                  twenty_four.claimed_internal_assay_id.astype(int)))
+    assert k24 <= set(candidates), "all 24 must be lineage candidates"
+    assert {steps[k] for k in k24} == {X.PRE_GATE}
+    emitted = set(zip(findings.sample_id, findings.proposed_internal_assay_id))
+    assert not (k24 & emitted), "not one of the 24 reaches a row"

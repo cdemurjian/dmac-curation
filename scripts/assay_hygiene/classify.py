@@ -2,13 +2,41 @@
 # requires-python = ">=3.11"
 # dependencies = ["pandas>=2.0", "pyarrow>=14"]
 # ///
-"""Stage C. Mode 1: a sample in NO assay. Mode 2 lives in `mode2.py`.
+"""Stage C. One pass, the precedence that orders it, and the three modes.
 
 NOTHING DECIDES. EVERYTHING PROPOSES. Every row this module builds reaches the
 operator as a proposal they approve or reject, no number in it authorises a
-change, and no function here is named for a decision. It reads six parquet
-files and one csv and writes nothing at all -- not even a findings file, which
-belongs to the task that emits every mode at once.
+change, and no function here is named for a decision. It reads six parquet files
+and one csv, and it writes exactly two csv files under `out_dir` --
+`findings.csv` and `mode3-disposition.csv` -- and nothing else, ever. No
+database is touched, no workbook is produced, and there is no APPROVE column.
+
+THE PRECEDENCE IS THE CONTRACT, and it is the tuple `PRECEDENCE` rather than the
+order of five `if` branches a later edit could reorder without failing anything:
+
+    1. GATE      a rejected claim reaches no mode, ever
+    2. MODE 1    registered in nothing (the ANY-membership definition)
+    3. LINEAGE   a neighbour carries it -> Mode 2
+    4. COMPAT    routinely coexists -> Mode 2 candidate, unproven
+                 never coexists     -> CLS_ALT_LABEL, no action
+                 otherwise          -> CLS_UNRESOLVED
+    5. MODE 3    emits nothing; no detector exists
+
+Three of the four adjacent swaps in that list change a measured number, which is
+what makes it a contract rather than a comment. Measured 2026-08-17 over the
+180,995 input keys: GATE with MODE 1 moves 746 keys, MODE 1 with LINEAGE 753,
+LINEAGE with COMPAT 903. The fourth moves none, because `PRE_MODE_3` claims no
+key under any evidence at all -- which is a finding and not an oversight.
+
+MODE 3 EMITS ZERO ROWS AND THAT IS MEASURED, NOT ASSUMED. Increment 1 reported
+866 contradictions. Under this precedence not one survives: 43 are gate rejects,
+326 are lineage absences, 247 name a pair that routinely coexists, 205 are
+unresolved and 45 are ALTERNATIVE LABELS -- D.IMG images sit in 127 Tissue
+Imaging or in 145 Histopathology and never in both, because a curator picks one,
+and 145 D.IMG samples are registered in Histopathology. Metadata disagreeing
+with a registration is not evidence that the registration is wrong, so the
+residue of the subtraction is empty and `mode3_findings` returns an EMPTY frame
+rather than a small one. Undetected and small are different findings.
 
 MODE 2 LIVES IN `mode2.py`. It was split out at about 780 lines when this file
 reached roughly 1,340 and the compatibility lane, the precedence and the unified
@@ -58,18 +86,45 @@ carried into this task correctly:
 
 The after-gate figures had not been measured by anyone before this task.
 
+And the unified pass, measured 2026-08-17 over the same extract. The INPUT is
+every (sample, proposed assay) ABSENCE key -- one a metadata claim names, or one
+a lineage neighbour makes available, or both -- and the five steps partition it:
+
+    attached claims                                  138,007
+      naming an assay the sample already holds       123,439   no absence, no key
+
+    input keys                                       180,995
+      PRE_GATE      refused, a rejected claim          4,567   emits nothing
+      PRE_MODE_1    registered in nothing              2,166
+      PRE_LINEAGE   a neighbour carries it           167,330
+      PRE_COMPAT    the co-registration test           6,932
+      PRE_MODE_3    the residue                            0   no detector
+
+    emitted rows                                     176,428
+      MODE_1                                           2,166
+      MODE_2     lineage 167,330 + compat 744         168,074
+      no mode    5,181 CLS_ALT_LABEL + 1,007 CLS_UNRESOLVED    6,188
+      MODE_3                                               0
+
+THE LINEAGE CEILING IS 172,338 AND THE EMITTED MODE 2 IS SMALLER, by exactly the
+precedence: the gate refuses 4,255 of those rows because a rejected claim names
+the same pair, and Mode 1 takes 753 more because the sample is registered in
+nothing and its own metadata proposes the assay. Both are counted by name; a
+difference nobody names is how two readings of one number get published.
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import pandas as pd
 
 from . import _schema as S
+from . import compatibility as CP
 from . import gate as G
 from . import lineage as L
-from .audit import registered_internal
+from .audit import audit_contradictions, registered_internal
 
 # --- what produced a proposal ------------------------------------------------
 #
@@ -95,7 +150,16 @@ from .audit import registered_internal
 # exists is the same call `_schema` made for `MODE_3` and for
 # `co_reg_registered_internal_assay_id`, and for the same reason: this is the
 # cheapest it will ever be.
-BY_CLAIM = "BY_CLAIM"            # the gated vocabulary claim alone -- Mode 1
+#
+# `BY_CLAIM` HAS TWO PRODUCERS AND ONE MEANING, and the distinction matters
+# because two MEANINGS under one name is what this family exists to stop. Mode 1
+# and the compatibility lane both emit it, and on both the claim is the whole
+# reason the row exists: without it there is no proposal, whereas a lineage row
+# stands on the neighbour's registration with no claim at all. The
+# co-registration band a compat row carries BANDS that proposal rather than
+# making a second one, so it earns no member of its own.
+BY_CLAIM = "BY_CLAIM"            # the gated vocabulary claim alone -- Mode 1,
+                                 # and the compatibility lane
 BY_PRECEDENT = "BY_PRECEDENT"    # stage B precedent on the hop alone
 BY_BOTH = "BY_BOTH"              # precedent proposed, the claim disambiguated
 # The neighbour's registration and NOTHING ELSE: a lineage absence on a hop with
@@ -590,19 +654,818 @@ def _registered_columns(
 
 
 
+# --- the precedence ----------------------------------------------------------
+#
+# THE CONTRACT, AS DATA. Five steps in one tuple, each with one test, walked in
+# order. An `if` chain would encode the same order and could be reordered by a
+# later edit with nothing failing, which is the exact hazard the brief for this
+# task names; a declared tuple is something a test can permute and re-run.
+#
+# WHAT A STEP CLAIMS IS A KEY, AND A KEY IS AN ABSENCE. One (sample, proposed
+# assay) pair the sample does not hold, raised either by a metadata claim or by
+# a lineage neighbour or by both. Adding a sample to an assay is ONE membership
+# write however many kinds of evidence argue for it, so exactly one step claims
+# each key and exactly one row is emitted for it -- or none, where the step that
+# claimed it emits nothing.
+#
+# MEASURED 2026-08-17, EACH ADJACENT SWAP, over the 180,995 input keys:
+#
+#     GATE    <-> MODE 1        746 keys change step
+#     MODE 1  <-> LINEAGE       753
+#     LINEAGE <-> COMPAT        903
+#     COMPAT  <-> MODE 3          0
+#
+# The last is zero because `PRE_MODE_3` claims no key under ANY evidence, which
+# `test_the_precedence_is_a_declared_order_and_every_adjacent_swap_moves_a_key`
+# proves exhaustively over all sixteen evidence tuples rather than over one
+# world. That is the finding this increment exists to report.
+PRE_GATE = "PRE_GATE"          # a rejected claim reaches no mode, ever
+PRE_MODE_1 = "PRE_MODE_1"      # the sample is registered in NOTHING
+PRE_LINEAGE = "PRE_LINEAGE"    # a lineage neighbour carries the assay
+PRE_COMPAT = "PRE_COMPAT"      # neither, so the co-registration test rules
+PRE_MODE_3 = "PRE_MODE_3"      # the residue, and there is none
+PRECEDENCE = (PRE_GATE, PRE_MODE_1, PRE_LINEAGE, PRE_COMPAT, PRE_MODE_3)
+
+class Evidence(NamedTuple):
+    """What is known about ONE absence key, and nothing else.
+
+    FOUR BOOLEANS AND NOT THE ROW THEY CAME FROM, deliberately. The precedence
+    is a statement about which EVIDENCE outranks which, and handing it a frame
+    row would let a later edit reach past the evidence into the claim's tier,
+    its vocabulary support or its co-registration rate -- every one of which is
+    a tuned number, and none of which may decide whether a proposal is made.
+    With four booleans there is nothing in scope to gate on.
+
+    A NAMEDTUPLE AND NOT A 4-TUPLE, for the reason `compatibility.CoRegistration`
+    and `mode2.Rule` give: all four fields are `bool` and any two of them
+    transpose silently. `claim` and `claim_reaches` are one word apart and mean
+    "a claim names this pair" against "...and the gate did not reject it", which
+    is the distinction the whole first step is about.
+
+    `claim_reaches` implies `claim`: a claim cannot pass a gate it never met.
+    `precedence_step` checks that rather than assuming it, because the
+    combination is constructible by hand and would otherwise route a key with no
+    claim at all through `PRE_COMPAT`.
+    """
+    claim: bool             # a metadata claim names this (sample, assay)
+    claim_reaches: bool     # ...and `gate.reaches_modes` is true for it
+    unregistered: bool      # the sample is registered in NO assay at all
+    lineage: bool           # a lineage neighbour registers this assay
+
+
+# ONE TEST PER STEP, and the dict is what makes the tuple above load-bearing:
+# `precedence_step` walks `PRECEDENCE` and looks each step up here, so permuting
+# the tuple permutes the contract and nothing else has to change.
+#
+# READ THEM AS A CASCADE. Every test after the first assumes the earlier ones
+# declined, which is why `PRE_MODE_1` does not re-check `claim_reaches` and
+# `PRE_COMPAT` does not re-check `lineage`. That is not an oversight to tidy up:
+# a test that restates its predecessor's condition makes the ORDER unobservable,
+# and an order no test can distinguish from its reverse is a comment. Measured,
+# re-checking `claim_reaches` in `PRE_MODE_1` alone would make the first swap
+# move 0 keys instead of 746.
+_PRECEDENCE_TESTS = {
+    # 1. the vocabulary gate. A rejected claim is not evidence, and the key it
+    #    named is refused OUTRIGHT rather than falling through to the neighbour
+    #    that also names it. That is the third design error, reversed: 24 A.FLOW
+    #    and A.SPC flags whose data parent registers the MEASUREMENT assay their
+    #    analysis child claims were filed `ABSENCE_LINEAGE` and routed to Mode 2
+    #    as write candidates, because lineage fired first and nothing tested the
+    #    term. All 24 are lineage candidates, so the gate is the only step that
+    #    can stop them.
+    PRE_GATE: lambda e: e.claim and not e.claim_reaches,
+    # 2. Mode 1. Registered in nothing, so there is no registration to reason
+    #    from and metadata is the only evidence there is.
+    PRE_MODE_1: lambda e: e.claim and e.unregistered,
+    # 3. lineage. A neighbour holds it, which settles the absence without any
+    #    claim at all -- 166,427 of these keys carry none.
+    PRE_LINEAGE: lambda e: e.lineage,
+    # 4. co-registration. A claim on a registered sample with no neighbour: the
+    #    only test left asks whether this TYPE routinely holds both assays.
+    PRE_COMPAT: lambda e: e.claim,
+    # 5. Mode 3, which claims nothing. NOT `True` with an empty emitter: a step
+    #    that swallowed the residue would make every later reader's "Mode 3
+    #    found nothing" mean "Mode 3 was handed nothing", and undetected is a
+    #    different and worse finding than small.
+    PRE_MODE_3: lambda e: False,
+}
+
+
+def precedence_step(evidence: Evidence, order=PRECEDENCE) -> str:
+    """Which step claims this key. One of `PRECEDENCE`.
+
+    `order` is a parameter so a test can permute the contract and measure what
+    moves; nothing in this module ever passes it. A default that a caller may
+    override is the cheapest way to make an ordering testable without the test
+    having to reimplement the cascade -- which is how a mutation harness ends up
+    proving that its own copy of the rule works.
+
+    RAISES when no step claims the key, which means the key carries no evidence
+    at all and was never an absence. `absence_keys` cannot build such a key, so
+    this fires only on one assembled by hand.
+    """
+    if evidence.claim_reaches and not evidence.claim:
+        raise ValueError(
+            f"{evidence} says a claim passed the gate while no claim names the "
+            "pair. `claim_reaches` is a property OF the claim, so it cannot be "
+            "true without it; a key built this way routes through PRE_COMPAT, "
+            "which would band a co-registration rate for a proposal nothing "
+            "made.")
+    for step in order:
+        if _PRECEDENCE_TESTS[step](evidence):
+            return step
+    raise ValueError(
+        f"no step in {order} claims {evidence}. Every key carries a claim or a "
+        "lineage neighbour by construction -- see `absence_keys` -- so this is "
+        "a key assembled by hand out of an absence of evidence.")
+
+
+def absence_keys(
+    attached: pd.DataFrame,
+    *,
+    population,
+    registered: dict[int, set[int]],
+    candidates,
+) -> dict[tuple[int, int], Evidence]:
+    """THE INPUT. Every (sample, proposed assay) absence, with its evidence.
+
+    A key is here when the sample is NOT registered in the assay AND either a
+    metadata claim names the pair or a lineage neighbour registers it. The union
+    is the point: 166,427 of the real extract's 180,995 keys carry no claim and
+    8,657 carry no neighbour, so neither source alone is the population and
+    quoting either as the input understates the pass by more than an order of
+    magnitude in one direction or 20x in the other.
+
+    A CLAIM NAMING AN ASSAY THE SAMPLE ALREADY HOLDS RAISES NO KEY. There is no
+    absence, so there is nothing to propose -- and it is the largest single
+    exclusion in stage C by far: 123,439 of the 138,007 attached claims, 89% of
+    them. `claims_agreeing_with_a_registration` names every one rather than
+    leaving a reader to subtract, because the direction of that number is
+    dangerous: it grows whenever a curator registers something, and every one it
+    gains is a key this pass stops raising.
+
+    A BLOCKED CLAIM STILL RAISES ITS KEY, and that is what makes the gate a STEP
+    rather than a filter. Dropping it here would leave the key to the lineage
+    neighbour that also names it -- which is the third design error exactly --
+    and would leave 4,567 refusals uncounted. `precedence_step` refuses them
+    visibly instead, and `findings_census` reports the count.
+
+    "Registered" is ANY membership row, through `audit.registered_internal`,
+    which is also where `population` comes from. The MAPPABLE-only reading is 82
+    samples adrift and has produced a wrong Mode 1 population and a wrong Mode 2
+    ceiling on this branch already.
+
+    `population` and `candidates` are PASSED IN rather than re-derived, for the
+    reason `mode1_findings` takes its population: a second opinion here about
+    which samples are registered, or about which pairs a neighbour offers, would
+    put the precedence and the lanes on two different worlds.
+    """
+    pop = {int(s) for s in population}
+    out: dict[tuple[int, int], Evidence] = {}
+
+    for row, reaches in zip(attached.itertuples(index=False),
+                            G.reaches_modes(attached)):
+        sample_id, assay_id = int(row.sample_id), int(row.internal_assay_id)
+        if assay_id in registered.get(sample_id, ()):
+            continue                      # an absence of nothing
+        out[(sample_id, assay_id)] = Evidence(
+            claim=True, claim_reaches=bool(reaches),
+            unregistered=sample_id in pop, lineage=False)
+
+    for pair in candidates:
+        sample_id, assay_id = int(pair[0]), int(pair[1])
+        was = out.get((sample_id, assay_id))
+        out[(sample_id, assay_id)] = Evidence(
+            claim=was.claim if was else False,
+            claim_reaches=was.claim_reaches if was else False,
+            unregistered=sample_id in pop, lineage=True)
+    return out
+
+
+def precedence_steps(keys: dict[tuple[int, int], Evidence]) -> dict[tuple[int, int], str]:
+    """Every input key beside the step that claims it. See `precedence_step`."""
+    return {key: precedence_step(evidence) for key, evidence in keys.items()}
+
+
+def claims_agreeing_with_a_registration(
+    attached: pd.DataFrame,
+    registered: dict[int, set[int]],
+) -> list[tuple[int, int]]:
+    """The (sample, assay) claims naming an assay the sample already holds, sorted.
+
+    Nothing is dropped silently. These claims raise no absence key, propose
+    nothing and appear in no finding row, and this is where that exclusion is
+    counted -- BY NAME, following `registered_samples_absent_from_samples` and
+    `gate.untyped_registration_samples`, because a list a reader can spot-check
+    is a different artifact from a number they must take on trust.
+
+    Measured on the real extract 2026-08-17: 123,439 of the 138,007 attached
+    claims, which is 89.4% of them and the largest exclusion anywhere in stage C.
+    The direction to watch is UPWARD: every claim that joins this list is a key
+    this pass stops raising, so silent growth shrinks all three modes at once
+    while looking exactly like a curator doing their job.
+
+    Sorted, because a curator diffs this between runs and dict iteration order
+    is part of no contract.
+    """
+    return sorted(
+        (int(r.sample_id), int(r.internal_assay_id))
+        for r in attached.itertuples(index=False)
+        if int(r.internal_assay_id) in registered.get(int(r.sample_id), ())
+    )
+
+
+# --- the compatibility lane --------------------------------------------------
+#
+# THE FOURTH STEP, and the only one this task builds from scratch. A gated claim
+# on a REGISTERED sample that no lineage neighbour corroborates: the sample holds
+# something, so there is a pair to measure, and the question is whether samples
+# of this type that hold R routinely hold X too.
+#
+# The three outcomes are `compatibility.BAND_ESTABLISHES` and this module does
+# not re-derive them. Measured over the real extract's 6,932 such keys:
+#
+#     BAND_ROUTINE     744   CLS_ABSENCE_COMPAT   Mode 2 candidate, unproven
+#     BAND_NEVER     5,181   CLS_ALT_LABEL        alternative labels, no action
+#     BAND_SOMETIMES   962   CLS_UNRESOLVED       neither test settles it
+#     BAND_NO_SUPPORT   45   CLS_UNRESOLVED       the population is unreadable
+#
+# TWO OF THE THREE CLASSES PROPOSE NOTHING, and their rows carry a null `mode`,
+# `A_NONE` and a null `proposed_by`. They are still EMITTED: the alternative
+# label is the operator's own second correction and the finding they asked for,
+# and `CLS_UNRESOLVED` is reported at its own size because silently absorbing
+# what the pipeline cannot classify is how a bucket ends up named for what
+# someone assumed was in it.
+
+# Which of `_schema.CLASSES` proposes a membership change and which does not, in
+# one place. `mode` and `action` are two columns that must agree -- a row with a
+# mode and `A_NONE` says both "Mode 2 proposes this" and "nothing is proposed"
+# -- so they are derived from one dict rather than written twice.
+CLASS_PROPOSAL = {
+    S.CLS_ABSENCE_COMPAT: (S.MODE_2, S.A_ADD_TO_ASSAY),
+    S.CLS_ALT_LABEL: (None, S.A_NONE),
+    S.CLS_UNRESOLVED: (None, S.A_NONE),
+}
+
+
+def _compat_summary(c, stype, band, got, cls) -> str:
+    """The sentence an operator reads, carrying what the columns cannot.
+
+    Shaped after `_evidence_summary` and `mode2._mode2_summary`: it names the
+    claim, the pair the rate was measured over, the population under it, and --
+    where there is one -- the well-supported zero that argues against the
+    proposal. It also says out loud that no lineage neighbour was found, because
+    the null `lineage_neighbour_uuid` is otherwise indistinguishable, to a
+    reader, from a test nobody ran.
+    """
+    parts = [
+        f"{c.source_field} {c.raw_value!r} maps to {int(c.internal_assay_id)} "
+        f"{c.internal_assay_title} ({c.tier}, {c.vocab_provenance}, "
+        f"{int(c.vocab_n_samples)} backing sample(s) at purity "
+        f"{float(c.vocab_purity):.3f})",
+        "no lineage neighbour registers it, so the co-registration test is the "
+        "only evidence left",
+    ]
+    if got.registered_assay_id is None:
+        parts.append(
+            f"no assay this sample holds reaches a measured population with "
+            f"{int(c.internal_assay_id)} for {stype}, so nothing was measured "
+            "-- that is absent evidence and not a rate of zero")
+    else:
+        parts.append(
+            f"{got.rate:.3f} of the {got.support} {stype} sample(s) registered "
+            f"in {got.registered_assay_id} also hold "
+            f"{int(c.internal_assay_id)} ({band})")
+    if got.alt_label_assay_id is not None:
+        parts.append(
+            f"COUNTER-EVIDENCE: {int(c.internal_assay_id)} never co-registers "
+            f"with {got.alt_label_assay_id}, which this sample HOLDS, over "
+            f"{got.alt_label_support} {stype} sample(s)")
+    if bool(c.contested):
+        parts.append("contested: this sample's own metadata names more than "
+                     "one assay, and every candidate is emitted")
+    if c.gate != S.GATE_PASS:
+        parts.append(f"{c.gate}: {c.gate_reason}")
+    mode, action = CLASS_PROPOSAL[cls]
+    parts.append(
+        f"proposes {action}; nothing is written and nothing is decided"
+        if mode is not None else
+        f"{cls}: no membership change is proposed and no mode claims this row")
+    return "; ".join(parts)
+
+
+def compat_findings(
+    attached: pd.DataFrame,
+    *,
+    steps: dict[tuple[int, int], str],
+    registered: dict[int, set[int]],
+    table: dict[tuple[str, int, int], tuple[float, int]],
+    titles: dict[int, str],
+    projects: dict[int, str],
+) -> pd.DataFrame:
+    """One row per key the co-registration step claims. Nothing is decided.
+
+    THE LANE TAKES ITS POPULATION FROM THE PRECEDENCE AND NEVER RE-DERIVES IT.
+    `mode1_findings` and `mode2.mode2_findings` are CEILING emitters with their
+    own tests and their own published figures, so they offer more keys than the
+    precedence grants them and `unify_findings` filters both. This lane is new
+    and has no such obligation, so it is built from `steps` directly -- which
+    means the gate test, the Mode 1 test and the lineage test appear here
+    exactly once each, inside `_PRECEDENCE_TESTS`, rather than being restated as
+    three `if`s a later edit could disagree with.
+
+    KEYWORD-ONLY, for the reason `mode2_findings` gives at eleven arguments:
+    `titles` and `projects` are both `dict[int, str]` and `registered` is
+    `dict[int, set[int]]`, so a positional call could transpose two of them and
+    produce a populated, wrong frame with no error.
+
+    `BAND_ESTABLISHES` OWNS THE MAPPING FROM BAND TO CLASS and `CLASS_PROPOSAL`
+    owns the mapping from class to (mode, action). Neither is restated here:
+    `BAND_NEVER -> CLS_ALT_LABEL` is the operator's second correction and
+    `BAND_NO_SUPPORT -> CLS_UNRESOLVED` is the guard that stops a rate of 0.000
+    over four samples being reported as "these never coexist".
+
+    WHAT THIS LANE DOES NOT ASSERT, and the nulls are the assertion. The
+    precedent block is NULL on every row and not zero: precedent is measured per
+    HOP, this lane's keys have no neighbour and therefore no hop, so there is no
+    rule to miss. `lineage` is `LIN_NONE` and NOT null, because the lineage test
+    DID run and found nothing -- that distinction is the one Task 5's nulls were
+    reserved for and it runs the other way here.
+
+    EVERY ROW HAS A TYPE, AND THAT IS A GUARD RATHER THAN A BRANCH.
+    `mode2.mode2_findings` handles a typeless sample because its rows come from
+    the lineage traversal, where a candidate need not carry a claim; these rows
+    come from `attached`, and `gate.gate_claims` indexes `types[str(c.uuid)]`
+    and raises `KeyError` on a claim whose uuid has no node row. So the type is
+    total on this frame by construction, and the assertion says so rather than a
+    null-handling branch saying it might not be -- a branch no data can enter is
+    indistinguishable, to a reader, from one that is merely rare.
+
+    Sorted on `(sample_id, proposed_internal_assay_id)`, a total order here.
+    """
+    rows = []
+    for c in attached.itertuples(index=False):
+        sample_id, assay_id = int(c.sample_id), int(c.internal_assay_id)
+        if steps.get((sample_id, assay_id)) != PRE_COMPAT:
+            continue
+        have = registered.get(sample_id, set())
+        assert pd.notna(c.sample_type), (
+            f"({sample_id}, {assay_id}) reached the compatibility lane with no "
+            "sample type; `gate_claims` raises on a claim whose uuid has no "
+            "node row, so this frame did not come from it")
+        stype = str(c.sample_type)
+        got = CP.best_co_registration(stype, have, assay_id, table)
+        band = CP.compat_band(got.rate, got.support)
+        cls = CP.band_establishes(band)
+        mode, action = CLASS_PROPOSAL[cls]
+        reg_ids, reg_titles = _registered_columns(sample_id, registered, titles)
+        rows.append({
+            "sample_id": sample_id,
+            "uuid": c.uuid,
+            "sample_type": stype,
+            # "" and not null: a claim comes off this sample's own metadata, so
+            # it HAS a `samples` row and its projects were read
+            "project_ids": projects.get(sample_id, ""),
+            "registered_internal_assay_ids": reg_ids,
+            "registered_internal_assay_titles": reg_titles,
+            "proposed_internal_assay_id": assay_id,
+            "proposed_internal_assay_title": titles.get(assay_id),
+            "mode": mode,
+            "classification": cls,
+            "gate": c.gate,
+            "claim_tier": c.tier,
+            "contested": bool(c.contested),
+            "source_field": c.source_field,
+            "raw_value": c.raw_value,
+            "vocab_support": int(c.vocab_support),
+            "vocab_purity": float(c.vocab_purity),
+            "vocab_provenance": c.vocab_provenance,
+            "type_registrations": int(c.type_registrations),
+            # the lineage test RAN and found nothing, which is not a null
+            "lineage": S.LIN_NONE,
+            "lineage_neighbour_uuid": None,
+            "lineage_n_supports": 0,
+            "co_reg_rate": got.rate,
+            "co_reg_pop": got.support,
+            "co_reg_registered_internal_assay_id": got.registered_assay_id,
+            "co_reg_alt_label_internal_assay_id": got.alt_label_assay_id,
+            "co_reg_alt_label_pop": got.alt_label_support,
+            "compat_band": band,
+            # no neighbour means no hop, and precedent is measured per hop
+            "precedent_rate": None,
+            "precedent_direction": None,
+            "precedent_n_both": None,
+            "precedent_n_child_only": None,
+            "precedent_n_parent_only": None,
+            # null where nothing is proposed: a proposal source on a row that
+            # proposes nothing names the author of a change no one suggested
+            "proposed_by": BY_CLAIM if mode is not None else None,
+            "evidence_summary": _compat_summary(c, stype, band, got, cls),
+            "action": action,
+        })
+
+    return pd.DataFrame(rows, columns=S.FINDING_COLUMNS).sort_values(
+        ["sample_id", "proposed_internal_assay_id"], ignore_index=True,
+    )
+
+
+# --- Mode 3, by subtraction --------------------------------------------------
+
+
+def mode3_findings() -> pd.DataFrame:
+    """Mode 3's rows. There are none, and there is no detector to produce any.
+
+    NOT SMALL. UNDETECTED. The operator's Mode 3 is "what samples have INCORRECT
+    assays". The detector built for it in increment 1 tests
+    `claimed_assay not in registered_assays`, which is an ABSENCE test reported
+    under a contradiction's name, and measurement has now twice shown its output
+    is not contradictions:
+
+      * the operator's first correction -- a PAV sample that had tissue
+        collected from it belongs in 56 Patient Visit AND 74 Tissue Collection,
+        one incoming and one outgoing, so the absence of the second is a
+        MISSING REGISTRATION. 86 of those 97 PAV samples have a TIS child
+        already registered in 74, on a hop running 0.931 in project 2;
+      * the operator's second correction -- of the 51 flags that survived, 45
+        name CORRECT assays under a different label. D.IMG images sit in 127
+        Tissue Imaging or in 145 Histopathology and never in both, because a
+        curator picks one, and 145 D.IMG samples are registered in
+        Histopathology. The remaining 6 are vocabulary defects.
+
+    Re-disposed under this precedence, all 866 land elsewhere: 43 gate rejects,
+    326 lineage absences, 247 routinely-coexisting pairs, 205 unresolved, 45
+    alternative labels. The residue of the subtraction is EMPTY.
+
+    So metadata disagreeing with a registration is not evidence that the
+    registration is wrong, and this mode reports and proposes nothing until a
+    detector that does not depend on the vocabulary is built and validated.
+    Candidates, all measurable today and none built: registration-side
+    reachability (a sample registered in an assay its own type is otherwise
+    never registered in, the mirror of the claim-side gate and needing no
+    metadata at all); cross-project registration; and a removal lane, which
+    ships last and separately because of the deletion hazard.
+
+    THE CROSS-PROJECT FIGURE NEEDS ITS CONSTRUCTION STATED AND ONE HALF OF IT IS
+    CORRECTED HERE. Measured 2026-08-18 over the real extract, taking the
+    project of the SEEK ASSAY RECORD the membership row names -- which is
+    single-valued -- against the sample's own `project_ids`: 1,340 of the
+    214,296 membership rows, reproducing the spec exactly. Taking instead the
+    project set of the INTERNAL assay, which unions every seek record sharing
+    that internal id and which 75 of the 154 internal ids spread over more than
+    one project, the same rule reads 924. Two constructions, two answers, and
+    the spec states neither.
+
+    The spec's companion figure reads "plus 271 samples with no project at
+    all". 271 is the ROW count; the SAMPLE count is 242. A unit stated wrongly
+    beside a number measured rightly is this project's signature defect, and
+    both figures are quoted here with their unit because the detector that would
+    use them is not built.
+
+    THE FRAME IS EMPTY AND CARRIES THE FULL CONTRACT. A mode absent from the
+    artifact reads as a mode nobody ran, and Task 9's report has to name it in
+    order to say it found nothing. It takes no argument, because a parameter it
+    ignored would suggest a subtraction happening inside it: the subtraction is
+    `PRECEDENCE`, and `PRE_MODE_3` sits at the end of it claiming no key.
+    """
+    return pd.DataFrame(columns=S.FINDING_COLUMNS)
+
+
+# --- the unified pass --------------------------------------------------------
+
+
+def unify_findings(
+    steps: dict[tuple[int, int], str],
+    lanes: dict[str, pd.DataFrame],
+) -> pd.DataFrame:
+    """Every mode's rows in one frame, one row per proposal. `findings.csv`.
+
+    `lanes` maps a step of `PRECEDENCE` to the frame that emits its rows, and
+    the precedence is what resolves a key two lanes both offer. On the real
+    extract that is 753 keys wanted by Mode 1 and by the lineage lane at once --
+    a sample registered in nothing whose own metadata names an assay a neighbour
+    also holds -- and adding it to that assay is ONE membership write, so one row
+    is emitted and the loser is counted rather than silently absent.
+
+    THE PARTITION IS ASSERTED AND NOT ASSUMED. Every key whose step has a lane
+    appears exactly once; every key whose step has none appears zero times; and
+    no (sample, assay) pair appears twice. A curator approves this file row by
+    row, so a duplicate proposal is a duplicate write.
+
+    RAISES on a lane keyed on something that is not a step, following every
+    other crossing in this package. `lanes` is a dict of frames keyed by string
+    and a typo in the key would silently drop a whole mode -- and a missing mode
+    looks exactly like a mode that found nothing, which is the distinction this
+    increment exists to draw.
+
+    Emitted in `PRECEDENCE` order and then SORTED on
+    `(sample_id, proposed_internal_assay_id)`, a total order on this output. The
+    three lanes each sort themselves and their concatenation does not, so the
+    sort has work to do.
+    """
+    unknown = sorted(set(lanes) - set(PRECEDENCE))
+    if unknown:
+        raise ValueError(
+            f"{unknown} is not in PRECEDENCE {PRECEDENCE}. `lanes` is keyed on "
+            "the step whose rows each frame emits; a key that is not a step "
+            "silently drops a whole mode, which reads exactly like a mode that "
+            "found nothing.")
+
+    kept = []
+    for step in PRECEDENCE:
+        frame = lanes.get(step)
+        if frame is None:
+            continue
+        owned = [steps.get((int(s), int(a))) == step
+                 for s, a in zip(frame.sample_id,
+                                 frame.proposed_internal_assay_id)]
+        kept.append(frame[owned])
+
+    out = (pd.concat(kept, ignore_index=True) if kept
+           else pd.DataFrame(columns=S.FINDING_COLUMNS))
+    out = out.reindex(columns=S.FINDING_COLUMNS).sort_values(
+        ["sample_id", "proposed_internal_assay_id"], ignore_index=True)
+
+    emitted = list(zip((int(s) for s in out.sample_id),
+                       (int(a) for a in out.proposed_internal_assay_id)))
+    assert len(emitted) == len(set(emitted)), (
+        "the unified frame carries a (sample, assay) pair twice, so one "
+        "membership write would be proposed to the operator as two rows")
+    expected = {k for k, step in steps.items() if step in lanes}
+    assert set(emitted) == expected, (
+        f"{len(expected - set(emitted))} key(s) the precedence granted a lane "
+        f"reach no row and {len(set(emitted) - expected)} row(s) belong to no "
+        "key: the lanes and the precedence disagree about the population")
+    return out
+
+
+# Every key `findings_census` returns, in report order, declared for the reason
+# `MODE1_CENSUS_KEYS`, `mode2.MODE2_CENSUS_KEYS` and `lineage.CEILING_KEYS` are:
+# the report prints them all, and a key that stops being produced must break
+# rather than stop being printed.
+#
+# FOUR IDENTITIES HOLD OVER THEM and a test asserts all four:
+#
+#     input_keys  = keys_refused_by_the_gate + keys_mode_1 + keys_lineage
+#                   + keys_compat + keys_mode_3
+#     rows        = input_keys - keys_refused_by_the_gate - keys_mode_3
+#     rows        = rows_mode_1 + rows_mode_2 + rows_mode_3 + rows_no_mode
+#     rows        = the four rows_cls_* + rows_without_a_classification
+#
+# THE UNIT IS A KEY ABOVE AND A ROW BELOW, and the two are equal only because
+# `PRE_GATE` and `PRE_MODE_3` emit nothing. The prefixes carry that: `keys_*`
+# counts what the precedence ruled on and `rows_*` counts what reached the
+# operator, and quoting one for the other is this project's signature defect.
+#
+# `rows_mode_2` IS NOT THE LINEAGE CEILING and the three `lineage_*` keys are
+# why. The lane offers 172,338; the gate refuses 4,255 and Mode 1 takes 753, so
+# 167,330 lineage rows plus 744 compatibility rows make 168,074. Every one of
+# those five numbers is a key here, because a difference nobody names is how two
+# readings of one number get published -- which has happened on this branch.
+FINDINGS_CENSUS_KEYS = (
+    "input_keys",
+    "keys_from_a_claim",
+    "keys_from_lineage",
+    "claims_agreeing_with_a_registration",
+    "keys_refused_by_the_gate",
+    "keys_mode_1",
+    "keys_lineage",
+    "keys_compat",
+    "keys_mode_3",
+    "rows",
+    "rows_mode_1",
+    "rows_mode_2",
+    "rows_mode_3",
+    "rows_no_mode",
+    "rows_cls_absence_lineage",
+    "rows_cls_absence_compat",
+    "rows_cls_alt_label",
+    "rows_cls_unresolved",
+    "rows_without_a_classification",
+    "lineage_ceiling_offered",
+    "lineage_refused_by_the_gate",
+    "lineage_taken_by_mode_1",
+)
+
+
+def findings_census(
+    keys: dict[tuple[int, int], Evidence],
+    steps: dict[tuple[int, int], str],
+    findings: pd.DataFrame,
+    lanes: dict[str, pd.DataFrame],
+    *,
+    agreeing,
+) -> dict[str, int]:
+    """Where every input key went and what every emitted row says. See the keys.
+
+    The `keys_*` half is counted off the PRECEDENCE and the `rows_*` half off
+    the EMITTED FRAME, deliberately and for the reason `mode1_census` splits its
+    own two halves: computing both sides from one object would make the
+    identities tautologies, and this way a defect in a lane breaks an identity
+    rather than hiding inside it.
+
+    `keys` AND `steps` are both taken, and neither is derived from the other
+    here. `steps` says which step claimed each key and `keys` says what evidence
+    it carried, and the second is not recoverable from the first: a
+    `PRE_LINEAGE` key may or may not also carry a claim -- 903 of the real
+    extract's 167,330 do -- so `keys_from_a_claim` cannot be counted off the
+    steps at all.
+
+    `agreeing` is `claims_agreeing_with_a_registration`'s output, passed in
+    rather than recomputed, so the census cannot hold a second opinion about the
+    largest exclusion in the stage.
+
+    `keys_from_lineage` and `lineage_ceiling_offered` are the SAME population
+    counted twice by two routes -- off the evidence and off the lane frame --
+    and a test asserts they agree. That is deliberate: the lane and the
+    precedence are built from two different traversals of the candidate list,
+    and this is the one line that proves they still describe one world.
+
+    Nothing pools the Mode 2 ceiling with the emitted Mode 2 count. The lane's
+    own figure, the two refusals and the emitted total are four separate keys.
+    """
+    counts = {step: 0 for step in PRECEDENCE}
+    for step in steps.values():
+        counts[step] += 1
+    cls = findings.classification
+    lineage_lane = lanes.get(PRE_LINEAGE)
+    offered = 0 if lineage_lane is None else len(lineage_lane)
+    refused_gate = taken_by_mode_1 = 0
+    if lineage_lane is not None:
+        for s, a in zip(lineage_lane.sample_id,
+                        lineage_lane.proposed_internal_assay_id):
+            step = steps.get((int(s), int(a)))
+            refused_gate += step == PRE_GATE
+            taken_by_mode_1 += step == PRE_MODE_1
+    out = {
+        "input_keys": len(steps),
+        "keys_from_a_claim": sum(1 for e in keys.values() if e.claim),
+        "keys_from_lineage": sum(1 for e in keys.values() if e.lineage),
+        "claims_agreeing_with_a_registration": len(agreeing),
+        "keys_refused_by_the_gate": counts[PRE_GATE],
+        "keys_mode_1": counts[PRE_MODE_1],
+        "keys_lineage": counts[PRE_LINEAGE],
+        "keys_compat": counts[PRE_COMPAT],
+        "keys_mode_3": counts[PRE_MODE_3],
+        "rows": len(findings),
+        "rows_mode_1": int((findings["mode"] == S.MODE_1).sum()),
+        "rows_mode_2": int((findings["mode"] == S.MODE_2).sum()),
+        "rows_mode_3": int((findings["mode"] == S.MODE_3).sum()),
+        "rows_no_mode": int(findings["mode"].isna().sum()),
+        "rows_cls_absence_lineage": int((cls == S.CLS_ABSENCE_LINEAGE).sum()),
+        "rows_cls_absence_compat": int((cls == S.CLS_ABSENCE_COMPAT).sum()),
+        "rows_cls_alt_label": int((cls == S.CLS_ALT_LABEL).sum()),
+        "rows_cls_unresolved": int((cls == S.CLS_UNRESOLVED).sum()),
+        "rows_without_a_classification": int(cls.isna().sum()),
+        "lineage_ceiling_offered": offered,
+        "lineage_refused_by_the_gate": refused_gate,
+        "lineage_taken_by_mode_1": taken_by_mode_1,
+    }
+    assert set(out) == set(FINDINGS_CENSUS_KEYS), "FINDINGS_CENSUS_KEYS is out of date"
+    return {k: int(v) for k, v in out.items()}
+
+
+# --- increment 1's 866 flags, superseded traceably ---------------------------
+#
+# One row per FLAG, which is one row per CLAIM, where `findings.csv` is one row
+# per PROPOSAL. The two grains differ exactly where the gate refused a claim: 43
+# of the 866 have a disposition row and no finding row, and that is the fact
+# this file exists to carry.
+#
+# `prior_verdict` rides beside `precedence_step` so the supersession is legible
+# IN THE ROW. A curator who reviewed the 866 opens this file and reads
+# "MODE_3_FLAG -> PRE_GATE" or "MODE_3_FLAG -> CLS_ALT_LABEL" without holding
+# two artifacts side by side, and increment 1's output is superseded rather than
+# deleted.
+#
+# THIS FILE REPLACES `scripts/measure_absence_vs_contradiction.py`'S OUTPUT OF
+# THE SAME NAME, and the prototype should be retired rather than left as a
+# second writer. It has no tests; it types samples by uuid prefix, drops
+# unmapped membership rows, traverses the CHILD_OF relation rather than
+# `DERIVED_FROM`, bands on `>` where `compatibility.compat_band` bands on `>=`,
+# has no vocabulary gate at all, and labels a well-supported zero CONTRADICTION
+# -- which is the relabelling this increment exists to perform. Its four-way
+# split reads 351 / 250 / 214 / 51 against this classifier's 326 / 247 / 205 /
+# 45 plus 43 refused, and the task report attributes every one of the
+# differences.
+DISPOSITION_COLUMNS = [
+    "sample_id", "uuid", "sample_type",
+    "registered_internal_assay_ids", "registered_internal_assay_titles",
+    "claimed_internal_assay_id", "claimed_internal_assay_title",
+    "tier", "source_field", "raw_value",
+    "prior_verdict",
+    "precedence_step", "mode", "classification", "action",
+    "gate", "gate_reason",
+    "lineage", "co_reg_rate", "co_reg_pop", "compat_band",
+    "evidence_summary",
+]
+
+
+def mode3_disposition(
+    flags: pd.DataFrame,
+    steps: dict[tuple[int, int], str],
+    findings: pd.DataFrame,
+    attached: pd.DataFrame,
+) -> pd.DataFrame:
+    """Increment 1's flags, each beside the step that now claims it.
+
+    Every column after `prior_verdict` is READ OFF the artifacts this run
+    already produced rather than recomputed. A second computation of a
+    classification, one function from the first, is how two answers to one
+    question get shipped -- and a curator comparing this file with
+    `findings.csv` would have no way to tell which was which.
+
+    RAISES on a flag naming a pair the precedence never saw. A flag is a claim
+    on a REGISTERED sample naming an assay it does not hold, which is an absence
+    key by construction, so a miss means the flags came from a different extract
+    than the steps -- and reporting that flag as unclassified would be a row
+    silently absent from every count in this file.
+
+    The gate-refused rows carry `gate` and `gate_reason` and NOTHING ELSE from
+    the mode side: no mode, no classification, no action. A refused claim
+    reached no mode, and filling those columns would be the laundering this
+    precedence exists to stop, performed in the artifact rather than in the code.
+    """
+    by_key = {
+        (int(r.sample_id), int(r.proposed_internal_assay_id)): r
+        for r in findings.itertuples(index=False)
+    }
+    gate_of = {
+        (int(r.sample_id), int(r.internal_assay_id)): (r.gate, r.gate_reason)
+        for r in attached.itertuples(index=False)
+    }
+
+    rows = []
+    for f in flags.itertuples(index=False):
+        key = (int(f.sample_id), int(f.claimed_internal_assay_id))
+        step = steps.get(key)
+        if step is None:
+            raise ValueError(
+                f"flag {key} names a pair the precedence never ruled on. A flag "
+                "is a claim on a registered sample naming an assay it lacks, "
+                "which is an absence key by construction, so the flags frame "
+                "and the steps describe different extracts.")
+        found = by_key.get(key)
+        gate, gate_reason = gate_of.get(key, (None, None))
+        rows.append({
+            "sample_id": int(f.sample_id),
+            "uuid": f.uuid,
+            "sample_type": f.sample_type,
+            "registered_internal_assay_ids": f.registered_internal_assay_ids,
+            "registered_internal_assay_titles": f.registered_internal_assay_titles,
+            "claimed_internal_assay_id": int(f.claimed_internal_assay_id),
+            "claimed_internal_assay_title": f.claimed_internal_assay_title,
+            "tier": f.tier,
+            "source_field": f.source_field,
+            "raw_value": f.raw_value,
+            "prior_verdict": f.verdict,
+            "precedence_step": step,
+            # `found.mode`, not `found["mode"]`: `itertuples` hands back a
+            # namedtuple, and `mode` is a valid field name on one
+            "mode": found.mode if found is not None else None,
+            "classification": found.classification if found is not None else None,
+            "action": found.action if found is not None else None,
+            "gate": gate,
+            "gate_reason": gate_reason,
+            "lineage": found.lineage if found is not None else None,
+            "co_reg_rate": found.co_reg_rate if found is not None else None,
+            "co_reg_pop": found.co_reg_pop if found is not None else None,
+            "compat_band": found.compat_band if found is not None else None,
+            "evidence_summary": (found.evidence_summary if found is not None
+                                 else None),
+        })
+    return pd.DataFrame(rows, columns=DISPOSITION_COLUMNS)
+
+
 def main(extract_dir: str = "assay-hygiene/extract",
          out_dir: str = "assay-hygiene") -> int:
-    """Report Modes 1 and 2 over the extract on disk. Read-only, no file written.
+    """Run every mode over the extract on disk and write the two artifacts.
 
-    Every input is left byte-identical and no artifact is produced: the
-    `findings` file is stage C's unified output and belongs to the task that
-    emits all the modes at once, so publishing a Mode-1-only version of it here
-    would put two files with one name in the operator's directory.
+    WRITES EXACTLY TWO FILES, both csv, both under `out_dir`, both named here:
+    `findings.csv` and `mode3-disposition.csv`. Every INPUT is left
+    byte-identical, no parquet is rewritten, no database is touched and no
+    workbook is produced. `test_main_writes_exactly_two_artifacts_and_leaves_
+    every_other_byte_unchanged` hashes the whole tree before and after and
+    diffs the two maps, because "it wrote exactly these two" is a claim about
+    the directory rather than about the absence of a call.
 
-    What this does produce is the census, printed, so that every figure this
-    module's docstring states can be re-derived by running it. A number nobody
-    can re-derive is what produced two conflicting readings of the Mode 2
-    ceiling on this branch.
+    It also prints all four censuses, so that every figure this module's
+    docstring states can be re-derived by running it. A number nobody can
+    re-derive is what produced two conflicting readings of the Mode 2 ceiling on
+    this branch.
+
+    THE ARTIFACTS ARE WRITTEN AFTER THE FRAMES ARE BUILT, never as each is
+    produced, and every frame-builder above is pure. A controller ledger on this
+    branch once recorded a dispatch that never happened because the line was
+    written before the call; here a run that fails part-way leaves the previous
+    artifacts in place rather than half of a new pair.
+
+    THE 866 FLAGS ARE RE-DERIVED HERE, THROUGH `audit.audit_contradictions`, AND
+    NOT READ FROM THE CSV INCREMENT 1 LEFT IN THE SAME DIRECTORY -- which is why
+    that name appears nowhere in this module as a path, exactly as with the
+    precedent csv one paragraph down. Flags raised against
+    another extract would be re-disposed against this one's steps, and
+    `mode3_disposition` would raise on the first key the precedence never saw --
+    or worse, agree by coincidence.
 
     PRECEDENT IS MINED HERE AND NOT READ FROM THE CSV STAGE B LEAVES IN THE SAME
     DIRECTORY -- which is why that name appears nowhere in this module as a path. The rules must describe the SAME edge frame the lineage
@@ -693,8 +1556,60 @@ def main(extract_dir: str = "assay-hygiene/extract",
           "rate and survive no threshold, including 0.0: absent evidence is "
           "not a rate of zero")
 
-    print("nothing was written: this run produced no file and no database "
-          "change, and every row above is a proposal awaiting approval")
+    # --- the unified pass ---------------------------------------------------
+    candidates = M2.mode2_candidates(children_of, parents_of, registered)
+    keys = absence_keys(attached, population=population,
+                        registered=registered, candidates=candidates)
+    steps = precedence_steps(keys)
+    titles = M2.assay_titles(assays)
+    projects = project_index(samples)
+    compat = compat_findings(
+        attached, steps=steps, registered=registered,
+        table=CP.co_registration(membership, assays, nodes),
+        titles=titles, projects=projects)
+    lanes = {PRE_MODE_1: findings, PRE_LINEAGE: m2, PRE_COMPAT: compat,
+             PRE_MODE_3: mode3_findings()}
+    unified = unify_findings(steps, lanes)
+    agreeing = claims_agreeing_with_a_registration(attached, registered)
+    ucensus = findings_census(keys, steps, unified, lanes, agreeing=agreeing)
+
+    print("THE PRECEDENCE, over every (sample, proposed assay) ABSENCE key -- "
+          "one a claim names, one a lineage neighbour offers, or both:")
+    for k in FINDINGS_CENSUS_KEYS:
+        print(f"  {k:<44} {ucensus[k]:>8,}")
+    print(f"  the {ucensus['keys_refused_by_the_gate']:,} key(s) the gate "
+          "refused emit NOTHING, and that is the third design error reversed: "
+          "a rejected claim reaches no mode even where a lineage neighbour "
+          "carries the same pair, which is the shape of the 24 FlowJo and "
+          "mass-spectra flags increment 1 routed to Mode 2.")
+    print(f"  emitted MODE_2 is {ucensus['rows_mode_2']:,} against a lineage "
+          f"CEILING of {ucensus['lineage_ceiling_offered']:,}: the gate refuses "
+          f"{ucensus['lineage_refused_by_the_gate']:,} of the ceiling's rows "
+          f"and Mode 1 takes {ucensus['lineage_taken_by_mode_1']:,} more, and "
+          f"{ucensus['rows_cls_absence_compat']:,} compatibility rows join it.")
+    print(f"  MODE_3 emitted {ucensus['rows_mode_3']:,} rows because there is "
+          "no detector for it -- UNDETECTED and not small. Metadata "
+          "disagreeing with a registration is not evidence the registration is "
+          "wrong.")
+
+    flags = audit_contradictions(claims, membership, assays, nodes)
+    disposition = mode3_disposition(flags, steps, unified, attached)
+    prior = disposition.precedence_step.where(
+        disposition.precedence_step != PRE_COMPAT,
+        disposition.classification).value_counts()
+    print(f"  increment 1 raised {len(flags):,} MODE_3 flags; not one is a "
+          "contradiction under this precedence:")
+    for k, v in prior.items():
+        print(f"    {k:<42} {v:>8,}")
+
+    unified.to_csv(out / "findings.csv", index=False)
+    disposition.to_csv(out / "mode3-disposition.csv", index=False)
+    print(f"wrote {out / 'findings.csv'} ({len(unified):,} rows) and "
+          f"{out / 'mode3-disposition.csv'} ({len(disposition):,} rows). "
+          "Nothing else was written: no parquet was rewritten, no database and "
+          "no workbook was touched by THIS run, and every row in both files is "
+          "a proposal awaiting operator approval. There is no APPROVE column "
+          "and nothing here authorises a change.")
     return 0
 
 
