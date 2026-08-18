@@ -686,6 +686,28 @@ PRE_COMPAT = "PRE_COMPAT"      # neither, so the co-registration test rules
 PRE_MODE_3 = "PRE_MODE_3"      # the residue, and there is none
 PRECEDENCE = (PRE_GATE, PRE_MODE_1, PRE_LINEAGE, PRE_COMPAT, PRE_MODE_3)
 
+# The steps that claim a key and emit NO row, DECLARED rather than implied.
+#
+# THIS TUPLE EXISTS BECAUSE `unify_findings` DERIVED ITS OWN EXPECTATION FROM
+# `lanes`, WHICH MADE AN OMITTED LANE UNDETECTABLE. `expected` read
+# `{k for k, step in steps.items() if step in lanes}`, so a step MISSING from
+# `lanes` was excluded from the very check that should have failed on it. Run on
+# the fixture world with `PRE_COMPAT` left out: no raise, 8 rows silently became
+# 4, and the census reported `keys_compat: 4` beside `rows: 4`. The `unknown`
+# guard one screen down catches only the TYPO case, which produces an EXTRA key;
+# the OMISSION case produces only a missing one and passed. That is exactly the
+# hazard `unify_findings`' own docstring names -- "a missing mode looks exactly
+# like a mode that found nothing" -- and Task 9 re-assembles `lanes`, so it is
+# the next consumer's footgun rather than a hypothetical.
+#
+# `PRE_MODE_3` IS DELIBERATELY NOT IN HERE. Mode 3 HAS a lane and that lane is
+# empty, which is a different statement from "this step emits nothing by
+# design": the empty frame is how the report names the mode in order to say it
+# found nothing. So a key ever reaching `PRE_MODE_3` with no lane, or with a
+# lane that does not carry it, now FAILS -- which is right, because such a key
+# would be a proposal in no artifact at all.
+NON_EMITTING_STEPS = (PRE_GATE,)
+
 class Evidence(NamedTuple):
     """What is known about ONE absence key, and nothing else.
 
@@ -1045,7 +1067,19 @@ def compat_findings(
             "lineage": S.LIN_NONE,
             "lineage_neighbour_uuid": None,
             "lineage_n_supports": 0,
-            "co_reg_rate": got.rate,
+            # NULL, NOT 0.0, WHERE NOTHING REACHED A POPULATION.
+            # `best_co_registration` returns `(0.0, 0, None, None, 0)` when no
+            # assay this sample holds reaches a key at all, and writing that
+            # 0.0 into an operator-facing column would state a MEASURED rate of
+            # zero -- "these never coexist" -- on the one row whose own
+            # `evidence_summary` says "that is absent evidence and not a rate
+            # of zero". `co_reg_pop` stays 0 beside it and is not null: the
+            # population WAS read and it is empty, which is what makes
+            # `compat_band` read `BAND_NO_SUPPORT` rather than `BAND_NEVER`.
+            # 0 of the 6,932 compatibility rows on the real extract, and Task 8
+            # is the first code to write these columns into an artifact, which
+            # is what newly exposes it.
+            "co_reg_rate": None if got.registered_assay_id is None else got.rate,
             "co_reg_pop": got.support,
             "co_reg_registered_internal_assay_id": got.registered_assay_id,
             "co_reg_alt_label_internal_assay_id": got.alt_label_assay_id,
@@ -1111,9 +1145,21 @@ def mode3_findings() -> pd.DataFrame:
     single-valued -- against the sample's own `project_ids`: 1,340 of the
     214,296 membership rows, reproducing the spec exactly. Taking instead the
     project set of the INTERNAL assay, which unions every seek record sharing
-    that internal id and which 75 of the 154 internal ids spread over more than
-    one project, the same rule reads 924. Two constructions, two answers, and
-    the spec states neither.
+    that internal id, the same rule reads 924. Two constructions, two answers,
+    and the spec states neither.
+
+    THE DENOMINATOR OF THE MULTI-PROJECT SHARE HAS TO SAY WHICH SET IT COUNTS,
+    and this package has been quoting it without one. Measured 2026-08-18 over
+    `assays.parquet`: 458 assay records carry 137 distinct non-null
+    `internal_assay_id`s and 17 records carry none, so `precedent.assay_index`'s
+    map holds 154 ids -- the 137 plus one fallback per junction-less record.
+    **75 of the 137 GENUINE ids span more than one project, up to seven.** The
+    familiar phrasing "75 of the 154" is arithmetically true and misleading: not
+    one of the 17 fallback ids can span a project, since each stands for exactly
+    one record, so 154 is the wrong denominator for this numerator. Corrected
+    here; the same sentence appears in `mode2.registration_projects` and
+    `mode2.assay_titles`, where 154 IS the right denominator because those count
+    what the MAP resolves.
 
     The spec's companion figure reads "plus 271 samples with no project at
     all". 271 is the ROW count; the SAMPLE count is 242. A unit stated wrongly
@@ -1151,11 +1197,14 @@ def unify_findings(
     no (sample, assay) pair appears twice. A curator approves this file row by
     row, so a duplicate proposal is a duplicate write.
 
-    RAISES on a lane keyed on something that is not a step, following every
-    other crossing in this package. `lanes` is a dict of frames keyed by string
-    and a typo in the key would silently drop a whole mode -- and a missing mode
-    looks exactly like a mode that found nothing, which is the distinction this
-    increment exists to draw.
+    RAISES BOTH WAYS on a `lanes` that does not match the contract, and the two
+    directions are different bugs. A key that is not a step is a TYPO and
+    produces an extra entry; a step the precedence granted keys to and `lanes`
+    omits produces only a MISSING one, and the second is the one that bites --
+    it drops every row that step claimed while the census beside it reads like a
+    mode that found nothing. `NON_EMITTING_STEPS` is what makes the second
+    checkable, and `expected` below is derived from it rather than from `lanes`,
+    which is how the omission got through in the first place.
 
     Emitted in `PRECEDENCE` order and then SORTED on
     `(sample_id, proposed_internal_assay_id)`, a total order on this output. The
@@ -1169,6 +1218,20 @@ def unify_findings(
             "the step whose rows each frame emits; a key that is not a step "
             "silently drops a whole mode, which reads exactly like a mode that "
             "found nothing.")
+    # ...and the MIRROR of that check, which is the one that actually bites. A
+    # typo produces an extra key and is caught above; an OMISSION produces only
+    # a missing one, and until this guard existed it passed -- 8 rows became 4
+    # on the fixture world with `PRE_COMPAT` left out, silently.
+    absent = sorted({step for step in steps.values()
+                     if step not in lanes and step not in NON_EMITTING_STEPS})
+    if absent:
+        raise ValueError(
+            f"the precedence granted {absent} at least one key and `lanes` "
+            f"carries no frame for it. Every step is either emitting -- and "
+            f"must hand over a frame -- or declared in NON_EMITTING_STEPS "
+            f"{NON_EMITTING_STEPS}. A step omitted from `lanes` drops every row "
+            "it claimed and reads, in the census beside it, exactly like a mode "
+            "that found nothing.")
 
     kept = []
     for step in PRECEDENCE:
@@ -1190,7 +1253,10 @@ def unify_findings(
     assert len(emitted) == len(set(emitted)), (
         "the unified frame carries a (sample, assay) pair twice, so one "
         "membership write would be proposed to the operator as two rows")
-    expected = {k for k, step in steps.items() if step in lanes}
+    # DERIVED FROM THE CONTRACT AND NEVER FROM `lanes`: see NON_EMITTING_STEPS.
+    # `if step in lanes` excused the caller's own omission from the check.
+    expected = {k for k, step in steps.items()
+                if step not in NON_EMITTING_STEPS}
     assert set(emitted) == expected, (
         f"{len(expected - set(emitted))} key(s) the precedence granted a lane "
         f"reach no row and {len(set(emitted) - expected)} row(s) belong to no "
@@ -1321,6 +1387,19 @@ def findings_census(
         "lineage_taken_by_mode_1": taken_by_mode_1,
     }
     assert set(out) == set(FINDINGS_CENSUS_KEYS), "FINDINGS_CENSUS_KEYS is out of date"
+    # THE IDENTITY, ASSERTED AT RUNTIME AND NOT ONLY IN A TEST. Every key the
+    # precedence granted an EMITTING step must have reached a row, so the input
+    # minus the non-emitting steps IS the row count. It held silently while
+    # `unify_findings` could drop a whole lane -- the census reported
+    # `keys_compat: 4` beside `rows: 4` and nothing compared them -- and the
+    # subtrahend is derived from `NON_EMITTING_STEPS` so it cannot drift from
+    # the tuple that defines it.
+    non_emitting = sum(counts[step] for step in NON_EMITTING_STEPS)
+    assert out["input_keys"] - non_emitting == out["rows"], (
+        f"{out['input_keys']} input key(s) minus {non_emitting} claimed by "
+        f"{NON_EMITTING_STEPS} is not {out['rows']} emitted row(s): a step the "
+        "precedence granted keys to reached no lane, or a lane emitted rows for "
+        "keys nobody granted it")
     return {k: int(v) for k, v in out.items()}
 
 
@@ -1358,6 +1437,51 @@ DISPOSITION_COLUMNS = [
     "lineage", "co_reg_rate", "co_reg_pop", "compat_band",
     "evidence_summary",
 ]
+
+
+def disposition_breakdown(disposition: pd.DataFrame) -> pd.Series:
+    """The 866's split: the step, or the CLASS where the step is `PRE_COMPAT`.
+
+    The one aggregation the operator reads, so it is a named function rather
+    than three lines inside a `print` loop -- which is what it was until review,
+    and which is why the defect below had no test in front of it.
+
+    NOTHING IS DROPPED SILENTLY, and `value_counts()` drops nulls by DEFAULT. A
+    null `classification` on a `PRE_COMPAT` row would shrink this
+    operator-facing total below the flag count with no error anywhere: the
+    figure a curator uses to check that increment 1's population was fully
+    re-disposed would simply be smaller, and smaller is exactly what "some of
+    them turned out fine" looks like. So `dropna=False`, and the sum is CHECKED
+    against the population it summarises rather than trusted.
+
+    The partition test uses `Counter`, which counts NaN as a key, so it
+    structurally could not have caught this: the guard existed on a path this
+    aggregation does not take.
+
+    Nothing can produce that null today -- `compat_findings` classifies every
+    row it emits and `.where` keeps the STEP everywhere else -- so this is a
+    tripwire rather than a fix for a live loss. It is here because the column it
+    reads is nullable by contract and the cost of the tripwire is one keyword.
+
+    RAISES rather than returning a short series. The branch is UNREACHABLE while
+    `dropna=False` stands -- a `value_counts(dropna=False)` over a series of
+    length n always sums to n -- so it is a tripwire for the keyword above it
+    and not a branch any frame can enter. Stated plainly, because a guard that
+    reads like live error handling and can never run is the same thing as a
+    comment claiming a check that does not happen.
+    """
+    split = disposition.precedence_step.where(
+        disposition.precedence_step != PRE_COMPAT,
+        disposition.classification).value_counts(dropna=False)
+    total = int(split.sum())
+    if total != len(disposition):
+        raise ValueError(
+            f"the disposition breakdown sums to {total} over "
+            f"{len(disposition)} flag(s), so {len(disposition) - total} of them "
+            "are in no printed bucket. `value_counts` drops nulls by default "
+            "and this one does not, so a short sum here means the frame changed "
+            "shape rather than that a row was silently dropped.")
+    return split
 
 
 def mode3_disposition(
@@ -1594,9 +1718,7 @@ def main(extract_dir: str = "assay-hygiene/extract",
 
     flags = audit_contradictions(claims, membership, assays, nodes)
     disposition = mode3_disposition(flags, steps, unified, attached)
-    prior = disposition.precedence_step.where(
-        disposition.precedence_step != PRE_COMPAT,
-        disposition.classification).value_counts()
+    prior = disposition_breakdown(disposition)
     print(f"  increment 1 raised {len(flags):,} MODE_3 flags; not one is a "
           "contradiction under this precedence:")
     for k, v in prior.items():

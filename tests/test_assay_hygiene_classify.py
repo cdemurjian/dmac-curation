@@ -3664,3 +3664,215 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
     assert {steps[k] for k in k24} == {X.PRE_GATE}
     emitted = set(zip(findings.sample_id, findings.proposed_internal_assay_id))
     assert not (k24 & emitted), "not one of the 24 reaches a row"
+
+
+def test_a_lane_omitted_from_the_unified_pass_fails_rather_than_dropping_a_whole_mode():
+    """The OMISSION case, which the typo guard could not see and review found live.
+
+    `unify_findings` derived its own expectation as
+    `{k for k, step in steps.items() if step in lanes}`, so a step MISSING from
+    `lanes` was excluded from the very check that should have failed on it. Run
+    on this world with `PRE_COMPAT` left out, that version raised nothing: 8 rows
+    silently became 4, and `findings_census` reported `keys_compat: 4` beside
+    `rows: 4` with the identity `input - non-emitting == rows` false and nothing
+    comparing them.
+
+    The `unknown` guard catches only the TYPO case, which produces an EXTRA key.
+    Task 9 re-assembles `lanes`, so this is the next consumer's live footgun
+    rather than a hypothetical, and `NON_EMITTING_STEPS` is what makes the
+    omission checkable: every step is either emitting -- and must hand over a
+    frame -- or declared.
+
+    THE WRONG RULE IS RUN BY HAND and asserted to give a different answer: the
+    lanes-derived expectation is computed here and shown to be SATISFIED by the
+    four rows the truncated call would have published.
+    """
+    _, parts = _pipeline3()
+    steps, lanes = parts["steps"], dict(parts["lanes"])
+    assert X.NON_EMITTING_STEPS == (X.PRE_GATE,)
+    assert set(X.NON_EMITTING_STEPS) < set(X.PRECEDENCE)
+    # Mode 3 is NOT declared non-emitting: it has a lane and that lane is empty,
+    # which is a different statement from "this step emits nothing by design"
+    assert X.PRE_MODE_3 not in X.NON_EMITTING_STEPS
+
+    del lanes[X.PRE_COMPAT]
+    with pytest.raises(ValueError, match="NON_EMITTING_STEPS"):
+        X.unify_findings(steps, lanes)
+
+    # THE WRONG RULE, run by hand: derive the expectation FROM `lanes`. The four
+    # rows the truncated call would have emitted satisfy it exactly, which is
+    # why the old guard passed while half the artifact went missing.
+    survivors = pd.concat(
+        [lanes[s] for s in X.PRECEDENCE if s in lanes], ignore_index=True)
+    kept = {(int(s), int(a)) for s, a in
+            zip(survivors.sample_id, survivors.proposed_internal_assay_id)
+            if steps.get((int(s), int(a))) is not None}
+    kept = {k for k in kept if steps[k] in lanes}
+    lanes_derived = {k for k, step in steps.items() if step in lanes}
+    assert kept == lanes_derived, "the wrong rule must be satisfied or this proves nothing"
+    assert len(kept) == 4 and len(parts["findings"]) == 8
+
+    # ...and the contract-derived expectation, which is what the emitter now
+    # uses, is NOT satisfied by those four
+    contract = {k for k, step in steps.items()
+                if step not in X.NON_EMITTING_STEPS}
+    assert contract != lanes_derived
+    assert len(contract) == 8
+
+    # the identity the census now asserts at runtime is the same fact
+    census = parts["census"]
+    assert (census["input_keys"] - census["keys_refused_by_the_gate"]
+            == census["rows"] == 8)
+
+    # THE OTHER DIRECTION, which is what separates the two derivations. A lane
+    # offered for a NON-EMITTING step is refused: its rows carry that step, so
+    # the filter would KEEP them, while the contract says the step emits
+    # nothing. Under the lanes-derived expectation those rows are silently
+    # admitted -- `step in lanes` is true of them -- and 2 gate-refused
+    # proposals reach `findings.csv`. This is the case the two rules disagree
+    # about, and it is the reason the derivation had to move off `lanes`.
+    smuggled = dict(parts["lanes"])
+    smuggled[X.PRE_GATE] = parts["lanes"][X.PRE_LINEAGE]
+    lanes_derived_wrong = {k for k, step in steps.items() if step in smuggled}
+    contract_here = {k for k, step in steps.items()
+                     if step not in X.NON_EMITTING_STEPS}
+    assert lanes_derived_wrong != contract_here, (
+        "the two derivations must disagree here or this proves nothing")
+    assert len(lanes_derived_wrong) == 10 and len(contract_here) == 8
+    with pytest.raises(AssertionError, match="belong to no"):
+        X.unify_findings(steps, smuggled)
+
+
+def test_the_census_refuses_a_row_count_that_contradicts_its_own_key_count():
+    """`input_keys` minus the non-emitting steps IS `rows`, asserted at runtime.
+
+    The identity held silently while `unify_findings` could drop a whole lane:
+    the census reported `keys_compat: 4` beside `rows: 4` and nothing compared
+    them. `unify_findings` now refuses that assembly before the census is
+    reached, so the two guards are belt and braces -- but `findings_census` is a
+    public function and a caller can hand it a frame that never went through the
+    emitter, which is exactly what a report assembled from a filtered artifact
+    would be.
+
+    The subtrahend is derived from `NON_EMITTING_STEPS` rather than written, so
+    it cannot drift from the tuple that defines it.
+    """
+    _, parts = _pipeline3()
+    keys, steps, lanes = parts["keys"], parts["steps"], parts["lanes"]
+    agreeing = X.claims_agreeing_with_a_registration(parts["attached"],
+                                                     parts["registered"])
+
+    # the honest call is green, so the guard is not firing unconditionally
+    census = X.findings_census(keys, steps, parts["findings"], lanes,
+                               agreeing=agreeing)
+    assert census["rows"] == 8
+
+    # a frame one row short of what the precedence granted
+    with pytest.raises(AssertionError, match="emitted row"):
+        X.findings_census(keys, steps, parts["findings"].iloc[1:], lanes,
+                          agreeing=agreeing)
+    # ...and one row too many
+    with pytest.raises(AssertionError, match="emitted row"):
+        X.findings_census(
+            keys, steps,
+            pd.concat([parts["findings"], parts["findings"].iloc[:1]],
+                      ignore_index=True),
+            lanes, agreeing=agreeing)
+
+
+def test_a_row_where_nothing_reached_a_population_carries_a_null_rate_not_a_measured_zero():
+    """`best_co_registration` returns 0.0 for "nothing measured", and 0.0 is a rate.
+
+    It returns `(0.0, 0, None, None, 0)` when no assay the sample holds reaches
+    a key at all, and the zero is safe THERE only because `compat_band` tests
+    support before rate. Written into `findings.csv` unguarded it becomes an
+    operator-facing `co_reg_rate` of 0.000 -- "these two never coexist" -- on
+    the one row whose own `evidence_summary` says "that is absent evidence and
+    not a rate of zero". Task 8 is the first code to write these columns into an
+    artifact, which is what newly exposes it.
+
+    0 of the 6,932 compatibility rows on the real extract reach this, because
+    the gate guarantees the proposed assay is reachable for the type and the
+    sample's own registration guarantees the other cell. So the state is
+    constructed here through the `table` argument, which is what the function
+    takes and what a caller measuring over a subset would hand it.
+
+    `co_reg_pop` stays 0 and is NOT null, deliberately: the population was read
+    and it is empty, which is exactly what makes `compat_band` read
+    `BAND_NO_SUPPORT` rather than `BAND_NEVER`.
+    """
+    _, parts = _pipeline3()
+    row = _found(parts["findings"], 600, 12)
+    assert pd.notna(row.co_reg_rate) and row.co_reg_rate > 0.0, (
+        "the unmutated world must measure a rate here or this proves nothing")
+
+    empty = X.compat_findings(
+        parts["attached"], steps=parts["steps"], registered=parts["registered"],
+        table={}, titles=parts["titles"], projects=parts["projects"])
+    assert len(empty) == len(parts["lanes"][X.PRE_COMPAT]) == 4
+
+    got = empty[(empty.sample_id == 600)
+                & (empty.proposed_internal_assay_id == 12)].iloc[0]
+    assert pd.isna(got.co_reg_rate), "0.0 would state a rate nobody measured"
+    assert got.co_reg_pop == 0            # read, and empty
+    assert pd.isna(got.co_reg_registered_internal_assay_id)
+    assert got.compat_band == S.BAND_NO_SUPPORT
+    assert got.classification == S.CLS_UNRESOLVED
+    assert pd.isna(got["mode"]) and got.action == S.A_NONE
+    assert "absent evidence and not a rate of zero" in got.evidence_summary
+    # every row on this path says the same thing, not just the one read above
+    assert empty.co_reg_rate.isna().all()
+    assert set(empty.compat_band) == {S.BAND_NO_SUPPORT}
+
+
+def test_the_disposition_breakdown_counts_a_null_class_rather_than_dropping_it():
+    """`value_counts()` drops nulls by default, and this one must not.
+
+    The breakdown is the figure a curator uses to check that increment 1's whole
+    866 was re-disposed. A null `classification` on a `PRE_COMPAT` row would
+    shrink it below 866 with no error, and smaller is exactly what "some of them
+    turned out fine" looks like to a reader.
+
+    Nothing can produce that null through the real path -- `compat_findings`
+    classifies every row it emits -- so it is INJECTED here, which is the only
+    way to know the guard fires rather than merely exists. The wrong rule,
+    `value_counts()` with its default, is run by hand on the same frame and
+    asserted to give a SMALLER total.
+    """
+    w, parts = _pipeline3()
+    flags = A.audit_contradictions(
+        C.sample_claims(V.parse_metadata(w["samples"]),
+                        dict(zip(w["samples"].sample_id.astype(int),
+                                 w["samples"].uuid)),
+                        w["vocabulary"]),
+        w["membership"], w["assays"], w["nodes"])
+    out = X.mode3_disposition(flags, parts["steps"], parts["findings"],
+                              parts["attached"])
+
+    clean = X.disposition_breakdown(out)
+    assert int(clean.sum()) == len(out) == len(flags)
+    assert not clean.index.isna().any(), "the real path produces no null"
+
+    # INJECT one, on a PRE_COMPAT row, which is the only place it could arise
+    holed = out.copy()
+    target = holed.index[holed.precedence_step == X.PRE_COMPAT][0]
+    holed.loc[target, "classification"] = None
+
+    # THE WRONG RULE, run by hand: the pandas default
+    wrong = holed.precedence_step.where(
+        holed.precedence_step != X.PRE_COMPAT,
+        holed.classification).value_counts()
+    assert int(wrong.sum()) == len(holed) - 1, (
+        "the default must lose the row or this proves nothing")
+
+    got = X.disposition_breakdown(holed)
+    assert int(got.sum()) == len(holed)
+    assert got.index.isna().any(), "the null is a bucket, not a deletion"
+    assert int(wrong.sum()) != int(got.sum())
+
+    # ...and the function's own sum check is what would REJECT the wrong rule's
+    # answer. The raise is unreachable while `dropna=False` stands -- a
+    # `value_counts(dropna=False)` over a series of length n always sums to n --
+    # so it is a tripwire for the keyword rather than a branch this frame can
+    # enter, and this is the assertion that says what it would have caught.
+    assert int(wrong.sum()) != len(holed)
