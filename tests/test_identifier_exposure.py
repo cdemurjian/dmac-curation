@@ -135,7 +135,12 @@ PROTOCOL_OCCURRENCES = 43          # case-tolerant.
 # All 42 occurrences sit in the reserved 19MMDD band, under the placeholder lab
 # codes those modules use, and none resolves to a real sample. PR #9 merged
 # without moving this baseline, which left dev red on this test alone.
-UID_PATTERN_OCCURRENCES = 496      # all synthetic
+# 496 -> 502 on 2026-09-28: the semicolon-spacing fix to review_metadata_vs_uploads
+# (cherry-picked from feat/curate-protocols-phase-3b) brings six fixture
+# occurrences in test_review_metadata.py. They arrived under a real batch stamp
+# and were re-stamped into the 19MMDD band on the way in, keeping type prefix,
+# lab code and serial as docs/SECURITY.md prescribes.
+UID_PATTERN_OCCURRENCES = 502      # all synthetic
 # 439 -> 440 on 2026-08-27: the prerequisites plan under docs/superpowers/plans/
 # cites one 19MMDD-band uid as the example new fixtures must follow. Verified
 # absent from all 177,393 production uids, and no 19xx-band uid is real for any
