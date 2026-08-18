@@ -461,9 +461,23 @@ peers.** Measured:
 | | ADD_PARENT | ADD_CHILD |
 |---|---|---|
 | corroborated by co-registration over the 866 | **88/88, 100%** | 15/263, 5.7% |
-| rules at rate >= 0.95 | 5 | 15 |
-| candidate rows surviving rate >= 0.5 | 79,488 | **3,663** of 117,463 |
-| rows creating a (type, assay) pair existing nowhere | 55.6% | **67.6%** |
+| candidate rows surviving rate >= 0.5, over DERIVED_FROM | **8,170** of 55,007 | **2,067** of 117,331 |
+| rows creating a (type, assay) pair existing nowhere | 55.4% | 62.4% |
+
+**CORRECTED 2026-08-18. THE SPEC WAS CORRECTED AND THIS WAS NOT**, for two
+weeks, in the document the tasks were dispatched from. The full derivation sits
+under the same table in
+`docs/superpowers/specs/2026-08-14-assay-hygiene-three-mode-design.md` and is
+deliberately not restated here: a third copy of a rationale is a third thing to
+drift, which is the defect this whole correction is an instance of.
+
+The survival row read `79,488 | 3,663 of 117,463`. **79,488 was impossible** --
+it exceeds the entire ADD_PARENT ceiling of 55,007 stated in this same plan,
+and neither the author nor two reviewers noticed a survivor count larger than
+its own population. The unseen-pair row read `55.6% | 67.6%`, and 67.6
+reproduces under none of four constructions. A fourth row, `rules at rate >=
+0.95 | 5 | 15`, is REMOVED: scoped correctly it favours ADD_CHILD three to one,
+so it argued against the heading it was cited to support.
 
 The single cleanest datum: `TIS <- PAV` under 56 Patient Visit runs a reverse
 rate of **0.006**, while the same hop under 74 Tissue Collection runs a

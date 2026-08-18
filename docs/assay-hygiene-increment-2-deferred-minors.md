@@ -14,10 +14,13 @@ WHOLE-BRANCH REVIEW IS POINTED AT THIS LIST.
 
 **52 deferred minors. 16 cross-task carries.**
 
-**Status 2026-08-18:** 16 closed by the final review (marked `[x]` with the
-commit that closed them). Four were already closed by later tasks and the
-ledger never recorded it -- which is itself the argument for extracting this
-list rather than trusting the ledger's open/closed state.
+**Status 2026-08-18:** 21 of 68 closed by the final review, marked `[x]` with the commit that closed them. **47 remain open.**
+
+NINE of those closures needed NO WORK -- they had already been fixed by a
+later task and the ledger never recorded it. A review trusting the ledger's
+open/closed state would have re-fixed nine things and reported them as
+findings. This ledger is a good record of what was FOUND and an unreliable
+record of what is OPEN, which is the argument for this file.
 
 ## Deferred minors
 
@@ -130,8 +133,10 @@ list rather than trusting the ledger's open/closed state.
 
 ### Task 6
 
-- [ ] (ledger:608) BRANCH-LEVEL DOC FIX REQUIRED (spec + plan), not Task 6's to make. Flag for the final review.
-- [ ] (ledger:639) BRANCH-LEVEL DOC FIX (spec + plan): all four demotion rows plus the 5/15 scope. Not Task 6's to make.
+- [x] (ledger:608) BRANCH-LEVEL DOC FIX REQUIRED (spec + plan), not Task 6's to make. Flag for the final review.
+      **RESOLVED 2026-08-18 (this wave): same demotion-table figures as ledger:639.**
+- [x] (ledger:639) BRANCH-LEVEL DOC FIX (spec + plan): all four demotion rows plus the 5/15 scope. Not Task 6's to make.
+      **RESOLVED 2026-08-18 (this wave): the spec had been corrected and THE PLAN HAD NOT, for two weeks, in the document the tasks were dispatched from. The plan still published 79,488 -- a survivor count larger than its own 55,007 ceiling. Now matched to the spec, with the fourth row removed.**
 - [ ] (ledger:683) reverse_rate 1.0 on n_both=2 should recover badly. CARRY TO TASK 7 AS ITS CENTRAL QUESTION.
 - [ ] (ledger:732) CARRY TO TASK 7: know the magnitude before leaning on it.
 - [x] (ledger:772) CARRY TO TASK 8: item 4's pin sits INSIDE the extract-backed test, which skips without the extract — but its source-text half has NO data dependency and skips with the data anyway. On a machine without the extract, an edit to main's prose passes silently. Split it.
@@ -144,10 +149,13 @@ list rather than trusting the ledger's open/closed state.
 
 ### Task 8
 
-- [ ] (ledger:904) BRANCH-LEVEL action I take after the review, not Task 8's — I wrote that script and the spec cites
-- [ ] (ledger:979) NOT Task 8's, recorded for the final review: tests/test_assay_hygiene_gate.py:196 says "458 records collapsing to 154 internal ids" — 458 collapse to 137; the map holds 154 after the 17 fallbacks.
+- [x] (ledger:904) BRANCH-LEVEL action I take after the review, not Task 8's — I wrote that script and the spec cites
+      **RESOLVED 2026-08-18 (7b84d39): this WAS the retire-the-prototype action, and it is done.**
+- [x] (ledger:979) NOT Task 8's, recorded for the final review: tests/test_assay_hygiene_gate.py:196 says "458 records collapsing to 154 internal ids" — 458 collapse to 137; the map holds 154 after the 17 fallbacks.
+      **RESOLVED by Task 8 round 3 (304cb20): the site now reads '458 records collapsing to 137 internal ids, 154 in `precedent.assay_index`'s map'. Verified 2026-08-18.**
 - [ ] (ledger:981) CARRY TO TASK 9: findings_census's new assertion is CARDINALITY-ONLY (right count, one key swapped, passes — unify_findings catches it, so exposure is the public-caller path); and it makes findings_census unusable on any FILTERED SUBSET of findings.csv, which Task 9's report code meets.
 
 ### Task 9
 
-- [ ] (ledger:1092) finding is untouched. Carried to the final review as a wording fix, since the "24" is published in
+- [x] (ledger:1092) finding is untouched. Carried to the final review as a wording fix, since the "24" is published in
+      **RESOLVED 2026-08-18 (7b84d39): the 24-vs-25 scoping is stated at the runtime print, the test comment and the spec.**
