@@ -214,7 +214,7 @@ def registration_projects(
     key the wrong rule silently. The denominator is 137 and not 154, corrected
     2026-08-18: 154 is what `assay_index`'s MAP holds once the 17 junction-less
     records take a fallback id, and not one of those 17 can span a project. The
-    154 in `assay_titles` three functions up is a different sentence with a
+    154 in `assay_titles` one function up is a different sentence with a
     different numerator and is right as it stands. Measured 2026-08-17, only 1 of 214,124 (sample, internal
     assay) registrations spans two projects at all, so the multiplicity this
     returns is real and rare; `mode2_findings` walks it in ascending order and

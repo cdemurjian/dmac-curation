@@ -193,8 +193,9 @@ def test_type_registration_index_counts_distinct_samples_of_the_type():
     assertion above. That is the self-certifying-test failure increment 1
     shipped five of. The real shape it stands in for is ordinary -- seek
     instantiates the same logical assay once per study, 458 records collapsing
-    to 154 internal ids -- so a sample in two studies' Tissue Collection is two
-    membership rows and one sample of that type.
+    to 137 internal ids, 154 in `precedent.assay_index`'s map once the 17
+    junction-less records take a fallback -- so a sample in two studies' Tissue
+    Collection is two membership rows and one sample of that type.
     """
     fx = S.make_fixture()
     nodes = _nodes(fx)

@@ -3254,9 +3254,16 @@ def test_the_classes_partition_every_claim_backed_absence_and_every_lineage_pair
     is 89% of the 138,007, and they are counted by name rather than dropped.
 
     Every key gets exactly one step, the five steps sum to the input, and the
-    two that emit nothing -- `PRE_GATE` and `PRE_MODE_3` -- are the difference
-    between the input and the emitted rows. Every emitted row gets exactly one
-    classification or an explicit null, and those sum to the rows.
+    keys claimed by `NON_EMITTING_STEPS` are the difference between the input
+    and the emitted rows. Every emitted row gets exactly one classification or
+    an explicit null, and those sum to the rows.
+
+    THIS SENTENCE SAID "the two that emit nothing -- `PRE_GATE` and
+    `PRE_MODE_3`" for one round after the inline comment 26 lines down was
+    corrected for saying exactly that. Same file, same function, same sentence,
+    and the correction did not look up. `PRE_MODE_3` is NOT non-emitting: Mode 3
+    has a lane, that lane is empty, and a key reaching it with no row is an
+    error rather than a design.
     """
     _, parts = _pipeline3()
     keys, steps, findings, census = (parts["keys"], parts["steps"],
@@ -3916,31 +3923,117 @@ def test_the_disposition_breakdown_counts_a_null_class_rather_than_dropping_it()
     assert int(wrong.sum()) != len(holed)
 
 
-def test_the_multi_project_share_is_measured_and_its_denominator_is_the_same_everywhere():
-    """Six figures re-derived from the parquet, then read back out of the source.
+def _sentence_sources() -> dict[str, str]:
+    r"""{name: source, comment markers stripped, whitespace flattened}. GLOBBED.
 
-    NOTHING PINNED ANY OF THEM. The sentence pairing 75 with the MAP's 154 was
-    published at seven live sites across three modules and this test file,
+    NAMING THE FILES IS WHAT LET A SITE GO UNSCANNED. The first version listed
+    four paths by hand and `_schema.py` was one of them -- yet its sentence was
+    invisible, so a revert there passed green. Globbing means a module added
+    later is scanned without anyone remembering, and the per-file coverage
+    assertion below is what makes a file that stops matching LOUD.
+
+    THE `#` MARKER IS STRIPPED BEFORE THE WHITESPACE, and that is the whole
+    defect. `re.sub(r"\s+", " ", ...)` collapses the newline and the indent but
+    leaves the comment marker, so a sentence wrapping mid-phrase inside a `#`
+    block flattens to `75 # of the 137 internal assay ids` and matches nothing.
+    `_schema.py` carries this sentence as a comment and wraps exactly there;
+    `classify.py` and `mode2.py` carry it in docstrings and did not, which is
+    why a clean run could not expose it.
+    """
+    files = (sorted((REPO / "scripts" / "assay_hygiene").glob("*.py"))
+             + sorted((REPO / "tests").glob("test_assay_hygiene_*.py")))
+    assert len(files) > 20, f"the glob found only {len(files)} file(s)"
+    out = {}
+    for f in files:
+        # the comment marker first, then the whitespace
+        text = re.sub(r"(?m)^\s*#\s?", "", f.read_text())
+        out[f.name] = re.sub(r"\s+", " ", text)
+    return out
+
+
+# The two id counts, stated once. `test_the_multi_project_share_is_measured_...`
+# proves both against `assays.parquet`; the scan below needs them without an
+# extract, which is why they are constants here rather than derived twice.
+ASSAYS_GENUINE_IDS = 137     # distinct non-null internal_assay_id in the frame
+ASSAYS_MAPPED_IDS = 154      # ...plus one fallback per junction-less record
+
+
+def test_the_multi_project_denominator_is_the_same_at_every_site_that_states_it():
+    """One sentence, nine sites, one denominator. NO EXTRACT NEEDED.
+
+    THE MEASUREMENT AND THE CONSISTENCY CHECK ARE SEPARATE TESTS, deliberately.
+    Proving 137 is the right number needs the parquet; proving that every site
+    says the SAME number needs only the source, and the first version gated both
+    behind `_real()` -- so on a clean checkout the whole class-guard silently did
+    not run. The half that can always run, always runs.
+
+    THE DENOMINATOR DEPENDS ON THE NUMERATOR BESIDE IT, which is what makes this
+    a class rather than a typo. `assay_index`'s MAP holds 154 ids: the 137 the
+    assays frame carries plus one fallback per junction-less record. A fallback
+    stands for exactly one record and cannot span a project, so every one of the
+    75 comes out of the 137 -- while 154 is exactly right three functions away,
+    where the sentence counts what the map resolves.
+
+    The wrong pairing is described here and never SPELLED: this test greps for
+    it, so writing it out would make the guard fail on its own docstring. It
+    did, on the first run, and its own assertion literal did on the second.
+    """
+    flat = _sentence_sources()
+    joined = " ".join(flat.values())
+
+    # WHICH FILES STATE IT, asserted as a SET. `>= 7` was satisfied by seven
+    # sites while an eighth went unscanned, so the shortfall was silent; a file
+    # that stops matching now names itself.
+    stating = {name: re.findall(
+        r"75 of the ([\d,]+) (?:internal assay|GENUINE) ids", text)
+        for name, text in flat.items()}
+    stating = {k: v for k, v in stating.items() if v}
+    assert set(stating) == {"_schema.py", "classify.py", "mode2.py",
+                            "test_assay_hygiene_classify.py"}, sorted(stating)
+    assert sum(len(v) for v in stating.values()) == 8, stating
+    assert {int(n.replace(",", "")) for v in stating.values() for n in v} == {
+        ASSAYS_GENUINE_IDS}
+
+    # ...and the COLLAPSE phrasing, which is the same fact under another verb.
+    # `collaps\w+` and not `collapse`, because the site this guard could not
+    # reach says "collapsing"; the numeral there is the frame's count, not the
+    # map's, in every spelling.
+    collapsing = {name: re.findall(
+        r"collaps\w+ to ([\d,]+) (?:curated )?internal", text)
+        for name, text in flat.items()}
+    collapsing = {k: v for k, v in collapsing.items() if v}
+    assert set(collapsing) == {"test_assay_hygiene_classify.py",
+                               "test_assay_hygiene_gate.py",
+                               "test_assay_hygiene_schema.py"}, sorted(collapsing)
+    assert {int(n.replace(",", "")) for v in collapsing.values() for n in v} == {
+        ASSAYS_GENUINE_IDS}
+
+    # NEITHER NEEDLE IS WRITTEN OUT, for the reason the docstring gives. They
+    # are assembled from the map size, which is what a reader would grep for.
+    wrong_pair = "75 of the " + str(ASSAYS_MAPPED_IDS)
+    assert wrong_pair.endswith(str(ASSAYS_MAPPED_IDS))
+    assert str(ASSAYS_GENUINE_IDS) not in wrong_pair
+    for name, text in flat.items():
+        assert wrong_pair not in text, name
+        assert not re.search(
+            r"collaps\w+ to %d internal" % ASSAYS_MAPPED_IDS, text), name
+
+    # ...and the ONE place the map size IS the right denominator still says it.
+    # Assembled too, so this string follows the same rule the comment above
+    # states -- it was the only hard-coded one.
+    right = ("no internal id resolves to two distinct titles over the %d in "
+             "the map" % ASSAYS_MAPPED_IDS)
+    assert right in flat["mode2.py"]
+
+
+def test_the_multi_project_share_is_measured_and_its_denominator_is_the_right_one():
+    """Six figures re-derived from the parquet. The scan above proves consistency.
+
+    NOTHING PINNED ANY OF THEM. The sentence pairing 75 with the MAP's count was
+    published at nine sites across three modules and three test files,
     propagated from one dispatch, and no test compared it to the data -- which
     is the same gap the R2 mutation exposed for the module docstring's swap
     counts, and it is closed the same way.
-
-    The wrong pairing is described here and never SPELLED, deliberately: this
-    test greps for it, so writing it out would make the guard fail on its own
-    docstring. That is not a trick to dodge the check -- the check found this
-    docstring on its first run, which is the evidence that it reads the file it
-    claims to read.
-
-    THE DENOMINATOR DEPENDS ON THE NUMERATOR BESIDE IT, which is what makes this
-    a class of defect rather than a typo. `assay_index`'s MAP holds 154 ids: the
-    137 the assays frame actually carries, plus one fallback per junction-less
-    record. Not one of those 17 fallbacks can span a project -- each stands for
-    exactly one record -- so every one of the 75 comes out of the 137, and 154
-    is wrong HERE while being exactly right three functions away, where the
-    sentence counts what the map resolves.
-
-    So this asserts both halves: 137 wherever the numerator is 75, and 154 in
-    `assay_titles`, whose numerator is "0 ids resolving to two titles".
     """
     r = _real()
     assays = r["assays"]
@@ -3954,9 +4047,9 @@ def test_the_multi_project_share_is_measured_and_its_denominator_is_the_same_eve
     multi = {i for i, p in projects_of.items() if len(p) > 1}
 
     assert len(assays) == 458
-    assert len(genuine) == 137
+    assert len(genuine) == ASSAYS_GENUINE_IDS == 137
     assert junctionless == 17
-    assert len(mapped) == 154 == len(genuine) + junctionless
+    assert len(mapped) == ASSAYS_MAPPED_IDS == len(genuine) + junctionless
     assert len(multi) == 75
     assert max(len(p) for p in projects_of.values()) == 7
     # ...and every one of the 75 is a GENUINE id, which is the whole argument
@@ -3964,51 +4057,9 @@ def test_the_multi_project_share_is_measured_and_its_denominator_is_the_same_eve
     assert multi <= genuine
     assert not (multi & (mapped - genuine))
 
-    # --- and now the sentences, read out of the source -----------------------
-    #
-    # The four files that publish the pairing, pinned as a SET so a fifth is
-    # visible rather than silently unguarded.
-    scanned = {
-        "classify.py": (PACKAGE / "classify.py").read_text(),
-        "mode2.py": (PACKAGE / "mode2.py").read_text(),
-        "_schema.py": (PACKAGE / "_schema.py").read_text(),
-        "test": Path(__file__).read_text(),
-    }
-    flat = {k: re.sub(r"\s+", " ", v) for k, v in scanned.items()}
-    joined = " ".join(flat.values())
-
-    stated = re.findall(r"75 of the ([\d,]+) (?:internal assay|GENUINE) ids",
-                        joined)
-    assert len(stated) >= 7, (
-        f"only {len(stated)} site(s) matched; the sentence was reworded and "
-        "this pin has gone blind")
-    assert {int(n.replace(",", "")) for n in stated} == {len(genuine)} == {137}
-
-    # The pairing this task corrected must not survive anywhere. BOTH NEEDLES
-    # ARE ASSEMBLED RATHER THAN WRITTEN, because this guard scans the file it is
-    # written in: a literal here would make the test fail on its own source. It
-    # did, on the first run, which is the evidence that the scan reads what it
-    # claims to. Assembling them is not dodging the check -- the string compared
-    # against every file is byte-identical to the one a reader would grep for.
-    wrong_pair = "75 of the " + str(len(mapped))
-    wrong_collapse = "collapse to " + str(len(mapped)) + " internal ids"
-    # the needles really are the map size and not the frame size, checked
-    # without spelling either of them
-    assert wrong_pair.endswith(str(len(mapped)))
-    assert str(len(genuine)) not in wrong_pair
-    assert str(len(mapped)) in wrong_collapse
-    for name, text in flat.items():
-        assert wrong_pair not in text, name
-        assert wrong_collapse not in text, name
-
-    # ...and the ONE place 154 is the right denominator still says 154, because
-    # its numerator is different. `assay_titles` counts what the MAP resolves.
-    assert ("no internal id resolves to two distinct titles over the 154 in "
-            "the map") in flat["mode2.py"]
-    assert len({t for _p, _i, t in ainfo.values()
-                if t is not None}) <= len(mapped)
+    # the map-scoped sentence's own numerator, measured
     decoded = {}
     for _seek, (_p, iaid, title) in ainfo.items():
         decoded.setdefault(iaid, set()).add(title)
     assert not [i for i, t in decoded.items() if len(t) > 1], (
-        "the 154-scoped sentence claims no id decodes to two titles")
+        "the map-scoped sentence claims no id decodes to two titles")
