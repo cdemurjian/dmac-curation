@@ -14,6 +14,11 @@ WHOLE-BRANCH REVIEW IS POINTED AT THIS LIST.
 
 **52 deferred minors. 16 cross-task carries.**
 
+**Status 2026-08-18:** 11 closed by the final review (marked `[x]` with the
+commit that closed them). Four were already closed by later tasks and the
+ledger never recorded it -- which is itself the argument for extracting this
+list rather than trusting the ledger's open/closed state.
+
 ## Deferred minors
 
 ### Task 1
@@ -30,12 +35,14 @@ WHOLE-BRANCH REVIEW IS POINTED AT THIS LIST.
 
 - [ ] (deferred; ledger:134) acceptance test's by_type dict keeps only the last row per type, so per-type assertions check 1 row not 11/13; inert today (populations uniform), blocking assert covers all 24.
 - [ ] (deferred; ledger:136) test_reachability_is_evaluated_before... docstring claims 3 failures, asserts only `gate`; gate_failures now makes the full claim one line.
-- [ ] (deferred, LATENT CRASH, carry to Task 8; ledger:138) three near-copies of the vocabulary index at gate.py:567-571, :706-710, :424 with DISAGREEING null policies — term_families skips null internal_assay_id, the other two do not, so such a row reaching int() at :732 raises ValueError. Unreachable today; the asymmetry is the bug. One _vocab_index() helper with one null policy.
+- [x] (deferred, LATENT CRASH, carry to Task 8; ledger:138) three near-copies of the vocabulary index at gate.py:567-571, :706-710, :424 with DISAGREEING null policies — term_families skips null internal_assay_id, the other two do not, so such a row reaching int() at :732 raises ValueError. Unreachable today; the asymmetry is the bug. One _vocab_index() helper with one null policy.
+      **RESOLVED 2026-08-18 (7b84d39): one declared policy, `gate._maps_an_assay`, used by all three sites. Csvs byte-identical, so behaviour-preserving on real data (0 of 736 rows carry a null).**
 - [ ] (deferred; ledger:142) defect sort documented as total but omits internal_assay_id under unstable quicksort; 0 ties on today's 202 rows.
 - [ ] (deferred; ledger:144) GATE_UNREACHABLE rows key internal_assay_id off the claim and title off the vocab row; agree today, would name a different assay if they diverged.
 - [ ] (deferred; ledger:146) `blocks_modes` (column) vs `blocks_mode` (function) differ by one character.
 - [ ] (deferred; ledger:147) test_a_curator_row_is_never_gated_out_by_the_floors... name now vacuous post-ruling-A.
-- [ ] (deferred, new; ledger:154) gate.py:876-878 zip(_casts,_argv) truncates, so a 5th CLI arg is now silently discarded where main(*sys.argv[1:]) previously raised TypeError.
+- [x] (deferred, new; ledger:154) gate.py:876-878 zip(_casts,_argv) truncates, so a 5th CLI arg is now silently discarded where main(*sys.argv[1:]) previously raised TypeError.
+      **RESOLVED 2026-08-18 (7b84d39): arity checked before the zip; a 5th argument now exits with a named error instead of being discarded.**
 - [ ] (deferred, new; ledger:156) gate.py:63-64 module docstring usage block still shows the bare no-arg invocation; the two new CLI positionals are documented only in main's docstring.
 
 ### Task 3
@@ -61,7 +68,8 @@ WHOLE-BRANCH REVIEW IS POINTED AT THIS LIST.
 - [ ] (deferred; ledger:359) no read-only parquet/import guard for compatibility.py where lineage.py has one.
 - [ ] (deferred; ledger:360) documented tie-break (larger support, then lowest id) is untested; world B has no tie.
 - [ ] (deferred; ledger:361) mode2_ceiling includes some of Mode 1's 6,242 unregistered samples (fixture 300 supplies 2 of 7 ADD_CHILD rows); ruled in the docstring but absent from the printed output and the corrected plan block. Bounded at <=6% of ADD_CHILD samples.
-- [ ] (deferred, CARRY TO A LATER TASK; ledger:364) measure_absence_vs_contradiction.py is a SECOND implementation of this rule that disagrees — bands on `>` where compat_band uses `>=`, and still labels a zero rate CONTRADICTION, the exact relabelling Task 4 exists to perform. Outside the package and outside the schema test's glob. Should be retired, not re-derived from.
+- [x] (deferred, CARRY TO A LATER TASK; ledger:364) measure_absence_vs_contradiction.py is a SECOND implementation of this rule that disagrees — bands on `>` where compat_band uses `>=`, and still labels a zero rate CONTRADICTION, the exact relabelling Task 4 exists to perform. Outside the package and outside the schema test's glob. Should be retired, not re-derived from.
+      **RESOLVED 2026-08-18 (7b84d39): the prototype is DELETED. It was a second writer of `mode3-disposition.csv`.**
 - [ ] (deferred; ledger:368) gate.py now 939 lines.
 - [ ] (deferred; ledger:399) two docstrings still describe the old (0.0,0,None) return shape; stale five-facts narrative at schema:130-134; new tautological assert at schema:218; untested high-rate-thin-support winner carrying a populated alt pair; untested winner-is-itself-a-zero case; 90-char line; no real-extract figure pinned for either new column.
 - [ ] (deferred; ledger:424) stale "Three files opened" (now five); false local-import rationale at :539; unfirable KeyError assert at :569 and its test mirror; 93-char line at :659; census test guards on 2 parquet files while reading 5; conflicts_any_band counts a BAND_NO_SUPPORT positive-rate winner.
@@ -87,10 +95,14 @@ WHOLE-BRANCH REVIEW IS POINTED AT THIS LIST.
 
 ### Task 8
 
-- [ ] (deferred; ledger:945) 24-flag assertion mixes rows and deduped keys; _world3's six named pairs pinned only by count; to_csv guard misses indented defs; a test naming rates it does not pin; (620,11) covered only transitively; rows_mode_2 pools 744 compat with 167,330 lineage (carry to Task 9); 1,618 vs 1,617.
-- [ ] (deferred, new; ledger:1005) the pin is gated behind _real(), which skips without the extract — but its source-scanning half needs no extract, so on a clean checkout the class-guard silently does not run.
-- [ ] (deferred, new; ledger:1007) the POSITIVE needle hard-codes "154" while both negatives are assembled; not live (an earlier assert fails first) but it is the one string not following its own comment's rule.
-- [ ] (deferred, new; ledger:1009) tests/test_assay_hygiene_schema.py:43 is a NINTH site, already correct at 137, also unscanned. And mode2.py:217 says "three functions up" where it is one.
+- [x] (deferred; ledger:945) 24-flag assertion mixes rows and deduped keys; _world3's six named pairs pinned only by count; to_csv guard misses indented defs; a test naming rates it does not pin; (620,11) covered only transitively; rows_mode_2 pools 744 compat with 167,330 lineage (carry to Task 9); 1,618 vs 1,617.
+      **PARTIALLY RESOLVED 2026-08-18 (7b84d39): the 24-vs-25 scoping is now stated wherever the figure is published. The remaining sub-items in this bullet are open.**
+- [x] (deferred, new; ledger:1005) the pin is gated behind _real(), which skips without the extract — but its source-scanning half needs no extract, so on a clean checkout the class-guard silently does not run.
+      **RESOLVED by Task 8 round 3 (304cb20): same split. The source-scanning half now always runs.**
+- [x] (deferred, new; ledger:1007) the POSITIVE needle hard-codes "154" while both negatives are assembled; not live (an earlier assert fails first) but it is the one string not following its own comment's rule.
+      **RESOLVED by Task 8 round 3 (304cb20): the positive needle is assembled from `ASSAYS_MAPPED_IDS` like the two negatives.**
+- [x] (deferred, new; ledger:1009) tests/test_assay_hygiene_schema.py:43 is a NINTH site, already correct at 137, also unscanned. And mode2.py:217 says "three functions up" where it is one.
+      **RESOLVED by Task 8 round 3 (304cb20): the file set is GLOBBED so `test_assay_hygiene_schema.py` is scanned, the needle was loosened to `collaps\w+`, and `mode2.py` now says 'one function up'.**
 
 ## Cross-task carries
 
@@ -100,13 +112,16 @@ WHOLE-BRANCH REVIEW IS POINTED AT THIS LIST.
 
 ### Task 3
 
-- [ ] (ledger:184) CARRY TO TASK 6: dispatch against `neighbours_registering`, not `neighbour_registers`.
+- [x] (ledger:184) CARRY TO TASK 6: dispatch against `neighbours_registering`, not `neighbour_registers`.
+      **ALREADY RESOLVED: the module ships `neighbour_registers`; `neighbours_registering` does not exist and the plan does not claim it (verified 2026-08-18).**
 - [ ] (ledger:185) CARRY TO TASKS 6 AND 8: `LIN_NONE` means "no absence established" and covers BOTH "no neighbour holds it" AND "the sample already holds it". Two states under one label; consumers must not read it as "no neighbour has it".
-- [ ] (ledger:246) CARRY TO TASKS 6 AND 8 — PLAN IS STALE: docs/superpowers/plans/2026-08-17-...md:294-297 and task-3-brief.md:10-14 still publish the BRIEFED signatures (lineage_index(edges,samples,membership, assays); neighbour_registers -> 2-tuple). Both now disagree with the module in arity AND return shape. Dispatch 6 and 8 from lineage.py:113 and :370, never from the plan. Ruling: do NOT edit the plan mid-flight (briefs are already extracted and would diverge); carry correct signatures verbatim in the dispatch and let the final review triage whether the plan is corrected. Cost if wrong: a stale plan outlives the session, which the final review can catch.
+- [x] (ledger:246) CARRY TO TASKS 6 AND 8 — PLAN IS STALE: docs/superpowers/plans/2026-08-17-...md:294-297 and task-3-brief.md:10-14 still publish the BRIEFED signatures (lineage_index(edges,samples,membership, assays); neighbour_registers -> 2-tuple). Both now disagree with the module in arity AND return shape. Dispatch 6 and 8 from lineage.py:113 and :370, never from the plan. Ruling: do NOT edit the plan mid-flight (briefs are already extracted and would diverge); carry correct signatures verbatim in the dispatch and let the final review triage whether the plan is corrected. Cost if wrong: a stale plan outlives the session, which the final review can catch.
+      **ALREADY RESOLVED before this session: the plan now carries a SUPERSEDED banner and the shipped signatures, which match `lineage.py` exactly (verified 2026-08-18).**
 
 ### Task 5
 
-- [ ] (ledger:525) CARRY TO TASK 9: 1,591 of the 2,166 proposed rows are CONTESTED and 1,576 are tier `weak`. An unqualified "2,166 Mode 1 proposals" would badly misrepresent the evidence. Report must qualify it.
+- [x] (ledger:525) CARRY TO TASK 9: 1,591 of the 2,166 proposed rows are CONTESTED and 1,576 are tier `weak`. An unqualified "2,166 Mode 1 proposals" would badly misrepresent the evidence. Report must qualify it.
+      **RESOLVED 2026-08-18 (7b84d39): MODE_1's headline now carries contested (1,591), the tier split and the 612 floor failures, ABOVE the prose. Task 9 had shipped it bare.**
 - [ ] (ledger:585) CARRY TO TASKS 6 AND 8 — BEHAVIOURAL: attach_gate's widened loop astype(str)-compares ANY column the two frames share. Gate-side numerics (vocab_support, vocab_n_samples, vocab_purity, type_registrations) and claim-side `contested` become eligible the moment a caller PRE-JOINS one, and astype(str) is repr-exact — an int64/float64 split renders "5" vs "5.0" and a last-bit difference on vocab_purity renders unequal, producing a FALSE "describe different runs" raise on frames that agree numerically. Fails safe (names the column, cannot produce a wrong row) but Tasks 6 and 8 pre-join and must know. Also: a caller carrying both X and X_gate makes merge emit two X_gate columns and the guard raises "truth value of a Series is ambiguous" instead of the named error.
 
 ### Task 6
@@ -115,7 +130,8 @@ WHOLE-BRANCH REVIEW IS POINTED AT THIS LIST.
 - [ ] (ledger:639) BRANCH-LEVEL DOC FIX (spec + plan): all four demotion rows plus the 5/15 scope. Not Task 6's to make.
 - [ ] (ledger:683) reverse_rate 1.0 on n_both=2 should recover badly. CARRY TO TASK 7 AS ITS CENTRAL QUESTION.
 - [ ] (ledger:732) CARRY TO TASK 7: know the magnitude before leaning on it.
-- [ ] (ledger:772) CARRY TO TASK 8: item 4's pin sits INSIDE the extract-backed test, which skips without the extract — but its source-text half has NO data dependency and skips with the data anyway. On a machine without the extract, an edit to main's prose passes silently. Split it.
+- [x] (ledger:772) CARRY TO TASK 8: item 4's pin sits INSIDE the extract-backed test, which skips without the extract — but its source-text half has NO data dependency and skips with the data anyway. On a machine without the extract, an edit to main's prose passes silently. Split it.
+      **RESOLVED by Task 8 round 3 (304cb20): the pin was split into an extract-backed measurement and a source-scan that needs no extract. Verified 2026-08-18.**
 
 ### Task 7
 

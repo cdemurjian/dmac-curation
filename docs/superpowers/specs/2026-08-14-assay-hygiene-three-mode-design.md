@@ -175,9 +175,14 @@ inside the 351.
 Measured over `vocabulary.csv` and the 866 flags:
 
 - One mapping, `Illumina Library` -> 24 DNA Extraction at purity **0.707** over
-  2,210 samples, produces **212 of the 250** `ABSENCE_COMPAT` flags. An Illumina
+  2,210 samples, produces **212 of the 247** `ABSENCE_COMPAT` flags. An Illumina
   library is a library; those DNA samples are already correctly registered in
   115 Library Creation.
+  **DENOMINATOR CORRECTED 2026-08-18; THE NUMERATOR IS UNCHANGED.** This read
+  "212 of the 250" until increment 2 measured it. The 250 came from the deleted
+  prototype (see the table below for how its rule differs); re-measured off the
+  `mode3-disposition.csv` the shipped classifier writes, the class holds 247.
+  The 212 reproduces exactly, which is why only the denominator moved.
 - One product is split across three assays: `flowjo` -> 30, `flowjo v10.8.1` ->
   31, `flowjo version 10` -> 31, `flowjo 10.3` -> 153. Nothing checks that a
   term family maps coherently.
@@ -205,16 +210,33 @@ reachability test at all, which is what produced the third instance above.
 
 Measured over the 866, with reachability applied first:
 
-| Class | n | Routes to |
-|---|---|---|
-| claim not credible (type never in claimed assay) | 31 | vocabulary curation, NOT a mode |
-| claim credible, neighbour carries it | 326 | Mode 2 |
-| claim credible, no neighbour, pair coexists | 250 | Mode 2 candidate, unproven |
-| claim credible, no neighbour, pair never coexists | 45 | alternative label, no action |
-| claim credible, neither test settles it | 214 | judgment |
+| Class | design (2026-08-14) | SHIPPED (2026-08-18) | Routes to |
+|---|---|---|---|
+| claim not credible (type never in claimed assay) | 31 | **43** | vocabulary curation, NOT a mode |
+| claim credible, neighbour carries it | 326 | **326** | Mode 2 |
+| claim credible, no neighbour, pair coexists | 250 | **247** | Mode 2 candidate, unproven |
+| claim credible, no neighbour, pair never coexists | 45 | **45** | alternative label, no action |
+| claim credible, neither test settles it | 214 | **205** | judgment |
 
-The 24 FlowJo and mass-spectra rows sit inside the 326 today and must be pulled
-out by the vocabulary gate, not by the lineage test.
+**THE SECOND COLUMN IS THE MEASUREMENT AND THE FIRST IS THE PREDICTION.** Added
+2026-08-18 from the `mode3-disposition.csv` increment 2 writes; both columns sum
+to 866. The design column was computed by
+`measure_absence_vs_contradiction.py`, a prototype since deleted, and it differs
+from the shipped classifier in four ways: no vocabulary gate at all, banding on
+`>` where `compatibility.compat_band` bands on `>=`, typing samples by uuid
+prefix, and traversing `CHILD_OF` rather than `DERIVED_FROM`. Two rows
+reproduce exactly. The 31 becomes 43 because the shipped gate refuses on
+coherence as well as reachability, which the prototype could not test.
+
+The 24 FlowJo and mass-spectra rows sat inside the 326 when this was written
+and had to be pulled out by the vocabulary gate rather than by the lineage
+test. **DONE, and verified as a regression test**: all 24 are now `PRE_GATE`
+and reach no mode. All 24 are ALSO lineage candidates, so the gate is the only
+thing that could have stopped them -- had it run after lineage, every one would
+have become a Mode 2 write proposal. Note the scoping: 24 is
+`(A.FLOW, 30)` plus `(A.SPC, 130)`. Keyed on the TERM instead, the same family
+is 25 flags, the extra a D.ADNKA sample carrying `FlowJo 10.3`; both are gate
+refusals and the counts are not interchangeable.
 
 **The `UNRESOLVED` 214 is mostly one benign pattern.** 204 are RNA samples with
 `Type: total RNA` claiming 61 RNA Extraction, and RNA samples ARE registered in
@@ -682,9 +704,12 @@ would we propose" and nothing else.
 
 The gate leads the increment rather than trailing it. Measured, the vocabulary
 is the largest single defect source in the current output: one mapping produces
-212 of 250 `ABSENCE_COMPAT` flags, and lineage-first precedence launders 24 more
-vocabulary defects into Mode 2 write candidates. Building detection on an
-ungated vocabulary reproduces that by construction.
+212 of 247 `ABSENCE_COMPAT` flags (denominator corrected 2026-08-18, see above),
+and lineage-first precedence launders 24 more vocabulary defects into Mode 2
+write candidates. Building detection on an ungated vocabulary reproduces that by
+construction. **Both halves were confirmed by increment 2**: the 212 reproduces
+exactly, and all 24 are gate refusals that are simultaneously lineage
+candidates, so lineage-first would have made write proposals of every one.
 
 **3. Adjudication, the approval surface, and the write path.** Stages D, E and
 F, behind the addition probe. Two approval shapes are required, because the
