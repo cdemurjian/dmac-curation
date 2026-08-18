@@ -208,10 +208,14 @@ def registration_projects(
     of the SEEK RECORD the membership row names -- so a lookup keyed any other
     way asks for a rule stage B never wrote.
 
-    THE ASSAY'S PROJECT LIST IS NOT A SUBSTITUTE. 75 of the real extract's 154
-    internal assay ids span more than one project, up to seven, so "the project
-    of assay X" is not single-valued and choosing one of them would key the wrong
-    rule silently. Measured 2026-08-17, only 1 of 214,124 (sample, internal
+    THE ASSAY'S PROJECT LIST IS NOT A SUBSTITUTE. 75 of the 137 internal assay
+    ids the assays frame carries span more than one project, up to seven, so
+    "the project of assay X" is not single-valued and choosing one of them would
+    key the wrong rule silently. The denominator is 137 and not 154, corrected
+    2026-08-18: 154 is what `assay_index`'s MAP holds once the 17 junction-less
+    records take a fallback id, and not one of those 17 can span a project. The
+    154 in `assay_titles` three functions up is a different sentence with a
+    different numerator and is right as it stands. Measured 2026-08-17, only 1 of 214,124 (sample, internal
     assay) registrations spans two projects at all, so the multiplicity this
     returns is real and rare; `mode2_findings` walks it in ascending order and
     takes the first rule that exists, which is stable across runs.

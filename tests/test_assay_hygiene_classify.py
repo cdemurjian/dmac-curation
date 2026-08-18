@@ -79,7 +79,9 @@ JUNCTIONLESS_SEEK_ID = 490
 
 # A SECOND SEEK RECORD FOR INTERNAL ASSAY 11, IN A DIFFERENT PROJECT. The same
 # logical assay is instantiated once per study, so 458 seek records collapse to
-# 154 internal ids and 75 of those ids span more than one project -- up to seven.
+# 137 internal ids -- 154 in `assay_index`'s map, once the 17 junction-less
+# records take a fallback id -- and 75 of the 137 internal assay ids span more
+# than one project, up to seven.
 # "The project of assay 11" is therefore not single-valued, and a rule key built
 # from the ASSAY rather than from the REGISTRATION picks whichever project sorts
 # first.
@@ -594,7 +596,7 @@ def test_the_project_column_carries_every_project_a_sample_holds_deduped_and_sor
 
     1,052 of the real 6,242 population samples carry more than one project id,
     34 carry a DUPLICATED one ("2,2"), and 193 carry none. The proposed assay's
-    project is no better a source: 75 of the 154 internal assay ids span more
+    project is no better a source: 75 of the 137 internal assay ids span more
     than one project, up to seven. So the sample's whole project set is emitted,
     `;`-joined in the convention `registered_internal_assay_ids` already uses.
 
@@ -1673,8 +1675,8 @@ def test_the_rule_key_is_all_four_components_and_three_of_four_does_not_match():
     assert row.precedent_rate == 0.65
 
     # THE WRONG RULE, run by hand: take the project off the ASSAY. It is not
-    # single-valued -- 75 of the real extract's 154 internal assay ids span more
-    # than one project, up to seven -- so such a lookup picks whichever sorts
+    # single-valued -- 75 of the 137 internal assay ids span more than one
+    # project, up to seven -- so such a lookup picks whichever sorts
     # first and finds a real, confident, different number rather than an error.
     assay_projects = {p for p, i, _ in P.assay_index(w["assays"]).values() if i == 11}
     assert assay_projects == {10, 40}
@@ -2106,8 +2108,8 @@ def test_registration_projects_and_registered_internal_describe_one_registration
 
     Both cross the seek `assay_assets.assay_id` junction through
     `precedent.assay_index`, and the rule key's project comes from the NEIGHBOUR's
-    own registration rather than from the assay's project list -- 75 of the real
-    extract's 154 internal assay ids span more than one project, up to seven, so
+    own registration rather than from the assay's project list -- 75 of the 137
+    internal assay ids span more than one project, up to seven, so
     an assay-level project is not single-valued and would key the wrong rule.
     Measured, 1 of 214,124 (sample, internal assay) registrations spans two
     projects at all.
@@ -3278,11 +3280,21 @@ def test_the_classes_partition_every_claim_backed_absence_and_every_lineage_pair
     assert sum(counts.values()) == len(keys) == census["input_keys"]
     assert set(counts) <= set(X.PRECEDENCE)
 
-    # the emitted rows are the input minus the two steps that emit nothing
-    assert len(findings) == len(keys) - counts[X.PRE_GATE] == 8
+    # THE EMITTED ROWS ARE THE INPUT MINUS THE KEYS `NON_EMITTING_STEPS` CLAIMS,
+    # derived from the tuple rather than named. This read "minus the two steps
+    # that emit nothing" while subtracting one, which was true only because
+    # `keys_mode_3` is 0 -- and `PRE_MODE_3` is not non-emitting: Mode 3 has a
+    # lane, it is empty, and a key reaching it must produce a row.
+    non_emitting = sum(counts[step] for step in X.NON_EMITTING_STEPS)
+    assert non_emitting == counts[X.PRE_GATE] == 2
+    assert len(findings) == len(keys) - non_emitting == 8
     assert census["rows"] == len(findings)
-    assert (census["input_keys"] - census["keys_refused_by_the_gate"]
-            - census["keys_mode_3"]) == census["rows"]
+    assert census["input_keys"] - non_emitting == census["rows"]
+    # ...and Mode 3 is NOT in that subtraction, which is what the old wording
+    # claimed. It contributes zero here because it claims zero keys, not because
+    # it is declared to emit nothing.
+    assert census["keys_mode_3"] == 0
+    assert X.PRE_MODE_3 not in X.NON_EMITTING_STEPS
 
     # ...and the modes partition the rows
     assert (census["rows_mode_1"] + census["rows_mode_2"]
@@ -3779,6 +3791,32 @@ def test_the_census_refuses_a_row_count_that_contradicts_its_own_key_count():
                       ignore_index=True),
             lanes, agreeing=agreeing)
 
+    # A KEY AT `PRE_MODE_3` THAT PRODUCED NO ROW IS AN ERROR, and this is the
+    # only construction that can show it. `_PRECEDENCE_TESTS[PRE_MODE_3]`
+    # returns False, so no world can route a key there and the subtrahend being
+    # `PRE_GATE` alone rather than both steps is invisible in the arithmetic --
+    # `keys_mode_3` is 0 everywhere, which is exactly the coincidence that lets
+    # the wrong contract read as right. `findings_census` is public and takes
+    # `steps`, so the key is injected here instead.
+    #
+    # This is what `PRE_MODE_3 not in NON_EMITTING_STEPS` MEANS, made
+    # falsifiable: Mode 3 has a lane, that lane is empty, and a key reaching it
+    # with no row is a proposal in no artifact at all -- not a step that emits
+    # nothing by design.
+    stranded = dict(steps)
+    stranded[(99999, 99999)] = X.PRE_MODE_3
+    stranded_keys = dict(keys)
+    stranded_keys[(99999, 99999)] = X.Evidence(False, False, False, False)
+    with pytest.raises(AssertionError, match="emitted row"):
+        X.findings_census(stranded_keys, stranded, parts["findings"], lanes,
+                          agreeing=agreeing)
+    # ...and the same key at PRE_GATE, which IS declared non-emitting, is fine
+    refused = dict(steps)
+    refused[(99999, 99999)] = X.PRE_GATE
+    ok = X.findings_census(stranded_keys, refused, parts["findings"], lanes,
+                           agreeing=agreeing)
+    assert ok["keys_refused_by_the_gate"] == 3 and ok["rows"] == 8
+
 
 def test_a_row_where_nothing_reached_a_population_carries_a_null_rate_not_a_measured_zero():
     """`best_co_registration` returns 0.0 for "nothing measured", and 0.0 is a rate.
@@ -3876,3 +3914,101 @@ def test_the_disposition_breakdown_counts_a_null_class_rather_than_dropping_it()
     # so it is a tripwire for the keyword rather than a branch this frame can
     # enter, and this is the assertion that says what it would have caught.
     assert int(wrong.sum()) != len(holed)
+
+
+def test_the_multi_project_share_is_measured_and_its_denominator_is_the_same_everywhere():
+    """Six figures re-derived from the parquet, then read back out of the source.
+
+    NOTHING PINNED ANY OF THEM. The sentence pairing 75 with the MAP's 154 was
+    published at seven live sites across three modules and this test file,
+    propagated from one dispatch, and no test compared it to the data -- which
+    is the same gap the R2 mutation exposed for the module docstring's swap
+    counts, and it is closed the same way.
+
+    The wrong pairing is described here and never SPELLED, deliberately: this
+    test greps for it, so writing it out would make the guard fail on its own
+    docstring. That is not a trick to dodge the check -- the check found this
+    docstring on its first run, which is the evidence that it reads the file it
+    claims to read.
+
+    THE DENOMINATOR DEPENDS ON THE NUMERATOR BESIDE IT, which is what makes this
+    a class of defect rather than a typo. `assay_index`'s MAP holds 154 ids: the
+    137 the assays frame actually carries, plus one fallback per junction-less
+    record. Not one of those 17 fallbacks can span a project -- each stands for
+    exactly one record -- so every one of the 75 comes out of the 137, and 154
+    is wrong HERE while being exactly right three functions away, where the
+    sentence counts what the map resolves.
+
+    So this asserts both halves: 137 wherever the numerator is 75, and 154 in
+    `assay_titles`, whose numerator is "0 ids resolving to two titles".
+    """
+    r = _real()
+    assays = r["assays"]
+    ainfo = P.assay_index(assays)
+    genuine = {int(i) for i in assays.internal_assay_id.dropna()}
+    junctionless = int(assays.internal_assay_id.isna().sum())
+    mapped = {iaid for _p, iaid, _t in ainfo.values()}
+    projects_of = {}
+    for _seek, (project_id, iaid, _title) in ainfo.items():
+        projects_of.setdefault(iaid, set()).add(int(project_id))
+    multi = {i for i, p in projects_of.items() if len(p) > 1}
+
+    assert len(assays) == 458
+    assert len(genuine) == 137
+    assert junctionless == 17
+    assert len(mapped) == 154 == len(genuine) + junctionless
+    assert len(multi) == 75
+    assert max(len(p) for p in projects_of.values()) == 7
+    # ...and every one of the 75 is a GENUINE id, which is the whole argument
+    # for the denominator: a fallback id stands for one record and cannot span
+    assert multi <= genuine
+    assert not (multi & (mapped - genuine))
+
+    # --- and now the sentences, read out of the source -----------------------
+    #
+    # The four files that publish the pairing, pinned as a SET so a fifth is
+    # visible rather than silently unguarded.
+    scanned = {
+        "classify.py": (PACKAGE / "classify.py").read_text(),
+        "mode2.py": (PACKAGE / "mode2.py").read_text(),
+        "_schema.py": (PACKAGE / "_schema.py").read_text(),
+        "test": Path(__file__).read_text(),
+    }
+    flat = {k: re.sub(r"\s+", " ", v) for k, v in scanned.items()}
+    joined = " ".join(flat.values())
+
+    stated = re.findall(r"75 of the ([\d,]+) (?:internal assay|GENUINE) ids",
+                        joined)
+    assert len(stated) >= 7, (
+        f"only {len(stated)} site(s) matched; the sentence was reworded and "
+        "this pin has gone blind")
+    assert {int(n.replace(",", "")) for n in stated} == {len(genuine)} == {137}
+
+    # The pairing this task corrected must not survive anywhere. BOTH NEEDLES
+    # ARE ASSEMBLED RATHER THAN WRITTEN, because this guard scans the file it is
+    # written in: a literal here would make the test fail on its own source. It
+    # did, on the first run, which is the evidence that the scan reads what it
+    # claims to. Assembling them is not dodging the check -- the string compared
+    # against every file is byte-identical to the one a reader would grep for.
+    wrong_pair = "75 of the " + str(len(mapped))
+    wrong_collapse = "collapse to " + str(len(mapped)) + " internal ids"
+    # the needles really are the map size and not the frame size, checked
+    # without spelling either of them
+    assert wrong_pair.endswith(str(len(mapped)))
+    assert str(len(genuine)) not in wrong_pair
+    assert str(len(mapped)) in wrong_collapse
+    for name, text in flat.items():
+        assert wrong_pair not in text, name
+        assert wrong_collapse not in text, name
+
+    # ...and the ONE place 154 is the right denominator still says 154, because
+    # its numerator is different. `assay_titles` counts what the MAP resolves.
+    assert ("no internal id resolves to two distinct titles over the 154 in "
+            "the map") in flat["mode2.py"]
+    assert len({t for _p, _i, t in ainfo.values()
+                if t is not None}) <= len(mapped)
+    decoded = {}
+    for _seek, (_p, iaid, title) in ainfo.items():
+        decoded.setdefault(iaid, set()).add(title)
+    assert not [i for i, t in decoded.items() if len(t) > 1], (
+        "the 154-scoped sentence claims no id decodes to two titles")

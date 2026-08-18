@@ -142,8 +142,18 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 #      any future recurrence rather than leaving it to a reader.
 #
 #   The proposed assay's project would not have rescued the singular either: 75
-#   of the 154 internal assay ids span more than one project, up to seven. There
+#   of the 137 internal assay ids span more than one project, up to seven. There
 #   is no single-valued project anywhere on this row.
+#
+#   THE DENOMINATOR IS 137 AND NOT 154, corrected 2026-08-18 against the
+#   parquet. `assays.parquet` carries 458 records over 137 distinct non-null
+#   `internal_assay_id`s plus 17 with none, so `precedent.assay_index`'s map
+#   holds 154 -- the 137 plus one fallback per junction-less record. Not one of
+#   those 17 fallbacks can span a project, since each stands for exactly one
+#   record, so all 75 come out of the 137 and 154 is the wrong denominator for
+#   this numerator. 154 IS right wherever the sentence counts what the MAP
+#   resolves, which is what it does at `VOCAB_COLUMNS` below and in
+#   `mode2.assay_titles`.
 #
 #   Renamed before the first emitter shipped, which is the same moment
 #   `registered_internal_assay_titles` and `co_reg_registered_internal_assay_id`
@@ -223,10 +233,23 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 #   whole set in position, so the operator can read it without a second lookup.
 #
 #   EMPTY exactly when no population was measured at all:
-#   `best_co_registration` returns `(0.0, 0, None)` when no registered assay
-#   reaches a co-registration key, and `compat_band` bands that BAND_NO_SUPPORT
-#   because it tests support before rate. An id beside a support of 0 would name
-#   a population nobody measured.
+#   `best_co_registration` returns `(0.0, 0, None, None, 0)` when no registered
+#   assay reaches a co-registration key, and `compat_band` bands that
+#   BAND_NO_SUPPORT because it tests support before rate. An id beside a support
+#   of 0 would name a population nobody measured.
+#
+#   AND `co_reg_rate` IS NULL ON EXACTLY THOSE ROWS, which is one column's
+#   contract and was living in two files with only one of them updated. That
+#   0.0 is safe INSIDE `best_co_registration`, because `compat_band` tests
+#   support first; written into `findings.csv` it states a MEASURED rate of
+#   zero -- "these never coexist" -- on the one row whose own
+#   `evidence_summary` says that is absent evidence and not a rate of zero.
+#   `classify.compat_findings` nulls it, and `co_reg_pop` stays 0 beside it:
+#   the population WAS read and it is empty, which is what makes the band
+#   BAND_NO_SUPPORT rather than BAND_NEVER. Measured 2026-08-18, 0 of the 6,932
+#   compatibility rows reach it -- all 45 BAND_NO_SUPPORT rows have a real
+#   winner over 4 to 28 samples and a genuinely measured 0.000, and they keep
+#   it.
 # `co_reg_alt_label_internal_assay_id` and `co_reg_alt_label_pop` carry the
 #   COUNTER-EVIDENCE: the assay this sample ALREADY HOLDS that never
 #   co-registers with the proposed one, over a population big enough to read,

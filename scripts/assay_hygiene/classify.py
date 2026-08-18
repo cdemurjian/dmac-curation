@@ -267,9 +267,10 @@ def project_index(samples: pd.DataFrame) -> dict[int, str]:
     Over Mode 1's real population, 1,052 of the 6,242 samples carry more than one
     project id, 34 carry the same id twice (the raw `GROUP_CONCAT` spells it
     `2,2`), and 193 carry none. The proposed assay's project would not have
-    rescued the singular either -- 75 of the 154 internal assay ids span more
-    than one project, up to seven -- so there is no single-valued project
-    anywhere on the row, from either side of it.
+    rescued the singular either -- 75 of the 137 internal assay ids the assays
+    frame carries span more than one project, up to seven -- so there is no
+    single-valued project anywhere on the row, from either side of it. (137 and
+    not 154: see `mode3_findings`, which measures both and says which is which.)
 
     THE DECISIVE HALF IS THE COLLISION. `RULE_KEY.project_id` is the ONE project
     a precedent rule is scoped to, and `ASSAY_COLUMNS.project_id` the ONE project
@@ -1149,17 +1150,34 @@ def mode3_findings() -> pd.DataFrame:
     and the spec states neither.
 
     THE DENOMINATOR OF THE MULTI-PROJECT SHARE HAS TO SAY WHICH SET IT COUNTS,
-    and this package has been quoting it without one. Measured 2026-08-18 over
+    and this package had been quoting it without one. Measured 2026-08-18 over
     `assays.parquet`: 458 assay records carry 137 distinct non-null
     `internal_assay_id`s and 17 records carry none, so `precedent.assay_index`'s
     map holds 154 ids -- the 137 plus one fallback per junction-less record.
-    **75 of the 137 GENUINE ids span more than one project, up to seven.** The
-    familiar phrasing "75 of the 154" is arithmetically true and misleading: not
-    one of the 17 fallback ids can span a project, since each stands for exactly
-    one record, so 154 is the wrong denominator for this numerator. Corrected
-    here; the same sentence appears in `mode2.registration_projects` and
-    `mode2.assay_titles`, where 154 IS the right denominator because those count
-    what the MAP resolves.
+    **75 of the 137 GENUINE ids span more than one project, up to seven.**
+    Pairing 75 with 154 is arithmetically true and misleading: not one of the 17
+    fallback ids can span a project, since each stands for exactly one record,
+    so all 75 come out of the 137 and 154 is the wrong denominator for THIS
+    numerator.
+
+    WHICH DENOMINATOR IS RIGHT DEPENDS ON THE NUMERATOR BESIDE IT, and the first
+    version of this paragraph got that wrong in the act of correcting it. It
+    said the pairing "appears in `mode2.registration_projects` and
+    `mode2.assay_titles`, where 154 IS the right denominator". Measured:
+    `assay_titles` does NOT carry the pairing -- its 154 sits beside a different
+    numerator, "0 internal ids resolve to two distinct titles", where 154 is
+    exactly right because that sentence counts what the MAP resolves.
+    `registration_projects` DID carry it verbatim, with this numerator, and is
+    corrected rather than blessed. So: 137 wherever the numerator is 75, and 154
+    wherever the sentence is about the map -- `assay_titles`, `audit`'s title
+    index, and `VOCAB_COLUMNS`.
+
+    Every site is swept and the figures are PINNED, by
+    `test_the_multi_project_share_is_measured_and_its_denominator_is_the_same_everywhere`,
+    which re-derives all six numbers from the parquet and then reads every
+    surviving sentence out of the source. Nothing here was pinned by any test
+    before that, which is the same gap the R2 mutation exposed for the module
+    docstring's swap counts, closed the same way.
 
     The spec's companion figure reads "plus 271 samples with no project at
     all". 271 is the ROW count; the SAMPLE count is 242. A unit stated wrongly
@@ -1273,14 +1291,27 @@ def unify_findings(
 #
 #     input_keys  = keys_refused_by_the_gate + keys_mode_1 + keys_lineage
 #                   + keys_compat + keys_mode_3
-#     rows        = input_keys - keys_refused_by_the_gate - keys_mode_3
+#     rows        = input_keys - the keys claimed by NON_EMITTING_STEPS
 #     rows        = rows_mode_1 + rows_mode_2 + rows_mode_3 + rows_no_mode
 #     rows        = the four rows_cls_* + rows_without_a_classification
 #
-# THE UNIT IS A KEY ABOVE AND A ROW BELOW, and the two are equal only because
-# `PRE_GATE` and `PRE_MODE_3` emit nothing. The prefixes carry that: `keys_*`
-# counts what the precedence ruled on and `rows_*` counts what reached the
-# operator, and quoting one for the other is this project's signature defect.
+# THE SECOND IDENTITY SUBTRACTS `NON_EMITTING_STEPS` AND NOTHING ELSE, and this
+# comment said "`input_keys - keys_refused_by_the_gate - keys_mode_3`" and "the
+# two are equal only because `PRE_GATE` and `PRE_MODE_3` emit nothing" for one
+# round after that tuple was declared -- eighteen lines above a runtime
+# assertion that subtracts `PRE_GATE` alone and would FAIL on the world this
+# comment described. `PRE_MODE_3` is NOT non-emitting: Mode 3 has a lane and it
+# is empty, so a key ever reaching it must produce a row or `unify_findings`
+# raises. The arithmetic agrees today only because `keys_mode_3` is 0, which is
+# exactly the coincidence that lets a wrong contract read as right.
+#
+# So the identity is stated in terms of the tuple, `findings_census` derives the
+# subtrahend from the tuple, and neither can drift from it.
+#
+# THE UNIT IS A KEY ABOVE AND A ROW BELOW, and the two differ by exactly those
+# claimed keys. The prefixes carry it: `keys_*` counts what the precedence ruled
+# on and `rows_*` counts what reached the operator, and quoting one for the
+# other is this project's signature defect.
 #
 # `rows_mode_2` IS NOT THE LINEAGE CEILING and the three `lineage_*` keys are
 # why. The lane offers 172,338; the gate refuses 4,255 and Mode 1 takes 753, so
