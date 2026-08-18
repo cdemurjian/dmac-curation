@@ -92,7 +92,17 @@ from .precedent import assay_index, membership_index
 BY_CLAIM = "BY_CLAIM"            # the gated vocabulary claim alone -- Mode 1
 BY_PRECEDENT = "BY_PRECEDENT"    # stage B precedent on the hop alone
 BY_BOTH = "BY_BOTH"              # precedent proposed, the claim disambiguated
-PROPOSAL_SOURCES = (BY_CLAIM, BY_PRECEDENT, BY_BOTH)
+# The neighbour's registration and NOTHING ELSE: a lineage absence on a hop with
+# no precedent rule, so there is no measured rate behind the proposal at all.
+#
+# IT IS A FOURTH MEMBER AND NOT A WIDENING OF `BY_PRECEDENT`, which is defined
+# three lines up as "stage B precedent on the hop alone" and would be a lie on
+# these rows -- their own `evidence_summary` says "NO measured basis" and their
+# `precedent_rate` is null. Two meanings under one name is the defect this branch
+# has paid for five times, and it was shipped here for one review cycle: 10 rows
+# of the real extract's 172,338 read `BY_PRECEDENT` while denying it.
+BY_LINEAGE_ONLY = "BY_LINEAGE_ONLY"
+PROPOSAL_SOURCES = (BY_CLAIM, BY_PRECEDENT, BY_BOTH, BY_LINEAGE_ONLY)
 
 # --- the joined frame every mode reads ---------------------------------------
 #
@@ -592,7 +602,8 @@ ACTION_PRECEDENT_DIRECTION = {
 # `mode2_findings` never sees them. 0.0 is included deliberately -- it is where a
 # row with NO measured rate visibly fails to appear.
 SURVIVAL_THRESHOLDS = (0.0, 0.5, 0.75, 0.9, 0.95)
-SURVIVAL_COLUMNS = ["threshold", "action", "rows", "samples", "of_rows"]
+SURVIVAL_COLUMNS = ["threshold", "action", "rows", "samples", "rule_groups",
+                    "of_rows"]
 
 # Every key `mode2_census` returns, in report order, declared for the reason
 # `MODE1_CENSUS_KEYS`, `INTEGRITY_KEYS` and `CEILING_KEYS` are: the report prints
@@ -922,6 +933,46 @@ def _mode2_summary(
     return "; ".join(parts)
 
 
+def _proposal_source(rule, claim, sample_id: int, assay_id: int) -> str:
+    """Which evidence produced this proposal. One of `PROPOSAL_SOURCES`.
+
+    THE FOUR COMBINATIONS OF (precedent rule, gated claim), ENUMERATED, because
+    three of them were collapsed into two values for one review cycle:
+
+        rule, claim   -> BY_BOTH           precedent proposed, the claim chose
+        rule, -       -> BY_PRECEDENT      the rule alone
+        -,    -       -> BY_LINEAGE_ONLY   the neighbour's registration alone
+        -,    claim   -> RAISES            see below
+
+    RAISES ON THE FOURTH, and the refusal is the honest answer rather than a
+    fifth value invented for a population of zero. Measured 2026-08-17 over the
+    real extract, that combination occurs 0 times: all 10 rows with no rule also
+    carry no gated claim, and all 1,656 claim-backed rows have a rule. `BY_BOTH`
+    is defined as "precedent proposed, the claim disambiguated", so labelling a
+    rule-less row with it would assert a precedent that is not there -- exactly
+    the defect this function was extracted to fix, one combination over.
+
+    Checked HERE, in the one place every row passes through, rather than only in
+    a test, following `precedent.assay_index`, which raises on a fallback
+    collision that likewise holds today only by luck of the data. The message
+    names the member to add so the next task does not have to derive it.
+    """
+    if rule is not None:
+        return BY_BOTH if claim is not None else BY_PRECEDENT
+    if claim is None:
+        return BY_LINEAGE_ONLY
+    raise ValueError(
+        f"({sample_id}, {assay_id}) has a gated metadata claim and NO precedent "
+        "rule, which is a combination `PROPOSAL_SOURCES` cannot spell. It occurs "
+        "0 times on the 2026-08-17 extract, so no value was invented for it. "
+        "`BY_BOTH` means 'precedent proposed, the claim disambiguated' and is "
+        "false here; `BY_LINEAGE_ONLY` means the neighbour's registration ALONE "
+        "and hides the claim. Add a fifth member naming the claim without the "
+        "rate -- and widen neither of the existing two, which is how this "
+        "package acquires two meanings under one name."
+    )
+
+
 def mode2_findings(
     attached: pd.DataFrame,
     *,
@@ -1110,7 +1161,7 @@ def mode2_findings(
                                        if rule is not None else None),
             "precedent_n_parent_only": (rule.n_parent_only
                                         if rule is not None else None),
-            "proposed_by": BY_BOTH if claim is not None else BY_PRECEDENT,
+            "proposed_by": _proposal_source(rule, claim, sample_id, assay_id),
             "evidence_summary": _mode2_summary(
                 action, relation, neighbour_uuid, len(kids) + len(rents),
                 assay_id, title, hop, project_id, rule, direction, sample_type,
@@ -1213,6 +1264,39 @@ def precedent_survival(
     is why 0.0 is in the default list: it is where absent evidence visibly fails
     to count as a rate of zero. `of_rows` rides beside every count as its
     denominator, for the reason `co_reg_pop` rides beside `co_reg_rate`.
+
+    THE CURVE CROSSES OVER AT THE TOP AND THE REASON IS NOT WHAT IT LOOKS LIKE.
+    At `rate >= 0.95` the WEAK direction survives 371 rows against the strong
+    direction's 46. The obvious reading -- that `reverse_rate` reaches 1.0 easily
+    on a thin denominator -- is MEASURABLY FALSE, and it was written into this
+    task's report for one review cycle before being measured:
+
+        rate >= 0.95     rows   median direction denominator   min   n <= 10
+        ADD_PARENT         46                            919   919         0
+        ADD_CHILD         371                         27,344   196         0
+
+    The weak direction's survivors sit on denominators about THIRTY TIMES LARGER
+    and not one of the 371 is thin. At rule level the same holds: the 15 reverse
+    rules clearing 0.95 with a real gap run denominators 196..35,547 against the
+    5 propagation rules' 105..7,177.
+
+    WHAT THE ROW COUNTS ACTUALLY REFLECT IS HOP CONCENTRATION, which is why
+    `rule_groups` is a column. Those 371 rows rest on 13 distinct evidence
+    groups and ONE of them keys 170 rows by itself; the 46 rest on 2, one keying
+    42. A row count counts affected samples, not independent evidence, and the
+    two directions fan out differently -- so a survivor count is not a strength
+    comparison in either direction, for this reason rather than the other one.
+
+    `rule_groups` counts distinct `(n_both, n_child_only, n_parent_only)` triples
+    and is therefore a LOWER BOUND on the number of precedent rules: two rules
+    with identical counts collapse into one group here. The bias is toward
+    reporting MORE concentration than there is, which is the safe direction for a
+    number whose job is to discount a row count.
+
+    None of this touches the demotion, which rests on the corroboration
+    measurement -- 88 of 88 against 15 of 263 over the 866 flags -- and on the
+    flagship hop. See the task report; Task 7's backtest is what settles the
+    curve.
     """
     rows = []
     for threshold in thresholds:
@@ -1229,6 +1313,12 @@ def precedent_survival(
                 "action": action,
                 "rows": len(survives),
                 "samples": survives.sample_id.nunique(),
+                # HOW MANY DISTINCT PIECES OF EVIDENCE THOSE ROWS REST ON. See
+                # the docstring: 371 rows over 13 groups is a different claim
+                # from 371 rows over 371.
+                "rule_groups": len(survives[[
+                    "precedent_n_both", "precedent_n_child_only",
+                    "precedent_n_parent_only"]].drop_duplicates()),
                 "of_rows": len(direction),
             })
     return pd.DataFrame(rows, columns=SURVIVAL_COLUMNS)
@@ -1323,7 +1413,15 @@ def main(extract_dir: str = "assay-hygiene/extract",
           "every row above is emitted at every threshold:")
     for r in precedent_survival(m2).itertuples(index=False):
         print(f"  rate >= {r.threshold:<5} {r.action:<22} {r.rows:>8,} rows"
-              f"  over {r.samples:>8,} samples   of {r.of_rows:,}")
+              f"  over {r.samples:>8,} samples   of {r.of_rows:,}"
+              f"   on {r.rule_groups:>3} evidence group(s)")
+    print("  `evidence group(s)` is how many distinct (n_both, n_child_only, "
+          "n_parent_only) triples those rows rest on -- a LOWER BOUND on the "
+          "precedent rules behind them. A row count counts affected SAMPLES and "
+          "not independent evidence: at rate >= 0.95 the weak direction's 371 "
+          "rows rest on 13 groups, one of which keys 170 of them, against 46 "
+          "rows on 2. That is why the crossover at the top of this curve is NOT "
+          "evidence that ADD_CHILD is the stronger direction.")
     print(f"  {m2census['rows_without_precedent']:,} row(s) carry NO measured "
           "rate and survive no threshold, including 0.0: absent evidence is "
           "not a rate of zero")

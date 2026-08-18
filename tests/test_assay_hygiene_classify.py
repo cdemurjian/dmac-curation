@@ -1001,8 +1001,11 @@ def _world2():
         1, 2, 3    TIS in 11        6, 7    TIS in 12        9    TIS in 13
         4, 5       PAV in 13        8       D.IMG in 11
 
-    The thirteen edges and the twenty-six proposals they produce. `->` is
+    The SIXTEEN edges and the TWENTY-EIGHT proposals they produce. `->` is
     `child -> parent`, and the assay in parentheses is what each endpoint holds.
+    Both counts are re-derived by
+    `test_the_fixture_world_carries_exactly_the_populations_its_docstring_states`,
+    which reads them off the world rather than trusting this sentence.
 
         E1   100 D.IMG(11) -> 200 TIS(12)    (200,11) ADD_PARENT  (100,12) ADD_CHILD
         E2   103 D.IMG(11) -> 200 TIS(12)    (200,11) 2nd support (103,12) ADD_CHILD
@@ -1023,7 +1026,7 @@ def _world2():
         E16  600 D.IMG(11*)-> 610 TIS(12)    (610,11) ADD_PARENT  (600,12) ADD_CHILD
 
     `11*` is internal assay 11 reached through the PROJECT 40 seek record rather
-    than the project 10 one. Sixteen edges, twenty-eight proposals.
+    than the project 10 one.
 
     EVERY REQUIRED CASE, AND WHICH ROW CARRIES IT:
 
@@ -1074,15 +1077,24 @@ def _world2():
     registered as well as edged:
 
         (TIS,11)=5   1,2,3,230,270          (D.IMG,11)=7  8,100,103,170,260,
-        (TIS,12)=10  6,7,200,270,280,290,                 501,600
-                     210,430,500,610        (D.IMG,12)=0
+        (TIS,12)=10  6,7,200,210,270,280,                 501,600
+                     290,430,500,610        (D.IMG,12)=0
         (TIS,13)=2   9,240                  (D.IMG,13)=1  110
         (TIS,14)=0   -- nothing             (D.IMG,490)=1 130
         (TIS,490)=0  -- nothing             (MUS,11)=1    250
         (PAV,11)=2   340,380                (MUS,12)=1    360
-        (PAV,12)=3   330,395,310            (MUS,14)=0
-        (PAV,13)=4   4,5,380,396
+        (PAV,12)=2   330,395                (MUS,14)=0
+        (PAV,13)=5   4,5,310,380,396
         (PAV,14)=2   350,390
+
+    THIS TABLE SAID `(PAV,12)=3` INCLUDING 310, AND `(PAV,13)=4` EXCLUDING IT,
+    until it was measured. 310 holds assay 13, so it was filed in the wrong cell
+    and BOTH cells were wrong. No test read either one, which is exactly the
+    "a stale fixture docstring cannot fail this suite" class -- in the one
+    fixture whose whole premise is that every count is hand-derived. Every cell
+    above is now pinned by
+    `test_the_fixture_world_carries_exactly_the_populations_its_docstring_states`,
+    so the table cannot drift from the world again.
 
     `(D.IMG,11)` counts 600 even though 600 is registered through the OTHER seek
     record: `type_registration_index` crosses to the internal namespace, so both
@@ -2043,6 +2055,153 @@ def test_the_key_construction_speaks_the_language_mine_precedent_writes():
         (10, "D.IMG", "TIS", 490)})
     assert sorted(out.precedent_rate.dropna()) != sorted(
         findings.precedent_rate.dropna())
+
+
+def test_the_fixture_world_carries_exactly_the_populations_its_docstring_states():
+    """`_world2`'s hand-derived table, read off the world instead of trusted.
+
+    THE ONE TEST THAT CAN FAIL A STALE FIXTURE DOCSTRING. Every other test here
+    asserts a band or a count that the docstring merely explains, so the
+    explanation can drift from the data without a single failure -- and it did:
+    the reachability table filed sample 310 under `(PAV,12)` when 310 holds assay
+    13, making BOTH that cell and `(PAV,13)` wrong, and the header still said
+    thirteen edges and twenty-six proposals after the world had grown to sixteen
+    and twenty-eight. Neither could fail anything, in the one fixture whose whole
+    premise is that its counts are derived by hand.
+
+    So the two populations a reader checks the table against are pinned here.
+    """
+    w = _world2()
+    _, _, findings = _pipeline2(w)
+
+    # the header sentence
+    assert len(w["edges"]) == 16
+    assert len(findings) == 28
+
+    # every reachability cell the docstring states, and NO cell it omits
+    cells = G.type_registration_index(w["membership"], w["assays"], w["nodes"])
+    assert cells == {
+        ("TIS", 11): 5, ("TIS", 12): 10, ("TIS", 13): 2,
+        ("PAV", 11): 2, ("PAV", 12): 2, ("PAV", 13): 5, ("PAV", 14): 2,
+        ("D.IMG", 11): 7, ("D.IMG", 13): 1, ("D.IMG", 490): 1,
+        ("MUS", 11): 1, ("MUS", 12): 1,
+    }
+    # the cells the docstring calls EMPTY are absent rather than zero, which is
+    # the distinction `type_registration_index` is built on and the one the
+    # unseen-pair flag reads
+    for empty in (("TIS", 14), ("TIS", 490), ("D.IMG", 12), ("MUS", 14)):
+        assert empty not in cells
+    # 310 is in the cell it is actually registered in
+    assert 13 in A.registered_internal(w["membership"], w["assays"])[310]
+
+
+def test_a_proposal_with_no_measured_rate_says_lineage_only_not_precedent():
+    """(360,11) has no rule, so `BY_PRECEDENT` would assert what the row denies.
+
+    `BY_PRECEDENT` is defined as "stage B precedent on the hop alone" and this
+    row's `precedent_rate` is NULL and its own summary says "NO measured basis".
+    Labelling it `BY_PRECEDENT` put two meanings under one name -- the defect
+    this package documents for `edge_internal_assay_id`, for `provenance` /
+    `source_provenance` and for the `FINDING_COLUMNS` grain change -- and it
+    shipped that way for one review cycle. 10 rows of the real extract's 172,338
+    carried it.
+
+    The fix is a FOURTH member, not a wider definition of the third.
+    """
+    _, _, findings = _pipeline2()
+
+    unmeasured = _row(findings, 360, 11)
+    assert pd.isna(unmeasured.precedent_rate)
+    assert unmeasured.proposed_by == X.BY_LINEAGE_ONLY
+    assert unmeasured.proposed_by != X.BY_PRECEDENT
+    assert "no precedent" in unmeasured.evidence_summary
+
+    # ...and a row that DOES have a rule still says so, so the new member did not
+    # swallow the third
+    measured = _row(findings, 200, 11)
+    assert pd.notna(measured.precedent_rate)
+    assert measured.proposed_by == X.BY_PRECEDENT
+
+    # the family stays closed, enumerable and collision-free
+    assert X.PROPOSAL_SOURCES == (X.BY_CLAIM, X.BY_PRECEDENT, X.BY_BOTH,
+                                  X.BY_LINEAGE_ONLY)
+    assert len(set(X.PROPOSAL_SOURCES)) == 4
+    assert set(findings.proposed_by) <= set(X.PROPOSAL_SOURCES)
+    # EVERY row with a null rate carries the new member, and every row with the
+    # new member has a null rate -- read off the frame, not off the two ids above
+    null_rate = set(findings[findings.precedent_rate.isna()].index)
+    lineage_only = set(findings[findings.proposed_by == X.BY_LINEAGE_ONLY].index)
+    assert null_rate == lineage_only == {unmeasured.name}
+
+
+def test_a_claim_with_no_precedent_rule_is_refused_rather_than_mislabelled():
+    """The fourth combination has no value, and inventing one is how buckets lie.
+
+    (precedent rule, gated claim) has four combinations and three have honest
+    labels. The fourth -- a claim on a hop with NO rule -- occurs 0 times on the
+    real extract, so no member was invented for it: `BY_BOTH` would assert a
+    precedent that is not there and `BY_LINEAGE_ONLY` would hide the claim.
+
+    It is refused in the emitter rather than only in a test, following
+    `precedent.assay_index`, which raises on a collision that also holds today
+    only by luck of the data. This test CONSTRUCTS the combination, which is the
+    only way to know the guard fires rather than merely exists.
+    """
+    w = _world2()
+    # give 360 -- the sample whose (10, D.IMG, MUS, 11) hop has no rule -- a
+    # gate-passing claim naming the very assay its rule-less row proposes
+    w["samples"] = w["samples"].copy()
+    w["samples"].loc[w["samples"].sample_id == 360, "json_metadata"] = \
+        '{"Type": "omega"}'
+    w["vocabulary"] = pd.concat([w["vocabulary"], pd.DataFrame(
+        [("Type", "omega", 11, "Assay 11", 700, 45, 0.97, S.P_LEARNED)],
+        columns=S.VOCAB_COLUMNS)], ignore_index=True)
+
+    # the claim must REACH a mode, or the guard is not the thing being tested
+    attached = _attached2(w)
+    hit = attached[(attached.sample_id == 360) & (attached.internal_assay_id == 11)]
+    assert len(hit) == 1 and G.reaches_modes(attached)[hit.index[0]]
+
+    with pytest.raises(ValueError, match="fifth member"):
+        _pipeline2(w)
+
+
+def test_the_survival_table_says_how_much_evidence_its_survivors_rest_on():
+    """A row count is not an evidence count, and the table now carries both.
+
+    Measured on the real extract at `rate >= 0.95`, the WEAK direction survives
+    371 rows against the strong direction's 46 -- and the obvious reading, that
+    `reverse_rate` reaches 1.0 easily on a thin denominator, is FALSE: those 371
+    sit on a median direction denominator of 27,344 against 919, and not one is
+    thin. The real driver is hop concentration, 371 rows over 13 evidence groups
+    with one group keying 170 of them, against 46 rows over 2.
+
+    `of_rows` is the denominator of the SHARE and answers none of that, so the
+    printed table deferred the question to whoever held the parquet.
+    """
+    _, _, findings = _pipeline2()
+    table = X.precedent_survival(findings)
+
+    assert list(table.columns) == X.SURVIVAL_COLUMNS
+    assert "rule_groups" in X.SURVIVAL_COLUMNS
+
+    for r in table.itertuples(index=False):
+        sub = findings[(findings.action == r.action)
+                       & findings.precedent_rate.notna()
+                       & (findings.precedent_rate >= r.threshold)]
+        groups = sub[["precedent_n_both", "precedent_n_child_only",
+                      "precedent_n_parent_only"]].drop_duplicates()
+        assert r.rule_groups == len(groups)
+        # a lower bound on rules and never more than the rows it summarises
+        assert r.rule_groups <= r.rows
+
+    # in this world the two directions genuinely differ, so the column is not a
+    # restatement of `rows`
+    at_zero = table[table.threshold == 0.0].set_index("action")
+    assert at_zero.loc[S.A_ADD_PARENT, "rule_groups"] \
+        != at_zero.loc[S.A_ADD_PARENT, "rows"]
+    assert (at_zero.loc[S.A_ADD_CHILD, "rule_groups"]
+            != at_zero.loc[S.A_ADD_PARENT, "rule_groups"])
 
 
 def test_a_world_with_no_lineage_at_all_yields_an_empty_mode_2_frame():
