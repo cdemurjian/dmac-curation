@@ -302,9 +302,32 @@ direction the operator's domain rule justifies and the evidence backs.
 |---|---|---|
 | corroborated by co-registration, over the 866 | **88 / 88, 100%** | 15 / 263, 5.7% |
 | edge-weighted rate over `precedent.csv` | 0.351 | 0.280 |
-| rules at rate >= 0.95 | 5 | 15 |
-| candidate rows surviving rate >= 0.5 | 79,488 | **3,663** of 111,039 |
-| rows that would create a (type, assay) pair existing nowhere | 55.6% | **67.6%** |
+| candidate rows surviving rate >= 0.5, over DERIVED_FROM | **8,170** of 55,007 | **2,067** of 117,331 |
+| rows that would create a (type, assay) pair existing nowhere | 55.4% | 62.4% |
+
+**Three figures in this table were wrong and are corrected above. Read this
+before quoting any of them.**
+
+*Corrected 2026-08-18, measured by Task 6 of increment 2.* The survival row read
+`79,488 | 3,663 of 111,039`. **79,488 was impossible**: it exceeds the entire
+ADD_PARENT ceiling of 55,007 stated in this same document, and neither the
+author nor two reviewers noticed a survivor count larger than its own
+population. It originated in a review of Task 4 and was propagated here. The
+denominator 111,039 was the CHILD_OF reading; over DERIVED_FROM, which is the
+relation Mode 2 actually uses, the emitted population is 117,331.
+
+The unseen-pair row read `55.6% | 67.6%`. 55.6 was within rounding of the
+measured 55.4; **67.6 reproduces under none of four constructions** (62.4%
+emitted rows, 62.3% ceiling, 62.2% over CHILD_OF, 86.6% as distinct pairs).
+
+**A fourth row was REMOVED because it argued against the conclusion it was cited
+to support.** It read `rules at rate >= 0.95 | 5 | 15`. That figure is correct
+only once rules sitting trivially at 1.0 with a zero gap count are excluded
+(170 propagation, 198 reverse); as literally written the row reads 175 / 213.
+Scoped correctly it favours ADD_CHILD three to one, and the mechanism is that a
+rate is easy to reach on a narrow gap count, so a high-rate rule count measures
+opportunity as much as strength. A row that cuts against its own heading cannot
+stand under it.
 
 The mechanism behind the asymmetry: a sample has one producing assay but many
 consuming ones, so "the child is in X" pins the parent tightly, while "the
@@ -319,6 +342,66 @@ mirror is "the larger of the two, 263 against 88". That reasoning is backwards:
 the 263 are precisely the weakly corroborated direction. `A_ADD_CHILD` survives
 only where `reverse_rate` earns it, roughly 3% of its ceiling, and the spec must
 never quote its unfiltered size without that qualification.
+
+### `A_ADD_CHILD` is weak in aggregate and is not weak at rate
+
+*Added 2026-08-18, from increment 2's Task 7 backtest.* The two halves of that
+heading are measured on **different populations** and neither figure below may
+be quoted without the population it came from.
+
+**In the LIVE population** — the 172,338-row Mode 2 ceiling stage C emits over
+the 2026-08-14 extract — the direction is the weak one. 117,331 of the emitted
+rows are `A_ADD_CHILD`, only 2,067 of them clear `reverse_rate >= 0.5`, and the
+crossover above 0.95 (371 rows against the mirror's 46) rests on 13 evidence
+groups against 2.
+
+**In a BACKTEST population** — over the same 2026-08-14 extract, samples held
+out at a **20% fraction on seed 0**, all their membership hidden, precedent
+mined on the subgraph induced by the kept samples, 59,182 proposals scored — the
+two directions recover a curator's assay at indistinguishable precision **at
+equal rate**: in `[0.95,1.00]`, 19,270 of 19,337 (0.997) against 4,143 of 4,151
+(0.998); in `[0.90,0.95)`, 0.949 against 0.952. Below 0.90 neither direction
+clears the 95% bar. Stable across the split — re-run at seed 7 and at fractions
+0.1 and 0.5, the `[0.95,1.00]` precision reads, **`A_ADD_CHILD` then
+`A_ADD_PARENT`** to match the order used above, 0.997 / 0.997, then 0.997 /
+0.999, then 0.996 / 0.998. **This population is not the live one**: it is
+enriched with the registrations the split hid, which the live run would never
+propose because the sample already holds them. So these are the precisions of a
+proposal about a *blinded* sample, and every one of them is a **lower bound**,
+because a curator's assay set is not known to be complete, which is the premise
+of Modes 1 and 2. The live dark rows have no ground truth by construction and
+none of these figures describes them.
+
+**Also on that backtest population, at the same 20% / seed 0**, and not on the
+live one: neither top band is one hop. Dropping the largest evidence group
+leaves 13,649 `A_ADD_CHILD` rows still recovering at 0.9958, and 3,534
+`A_ADD_PARENT` rows still recovering at 0.9977. But the group counts are
+unequal — the largest group carries 29.4% of the `A_ADD_CHILD` band and the top
+three 60.6% — and the largest group is the **same triple in both directions**,
+keying 5,688 rows there and 617 in the mirror. So the two top bands are not
+independent evidence of each other, and a group COUNT (118 and 95) must not be
+read as a discount on a row count.
+
+**Where the two populations agree:** the demoted direction is genuinely worse in
+the bulk. In the backtest's `[0.00,0.50)` band it recovers 210 of 18,996 (0.011)
+against the mirror's 519 of 8,806 (0.059), five times worse — and in the live
+population that band is where almost all of its 117,331 rows sit.
+
+**Consequence.** `A_ADD_CHILD` may be demoted in **reading order**, because in
+the live population its volume is concentrated where recovery is worst. It must
+**not** be demoted **at equal rate**: measured, a `reverse_rate` of 0.97 is as
+good a guide as a `propagation_rate` of 0.97. Nothing here touches the two
+measurements the demotion actually rests on — co-registration corroboration over
+increment 1's 866 flags (88 of 88 against 15 of 263) and the flagship hop
+`TIS <- PAV` (0.006 reverse under assay 56 against 0.931 propagation under 74) —
+and neither is tested by this instrument.
+
+Reproduce from the repo root, read-only, no artifact written:
+
+```
+PYTHONPATH=scripts uv run --with pandas --with pyarrow \
+    python -m assay_hygiene.backtest assay-hygiene/extract 0.2 0
+```
 
 ### Which lineage relation, stated once
 
