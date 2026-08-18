@@ -76,8 +76,13 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
     itself as `registered_internal_assay_ids`, so there is nothing for a
     tiebreak to recover later and nothing at the end to protect. The successor
     below is strictly stronger than the assertion it replaces: the old test
-    pinned two facts about one column, this one pins all 34 columns, their
+    pinned two facts about one column, this one pins all 36 columns, their
     order, and their uniqueness.
+
+    THIS LINE SAID 34 while the paragraph two below it explains why the count
+    is 36, in the same docstring, added the same day. The number is not derived
+    here -- the assertion reads `FINDING_COLUMNS` -- so the prose drifted and
+    nothing went red. Corrected 2026-08-18.
 
     34 and not 31 since 2026-08-17. `co_reg_registered_internal_assay_id` names
     which pair the winning rate measured, and
@@ -833,6 +838,15 @@ def test_every_stage_c_family_is_closed():
             f"{prefix}* constants {sorted(family)} disagree with the closed "
             f"tuple {closed}")
         assert len(set(closed)) == len(closed), f"{prefix}* has a duplicate value"
+        # ...and the same check on the FAMILY, which the set comparison above
+        # structurally cannot make. Two constants in one family sharing a value
+        # collapse into one set element, so `set(family.values())` is unchanged
+        # and the assertion passes -- an alias for a member of a closed
+        # vocabulary is exactly the thing a closure test exists to refuse, and
+        # this family is read by the gate, the classifier and the report.
+        assert len(family) == len(set(family.values())), (
+            f"two {prefix}* constants share a value: {sorted(family)}. The "
+            "closure assertion above compares sets and cannot see this.")
 
     # The class vocabulary is the one the spec names as closed, so it is pinned
     # literally as well: closure against a tuple that itself grew is vacuous.
@@ -925,8 +939,15 @@ def test_the_two_reporting_numbers_gate_nothing():
     """
     package = REPO / "scripts" / "assay_hygiene"
     APPROVED = {"compatibility.py"}
+    # RECURSIVE, and floored. `glob` is non-recursive, so a reader added in a
+    # future subpackage would not be seen by a guard whose whole subject is
+    # that NO module outside the approved one reads these two names. The floor
+    # is the other half: a glob that stops matching, for any reason, yields an
+    # empty `readers` and this test reports success in the shape of silence.
+    modules = sorted(package.rglob("*.py"))
+    assert len(modules) > 15, f"the glob found only {len(modules)} module(s)"
     readers = sorted(
-        p.name for p in package.glob("*.py")
+        p.name for p in modules
         if p.name != "_schema.py" and p.name not in APPROVED
         and ("MIN_CO_REG_SUPPORT" in p.read_text()
              or "CO_OCCUR_BAND" in p.read_text())

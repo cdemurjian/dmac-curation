@@ -2041,7 +2041,15 @@ def test_the_survival_table_reports_the_two_directions_apart_and_drops_no_eviden
     866 flags and ADD_CHILD 15 times out of 263, so one number covering both
     would present the weak direction as carrying the strong one's evidence.
     Measured on the real extract at `rate >= 0.5`, ADD_PARENT survives 8,170 rows
-    and ADD_CHILD 2,067 -- of a ceiling of 55,007 and 117,331.
+    and ADD_CHILD 2,067 -- of 55,007 and 117,331 EMITTED lane rows.
+
+    THOSE TWO DENOMINATORS ARE NOT BOTH CEILINGS, and this line called them
+    both one until 2026-08-18. ADD_PARENT's emitted count happens to EQUAL its
+    ceiling, 55,007; ADD_CHILD's does not -- its ceiling is 117,463 and 117,331
+    is what the lane emitted, a gap `mode2.py` names explicitly one function
+    away. A number that coincides with a ceiling in one direction and not the
+    other is the worst possible one to label by adjacency, and this branch has
+    already published two irreconcilable readings of this exact quantity.
 
     A THRESHOLD ORDERS READING AND GRANTS NOTHING. Every row above is emitted
     whatever this table says.
