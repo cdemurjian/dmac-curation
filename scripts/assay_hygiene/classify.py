@@ -676,7 +676,7 @@ def _registered_columns(
 #     COMPAT  <-> MODE 3          0
 #
 # The last is zero because `PRE_MODE_3` claims no key under ANY evidence, which
-# `test_the_precedence_is_a_declared_order_and_every_adjacent_swap_moves_a_key`
+# `test_the_precedence_is_a_declared_order_and_three_of_its_four_swaps_move_a_key`
 # proves exhaustively over all sixteen evidence tuples rather than over one
 # world. That is the finding this increment exists to report.
 PRE_GATE = "PRE_GATE"          # a rejected claim reaches no mode, ever

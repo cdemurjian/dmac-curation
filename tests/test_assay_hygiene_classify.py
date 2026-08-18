@@ -2946,7 +2946,7 @@ def test_world_3_carries_exactly_the_cells_and_rates_its_docstring_states():
     assert never[1] >= S.MIN_CO_REG_SUPPORT > no_support[1]
 
 
-def test_the_precedence_is_a_declared_order_and_every_adjacent_swap_moves_a_key():
+def test_the_precedence_is_a_declared_order_and_three_of_its_four_swaps_move_a_key():
     """`PRECEDENCE` is data, and reordering it changes a measured answer.
 
     THE POINT OF THE TASK, in one test. An `if` chain in `precedence_step` would
