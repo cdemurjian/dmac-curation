@@ -10,8 +10,8 @@ run Mode 2 cold, and ask of each proposal it makes about a held-out sample:
 did a curator actually put that sample in that assay. Recovery, not rate.
 
 THE SPLIT IS BY SAMPLE AND NEVER BY EDGE. A sample fans out to many edges -- one
-row of the real extract has 1,526 lineage neighbours -- so an edge-level split
-puts the same sample on both sides and scores memorised answers. The spec
+sample of the real extract has 1,528 children -- so an edge-level split puts the
+same sample on both sides and scores memorised answers. The spec
 records this as a mistake already made once on this project, which is why
 `check_split` refuses a sample appearing in both halves and why
 `test_a_sample_on_both_sides_of_the_split_is_refused_and_an_edge_split_makes_one`
@@ -770,9 +770,10 @@ def test_a_band_says_how_much_independent_evidence_its_rows_rest_on():
     counts collapse into one group, so it is a LOWER bound on the rules behind a
     band. Measured over the live extract it is EXACT at the 0.95 cut -- 15
     qualifying reverse rules occupy 15 distinct triples and 5 propagation rules 5
-    -- and loose across the whole mined set, where 961 rules collapse to 537
-    triples, 44%. Neither figure has been re-measured on a BLINDED world, so it
-    is read here as a lower bound and nothing else.
+    -- and loose across the whole mined set, where the 961 mined rules occupy
+    537 distinct triples, 55.9%, so 44.1% of them share a triple with another
+    rule. Neither figure has been re-measured on a BLINDED world, so it is read
+    here as a lower bound and nothing else.
     """
     _, _, out = _run()
 

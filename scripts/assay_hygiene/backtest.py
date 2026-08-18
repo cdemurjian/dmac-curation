@@ -19,8 +19,8 @@ and `backtest` filters not one proposal by a rate.
         python -m assay_hygiene.backtest
 
 THE SPLIT IS BY SAMPLE AND NEVER BY EDGE. A sample fans out to many edges -- one
-row of the real extract has 1,526 lineage neighbours -- so an edge-level split
-puts the same sample in both halves and scores answers the run was trained on.
+sample of the real extract has 1,528 children -- so an edge-level split puts the
+same sample in both halves and scores answers the run was trained on.
 The spec records this as a mistake already made once on this project.
 `check_split` refuses a sample appearing in both halves, and refuses one
 appearing in neither, because an unassigned sample is silently treated as kept
@@ -584,8 +584,12 @@ def recovery_bands(
     number whose job is to discount a row count. Measured on the LIVE extract it
     is exact at the 0.95 cut -- 15 qualifying reverse rules occupy 15 distinct
     triples and 5 propagation rules 5 -- and loose across the whole mined set,
-    where 961 rules collapse to 537 triples, 44%. Neither figure has been
-    re-measured on a blinded world, so it is read here as a lower bound only.
+    where the 961 mined rules occupy 537 distinct triples, 55.9%, so 44.1% of
+    them share a triple with another rule. The figure this task inherited read
+    "961 mined rules collapse to 537 triples, 44%", which states 537 as 44% of
+    961 and is wrong in that reading; 44% is the COLLAPSE rate, re-measured
+    2026-08-18. Neither figure has been re-measured on a blinded world, so it is
+    read here as a lower bound only.
 
     THE `NO_RATE` BAND REPORTS ZERO GROUPS AND NOT ONE. Those rows carry a null
     triple, and `drop_duplicates` treats two nulls as equal, so the natural
