@@ -10,8 +10,9 @@ run Mode 2 cold, and ask of each proposal it makes about a held-out sample:
 did a curator actually put that sample in that assay. Recovery, not rate.
 
 THE SPLIT IS BY SAMPLE AND NEVER BY EDGE. A sample fans out to many edges -- one
-sample of the real extract has 1,528 children -- so an edge-level split puts the
-same sample on both sides and scores memorised answers. The spec
+(sample, assay) pair of the real extract is supported by 1,526 lineage
+neighbours, and the largest single child set is 1,528 -- so an edge-level split
+puts the same sample on both sides and scores memorised answers. The spec
 records this as a mistake already made once on this project, which is why
 `check_split` refuses a sample appearing in both halves and why
 `test_a_sample_on_both_sides_of_the_split_is_refused_and_an_edge_split_makes_one`
@@ -957,10 +958,18 @@ def test_the_real_extract_reproduces_both_recovery_curves_separately():
 
     THE HEADLINE, AND IT CUTS AGAINST THE SPEC'S DEMOTION OF `A_ADD_CHILD`. In
     the `[0.95,1.00]` band the demoted direction recovers the curator's assay on
-    19,270 of 19,337 proposals, 0.9965, over 118 evidence groups; the favoured
-    direction recovers 4,143 of 4,151, 0.9981, over 95. At equal precedent rate
-    the two directions are indistinguishable, so `reverse_rate` at a given value
-    is as good a guide to reading order as `propagation_rate` at that value.
+    19,270 of 19,337 proposals, 0.9965; the favoured direction recovers 4,143 of
+    4,151, 0.9981. At equal precedent rate the two directions are
+    indistinguishable, so `reverse_rate` at a given value is as good a guide to
+    reading order as `propagation_rate` at that value.
+
+    THE GROUP COUNTS -- 118 AND 95 -- ARE NOT A DISCOUNT ON THOSE ROW COUNTS AND
+    THAT READING IS WITHDRAWN. They are pinned below because `main` prints them,
+    not because they measure independence: the ADD_CHILD band's largest group
+    keys 5,688 of its 19,337 rows and its top three 60.6%, and its largest is the
+    SAME triple that tops the ADD_PARENT band. What survives is only that neither
+    band is ONE hop. See
+    `test_a_band_says_how_much_independent_evidence_its_rows_rest_on`.
 
     THE DEMOTION SURVIVES ON THE DIRECTION'S BULK AND NOT ON ITS TOP BAND. In
     `[0.00,0.50)` the demoted direction recovers 210 of 18,996 against 519 of
