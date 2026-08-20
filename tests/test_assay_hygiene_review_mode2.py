@@ -629,3 +629,46 @@ def test_the_children_are_nested_in_the_target_and_not_beside_the_neighbour():
         "before the neighbour's opens")
     # ...and name the sample, so ownership never rests on reading the indent
     assert "CHILDREN OF TIS-240101ENG-800" in page
+
+
+# --- the rulings are the only irreplaceable artifact -------------------------
+
+
+RULINGS = Path(__file__).resolve().parent / "fixtures" / "mode2-rulings.tsv"
+
+
+def test_the_operators_rulings_are_tracked_and_loadable():
+    """The one artifact in this package that CANNOT be regenerated.
+
+    Every other file under `assay-hygiene/` is derived -- delete it and a run
+    rebuilds it. The rulings are a human's judgement on 111 cohorts and exist
+    only because someone made them. They lived for one afternoon solely in
+    `assay-hygiene/mode2-rulings.tsv`, inside a directory gitignored WHOLESALE
+    because `extract/` carries 163k rows of real sample metadata, so a `git
+    clean` would have destroyed them with no copy anywhere.
+
+    The tracked copy lives beside Mode 1's, which was tracked from the start.
+    This test is what makes its absence loud.
+    """
+    assert RULINGS.exists(), (
+        "the tracked copy of the Mode 2 rulings is gone. It is the only "
+        "irreplaceable artifact in this package -- restore it before running "
+        "anything that regenerates the sheet.")
+    presets = M.load_presets(RULINGS)
+    assert len(presets) == 111
+    assert sum(1 for r, _n in presets.values() if r == "APPROVE") == 100
+
+
+def test_the_tracked_rulings_and_the_working_copy_have_not_drifted():
+    """Two copies of a hand-made file is a drift hazard, so it is asserted.
+
+    `review_mode2.main` reads the working copy under `assay-hygiene/`, because
+    that is where every input to a run lives. The tracked copy is the durable
+    record. They must be the same file.
+    """
+    working = ARTIFACTS / M.PRESET_NAME
+    if not working.exists():
+        pytest.skip("no working copy; nothing to drift against")
+    assert M.load_presets(working) == M.load_presets(RULINGS), (
+        f"{working} and {RULINGS} disagree. The tracked copy is the record; "
+        "reconcile them before regenerating, or a ruling is about to be lost.")
