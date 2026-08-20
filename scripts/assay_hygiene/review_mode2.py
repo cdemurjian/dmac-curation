@@ -473,16 +473,48 @@ def to_csv(blocks: list[dict], presets: dict | None = None) -> pd.DataFrame:
 
 
 def _pair_html(pair: dict) -> list[str]:
-    """The write target, then the neighbour that is the evidence for it.
+    """The write target with its own children, then the neighbour that is the
+    evidence for it.
 
     THE LABELS ARE COMPUTED, NEVER CONSTANT. `review._child_html` prints CHILD
     then PARENT because in Mode 1 that is always what they are. In Mode 2 the
     row's own sample is the PARENT on an ADD_PARENT row, so a constant label is
     wrong on 54,852 of 167,347 rows -- and wrong in the direction that hides the
     evidence, which is how ten cohorts came back rejected for want of it.
+
+    THE SECOND HOP IS RENDERED INSIDE THE TARGET'S OWN BLOCK, and that placement
+    is the fix for a defect the operator caught on sight. It shipped once as a
+    SIBLING of the neighbour block, at almost the same indent (`.kids` 1.1rem
+    against `.parent` 1.4rem) and after the neighbour's metadata, so it read as
+    the NEIGHBOUR's children -- on a page whose entire purpose is telling a
+    reviewer which sample a fact is about. Nesting it inside the target's div
+    and naming the sample in the label makes the ownership structural rather
+    than a matter of reading the indentation correctly.
     """
     role = pair["target_role"]
     nb_role = pair["neighbour_role"]
+
+    # the second hop: types, and whether each child holds the proposed assay,
+    # is the whole question, so no metadata is expanded here
+    if pair["children"]:
+        held = pair["n_children_holding"]
+        kids = ", ".join(
+            f'<code>{R._e(c["uuid"])}</code> '
+            f'<span class="{"ok" if c["holds"] else "mut"}">{R._e(c["type"])}'
+            f'{" &check;" if c["holds"] else ""}</span>'
+            for c in pair["children"])
+        more = (f' &middot; {pair["n_children_hidden"]} more of '
+                f'{pair["n_children"]}' if pair["n_children_hidden"] else "")
+        kids_html = (
+            f'<div class="kids"><span class="lbl">CHILDREN OF '
+            f'{R._e(pair["uuid"])}</span> {kids}{more} &middot; '
+            f'{held} of {len(pair["children"])} shown hold the proposed assay'
+            "</div>")
+    else:
+        kids_html = (
+            f'<div class="kids"><span class="lbl">CHILDREN OF '
+            f'{R._e(pair["uuid"])}</span> <span class="empty">none</span></div>')
+
     out = [
         f'<div class="pair{" corroborated" if pair["neighbour_holds"] else ""}">',
         f'<div class="child"><span class="lbl">{R._e(role)} &mdash; WRITE HERE'
@@ -493,6 +525,7 @@ def _pair_html(pair: dict) -> list[str]:
         f'{R._registrations_html(pair["own_regs"], pair["n_own_regs_hidden"])}'
         "</div>"
         f'{R._metadata_html(pair["meta"])}'
+        f'{kids_html}'
         "</div>",
     ]
     if not pair["neighbour_uuid"]:
@@ -512,25 +545,6 @@ def _pair_html(pair: dict) -> list[str]:
             "</div>"
             f'{R._metadata_html(pair["neighbour_meta"])}'
             "</div>")
-    # the second hop, rendered compactly: types and whether each holds the
-    # proposed assay is the whole question, so no metadata is expanded here
-    if pair["children"]:
-        held = pair["n_children_holding"]
-        kids = ", ".join(
-            f'<code>{R._e(c["uuid"])}</code> '
-            f'<span class="{"ok" if c["holds"] else "mut"}">{R._e(c["type"])}'
-            f'{" &check;" if c["holds"] else ""}</span>'
-            for c in pair["children"])
-        more = (f' &middot; {pair["n_children_hidden"]} more of '
-                f'{pair["n_children"]}' if pair["n_children_hidden"] else "")
-        out.append(
-            f'<div class="kids"><span class="lbl">ITS CHILDREN</span> '
-            f'{kids}{more} &middot; '
-            f'{held} of {len(pair["children"])} shown hold the proposed assay'
-            "</div>")
-    else:
-        out.append('<div class="kids"><span class="lbl">ITS CHILDREN</span> '
-                   '<span class="empty">none</span></div>')
     out.append("</div>")
     return out
 
@@ -542,6 +556,11 @@ def _notes_html(block: dict, presets: dict) -> str:
     restore from storage. This one also accepts a preset, and marks it both in
     the markup AND visibly on the page, because a verdict that appears in a
     reviewer's export without their having chosen it must not be silent.
+
+    `selected` is emitted ONLY for a real ruling, never for the empty option --
+    which is the first one and therefore already the default. The token then
+    means "a preset chose this" rather than "this is first", which is what makes
+    it testable.
     """
     key = R.cohort_key(block)
     ruling, note = presets.get(key, ("", ""))
@@ -646,8 +665,8 @@ def render(blocks: list[dict], floor: float = FLOOR,
 
 
 _CSS_EXTRA = """
-.kids{margin:.35rem 0 .1rem 1.1rem;font-size:.83rem;color:var(--mut);
- line-height:1.7}
+.kids{margin:.4rem 0 .1rem 0;padding:.25rem .5rem;font-size:.83rem;
+ color:var(--mut);line-height:1.7;background:var(--code);border-radius:4px}
 .kids .lbl{margin-right:.4rem}
 .kids .mut{color:var(--mut)}
 .kids .ok{color:var(--ok);font-weight:600}

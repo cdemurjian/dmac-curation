@@ -511,7 +511,7 @@ def test_the_pair_carries_the_row_samples_own_children():
     # and it must actually reach the page
     page = M.render([block])
     assert any(c["uuid"] in page for c in pair["children"])
-    assert "ITS CHILDREN" in page
+    assert "CHILDREN OF TIS-240101ENG-800" in page
     assert {c["type"] for c in pair["children"]} <= {"D.IMG", "CEL", R.UNTYPED}
 
 
@@ -526,7 +526,7 @@ def test_a_child_holding_the_proposed_assay_is_marked():
 def test_a_sample_with_no_children_says_so_rather_than_rendering_nothing():
     page = M.render(_blocks([_m2(903, "TIS-240104ENG-903",
                                  neighbour="TIS-240101ENG-800")]))
-    assert "ITS CHILDREN" in page
+    assert "CHILDREN OF TIS-240104ENG-903" in page
     assert "none" in page
 
 
@@ -604,3 +604,28 @@ def test_a_preset_naming_no_cohort_is_refused():
     with pytest.raises(ValueError, match="name no cohort"):
         M.check_presets({"NOPE|NOPE|NOPE|NOPE|NOPE|NOPE": ("APPROVE", "")},
                         blocks, expect=0)
+
+
+def test_the_children_are_nested_in_the_target_and_not_beside_the_neighbour():
+    """The placement defect the operator caught on sight.
+
+    It shipped once as a SIBLING of the neighbour block, at almost the same
+    indent (`.kids` 1.1rem against `.parent` 1.4rem) and rendered AFTER the
+    neighbour's metadata -- so "its children" read as the NEIGHBOUR's children,
+    on a page whose whole job is saying which sample a fact is about. He asked
+    "Im not seeing the child here?" while looking straight at it.
+
+    Ordering is asserted rather than styling, because the indent was only half
+    of it: the block has to belong to the target structurally and say whose
+    children it lists.
+    """
+    page = M.render(_blocks([_m2(800, "TIS-240101ENG-800",
+                                 neighbour="TIS-240101ENG-801")]))
+    child = page.index('<div class="child">')
+    kids = page.index('<div class="kids">')
+    parent = page.index('<div class="parent">')
+    assert child < kids < parent, (
+        "the children block must sit inside the target's own block and close "
+        "before the neighbour's opens")
+    # ...and name the sample, so ownership never rests on reading the indent
+    assert "CHILDREN OF TIS-240101ENG-800" in page
