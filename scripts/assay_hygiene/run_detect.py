@@ -415,6 +415,11 @@ def build_report(findings: pd.DataFrame,
     """
     n_findings, n_flags = len(findings), len(disposition)
     cohorts = cohort_table(findings)
+    # ACTIONABLE vs EMITTED. 6,188 of the real extract's rows carry
+    # `action == NONE` and reach no mode; calling every row a proposal
+    # overstates the output by 3.5%, which the first version of this report did.
+    n_none = int((findings.action == "NONE").sum()) if n_findings else 0
+    n_actionable = n_findings - n_none
     counts = findings["mode"].value_counts(dropna=False) if n_findings \
         else pd.Series(dtype=int)
     classes = findings.classification.value_counts(dropna=False) if n_findings \
@@ -490,8 +495,13 @@ def build_report(findings: pd.DataFrame,
     lines += [
         f"## Artifacts, all under {where}",
         "",
-        f"- `findings.csv` -- **{n_findings:,}** proposals, one row per "
-        "(sample, proposed assay)",
+        f"- `findings.csv` -- **{n_findings:,}** rows, one per (sample, "
+        f"proposed assay), of which **{n_actionable:,}** are PROPOSALS and "
+        f"**{n_none:,}** propose nothing (`action` is `NONE`: the pair never "
+        "coexists, so the term is an alternative label, or no test settled "
+        "it). Calling all "
+        f"{n_findings:,} of them proposals overstates the output by "
+        f"{n_none / n_findings:.1%}",
         f"- `mode3-disposition.csv` -- all **{n_flags:,}** of increment 1's "
         "flags, carrying the step that now claims each one, so increment 1's "
         "output is superseded traceably rather than deleted",
@@ -503,6 +513,21 @@ def build_report(findings: pd.DataFrame,
         "are separate columns so a cohort that proposes nothing cannot read as "
         "one that does",
         f"- `{REPORT_NAME}` -- this file",
+        "",
+        "**A PROPOSAL NAMES AN INTERNAL ASSAY ID, AND THAT IS NOT A WRITABLE",
+        "TARGET.** `proposed_internal_assay_id` is a harmonisation key this",
+        "package DERIVES by crossing `dmac.assays_internal_assays`. A",
+        "membership row natively carries a SEEK `assays.id` (`assay_assets.",
+        "assay_id`), and one internal id spans up to 23 SEEK records. Acting on",
+        "any row here means resolving the internal id back to ONE SEEK assay",
+        "record, and NO COLUMN IN ANY FILE ABOVE CARRIES THAT RESOLUTION.",
+        "",
+        "The design states the rule -- in Mode 2, target the assay record the",
+        "registered neighbour is already in -- and NO STAGE IN THIS INCREMENT",
+        "IMPLEMENTS IT. Measured against that rule, 166,757 of the 167,330",
+        "neighbour-anchored rows resolve to exactly one SEEK record and 573 to",
+        "two. Mode 1 has no neighbour for the rule to use at all, so its 2,166",
+        "rows are not covered by it.",
         "",
     ]
 

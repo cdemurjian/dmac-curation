@@ -669,6 +669,8 @@ def test_every_bolded_integer_in_the_prose_is_a_number_the_artifacts_hold(
             if col in frame.columns:
                 legitimate.add(int(frame[col].nunique()))
     legitimate |= set(int(v) for v in ceiling.values())
+    if len(findings):
+        legitimate.add(len(findings) - int((findings.action == "NONE").sum()))
     legitimate |= {0}
     # MODE_1's qualification counts, which are subset counts and so are not
     # reachable from the whole-frame value_counts above
