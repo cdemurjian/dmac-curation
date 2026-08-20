@@ -591,3 +591,69 @@ def test_a_null_id_row_is_a_working_ruled_not_an_assay_state(tmp_path):
     #    ruling is recorded, and nobody is asked to make it again
     assert list(V.unresolved_terms(meta, vocab, {}, min_occurrences=1)
                 .raw_value) == []
+
+
+def test_a_null_id_curator_row_RETIRES_an_existing_learned_mapping():
+    """Retiring a term the vocabulary ALREADY maps, which is the tif case.
+
+    The test above rules on a term with no learned row, so it exercises the
+    RECORDING half of a null id and not the OVERRIDE half. Those are different
+    mechanisms and only the second one is load-bearing for the first curator
+    file this project will ever write: `DataType/tif -> 138 CometChip Assay`
+    carries support 3755 over 3442 samples, and a retirement that merely
+    appends leaves the learned row winning every lookup and the ruling applied
+    to nothing.
+
+    The numbers are the live ones. Measured on the 2026-08-14 extract, that one
+    vocabulary row serves 4,750 claims -- `tif` and `TIF` both normalise to
+    `tif` -- and the samples behind it are registered in CometChip 3,574,
+    Device Imaging 1,754 and Cancer Cell Extravasation 812, which is why
+    purity is 0.363 and why the term is retired rather than remapped: a
+    plurality is not a determination.
+    """
+    learned = _vocab([("DataType", "tif", 138, "CometChip Assay",
+                       3755, 3442, 0.363249, S.P_LEARNED)])
+    curator = _vocab([("DataType", "tif", None, None, 0, 0, 0.0, S.P_CURATOR)])
+    vocab = V.merge_vocabulary(learned, _vocab([]), curator, _assays())
+
+    # 1. ONE row survives, not two, and the survivor is the curator's. A second
+    #    surviving row would leave the learned mapping reachable by every
+    #    consumer that keys on (field, value) and takes the first hit.
+    assert len(vocab) == 1
+    assert vocab.iloc[0].provenance == S.P_CURATOR
+    assert pd.isna(vocab.iloc[0].internal_assay_id)
+
+    # 2. the mapping is GONE, not merely outranked -- no claim is built for a
+    #    sample whose metadata carries the retired term, in either casing,
+    #    because `normalise_value` folds them onto the one retired key
+    meta = {1: {"DataType": "tif"}, 2: {"DataType": "TIF"}}
+    assert len(C.sample_claims(meta, {1: "D.IMG-1", 2: "D.IMG-2"}, vocab)) == 0
+
+    # 3. and the retired term does not return to the judgment queue asking to
+    #    be ruled on again
+    assert list(V.unresolved_terms(meta, vocab, {}, min_occurrences=1)
+                .raw_value) == []
+
+
+def test_retiring_one_term_leaves_its_neighbours_mapping():
+    """A retirement is keyed on (field, value) and reaches nothing else.
+
+    `DataType/tif` and `DataType/tiff` are one letter and two different terms
+    -- tiff maps to 145 Histopathology at purity 0.962 over 53 samples and is
+    not in question -- while `Type/tif` would be a third. A retirement written
+    against the value alone, or stemmed to a family, would take all three.
+    """
+    learned = _vocab([("DataType", "tif", 138, "CometChip Assay",
+                       3755, 3442, 0.363249, S.P_LEARNED),
+                      ("DataType", "tiff", 145, "Histopathology",
+                       53, 53, 0.962264, S.P_LEARNED)])
+    curator = _vocab([("DataType", "tif", None, None, 0, 0, 0.0, S.P_CURATOR)])
+    vocab = V.merge_vocabulary(learned, _vocab([]), curator, _assays())
+
+    surviving = dict(zip(vocab.raw_value, vocab.internal_assay_id))
+    assert pd.isna(surviving["tif"])
+    assert surviving["tiff"] == 145
+
+    meta = {1: {"DataType": "tiff"}}
+    claims = C.sample_claims(meta, {1: "TIS-1"}, vocab)
+    assert list(claims.internal_assay_id) == [145]

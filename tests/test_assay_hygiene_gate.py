@@ -1006,3 +1006,54 @@ def test_the_24_flowjo_and_mass_spectra_rows_are_all_rejected_by_the_gate():
     by_type = dict(zip(verdicts.sample_type, verdicts.gate))
     assert by_type["A.FLOW"] == S.GATE_INCOHERENT
     assert by_type["A.SPC"] == S.GATE_UNREACHABLE
+
+
+def test_a_claim_surviving_from_before_a_retirement_raises_rather_than_passing():
+    """The run-order guard for the first curator retirement.
+
+    `run_evidence` writes both `vocabulary.csv` and `claims.parquet`, and
+    `run_detect` reads both. Retiring `DataType/tif` and re-running only the
+    second stage leaves 4,750 claims on disk that name a term the vocabulary no
+    longer maps -- the exact shape this raise exists for, and the reason the
+    handoff's instruction is "re-run run_evidence THEN run_detect" rather than
+    either order.
+
+    What makes it worth a test is the alternative. `_vocab_index` skips a null
+    `internal_assay_id`, so the retired row is absent from the index rather
+    than present-and-empty, and a `gate_claims` that skipped an unindexed key
+    instead of raising would drop all 4,750 from Modes 1 and 2 with no count
+    anywhere -- a stale-input error reading as a clean run that found less.
+    """
+    vocab = _vocab(("DataType", "tif", None, None, 0, 0, 0.0, S.P_CURATOR))
+    stale = _claims(_claim(1, "D.IMG-1", 138, "CometChip Assay",
+                           "DataType", "tif"))
+    with pytest.raises(ValueError, match="no vocabulary row"):
+        G.gate_claims(stale, vocab, {("D.IMG", 138): 50}, {"D.IMG-1": "D.IMG"})
+
+
+def test_a_retired_term_is_skipped_by_every_vocabulary_reader_not_just_one():
+    """`_maps_an_assay` is the ONE policy, and a retirement is what exercises it.
+
+    Its docstring calls the null case "unreachable on the 2026-08-14 extract:
+    0 of 736 vocabulary rows carry a null". The first curator file makes it
+    reachable, so the three readers that disagreed before it existed --
+    `_vocab_index`, `term_families` and `vocabulary_defects` -- are asserted
+    here to agree on the same row rather than left to the comment.
+    """
+    vocab = _vocab(("DataType", "tif", None, None, 0, 0, 0.0, S.P_CURATOR),
+                   ("DataType", "tiff", 145, "Histopathology",
+                    53, 53, 0.962264, S.P_LEARNED))
+    assert ("DataType", "tif") not in G._vocab_index(vocab)
+    assert ("DataType", "tiff") in G._vocab_index(vocab)
+    # no family anywhere carries the retired row, which is what `term_families`
+    # got right while the two indexes got it wrong
+    assert not any(pd.isna(r.internal_assay_id)
+                   for fam in G.term_families(vocab).values() for r in fam)
+    assert ("DataType", G.term_stem("tiff")) in G.term_families(vocab)
+    # and the defect report cannot crash on it, which is how the old asymmetry
+    # surfaced: one reader kept the null and fed it to `int()`
+    gated = G.gate_claims(
+        _claims(_claim(1, "TIS-1", 145, "Histopathology", "DataType", "tiff")),
+        vocab, {("TIS", 145): 50}, {"TIS-1": "TIS"})
+    defects = G.vocabulary_defects(gated, vocab)
+    assert "tif" not in set(defects.raw_value)
