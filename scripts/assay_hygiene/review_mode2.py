@@ -56,6 +56,7 @@ co-registration lane needs its own axis and is not attempted here.
 from __future__ import annotations
 
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
@@ -64,6 +65,9 @@ from . import _schema as S
 from . import review as R
 
 FLOOR = 0.50
+
+PRESET_NAME = "mode2-rulings.tsv"
+MAX_CHILDREN = 4
 
 CSV_NAME = "mode2-cohorts-to-review.csv"
 REVIEW_NAME = "mode2-review.html"
@@ -74,7 +78,23 @@ REVIEW_NAME = "mode2-review.html"
 # asserted below, so a rename in `review.py` fails loudly here instead of
 # quietly reuniting the two stores.
 _LS_MODE1 = 'var LS = "mode1-review:";'
-_LS_MODE2 = 'var LS = "mode2-review:";'
+# BUMPED FROM `mode2-review:` ON 2026-08-20, deliberately, and the old store is
+# left where it is rather than migrated.
+#
+# The sheet's script does `saved = sget(key); if (saved !== null) el.value =
+# saved`, so STORAGE WINS over anything rendered into the page. That is right --
+# a reviewer's typing must survive a rebuild -- and it makes a preset
+# unreachable on any cohort already stored. The operator asked for eight of his
+# own rulings to be pre-filled with a verdict he had reached on evidence the
+# page had been hiding, so the presets have to win exactly once.
+#
+# A fresh keyspace is how they win without the script ever overriding a stored
+# value, which would be the more dangerous mechanism to build. The cost is that
+# the v1 store is orphaned, so PRESETS MUST CARRY EVERY RULING ALREADY MADE and
+# not only the eight changed -- see `load_presets`, and the assertion in `main`
+# that refuses to ship a preset file smaller than the count it was told to
+# expect.
+_LS_MODE2 = 'var LS = "mode2-review-v2:";'
 
 BAND_A = "A_precedent_0.95+"
 BAND_B = "B_precedent_0.90+"
@@ -159,6 +179,82 @@ def _band(rate: float) -> str:
     return BAND_D
 
 
+def load_presets(path) -> dict[str, tuple[str, str]]:
+    """cohort key -> (ruling, note), from a sheet EXPORT fed back in.
+
+    The file is the sheet's own export format verbatim -- the six key columns
+    then `ruling` and `note` -- so a reviewer round-trips their work by pasting
+    the export back into a file, with no second format to learn and no importer
+    to keep in step with the exporter.
+
+    Returns {} when the file is absent, which is the normal case: presets exist
+    only because a rebuild orphaned a store, and a run without one is not an
+    error.
+    """
+    path = Path(path)
+    if not path.exists():
+        return {}
+    frame = pd.read_csv(path, sep="\t", dtype=str).fillna("")
+    expected = list(R.EXPORT_COLUMNS)
+    if list(frame.columns) != expected:
+        raise ValueError(
+            f"{path} has columns {list(frame.columns)}; the sheet exports "
+            f"{expected}. The preset file IS an export -- paste it unchanged.")
+    known = {value for value, _label in R.RULING_OPTIONS}
+    bad = sorted({r for r in frame.ruling if r not in known})
+    if bad:
+        raise ValueError(
+            f"{path} carries ruling(s) the sheet cannot render: {bad}. "
+            f"RULING_OPTIONS is {sorted(known)}.")
+    return {R.KEY_DELIMITER.join(row[c] for c in R.BLOCK_KEY):
+            (row["ruling"], row["note"])
+            for _i, row in frame.iterrows()}
+
+
+def _children_index(context: dict) -> dict[int, set]:
+    """sample_id -> its children, INVERTED from `parents_of`.
+
+    `lineage.lineage_index` returns a children map and `review.load_context`
+    discards it. Inverting the parents map it does keep is one definition read
+    backwards rather than a second traversal of the edge frame, which is the
+    rule this package keeps about indexes.
+    """
+    out: dict[int, set] = defaultdict(set)
+    for child, parents in context["parents_of"].items():
+        for parent in parents or ():
+            out[int(parent)].add(int(child))
+    return dict(out)
+
+
+def check_presets(presets: dict, blocks: list[dict], expect: int = 0) -> None:
+    """Refuse to ship a preset file that would LOSE a ruling. Raises or returns.
+
+    Both failures are silent by default and both destroy work, which is why
+    they are checks rather than warnings.
+
+    SHORT FILE. The storage prefix is bumped whenever presets must win over an
+    orphaned store, so the previous store stops being read -- and any ruling not
+    in the preset file is simply gone from the reviewer's page. `expect` is the
+    count the caller believes was already made.
+
+    UNMATCHED KEY. A preset naming no cohort renders nowhere, so the ruling is
+    dropped with nothing on the page to notice. That happens when the cohort key
+    changes, or when the floor moves and takes a ruled cohort off the sheet --
+    the second is easy to do by accident and impossible to see afterwards.
+    """
+    if len(presets) < int(expect):
+        raise ValueError(
+            f"the preset file carries {len(presets)} ruling(s) and {expect} "
+            "were expected. The storage prefix changes with this sheet, so "
+            "every ruling already made must be in the preset file or it is "
+            "LOST. Export the current sheet and pass the full file.")
+    unmatched = sorted(set(presets) - {R.cohort_key(b) for b in blocks})
+    if unmatched:
+        raise ValueError(
+            f"{len(unmatched)} preset(s) name no cohort on this sheet, so "
+            f"those rulings would vanish: {unmatched[:3]}")
+
+
 def _neighbour_index(context: dict) -> dict[str, int]:
     """uuid -> sample_id, the inverse of `context["uuid_of"]`.
 
@@ -169,7 +265,7 @@ def _neighbour_index(context: dict) -> dict[str, int]:
     return {uuid: sid for sid, uuid in context["uuid_of"].items()}
 
 
-def _pair(row, context, sid_of, twins) -> dict:
+def _pair(row, context, sid_of, twins, children_of, proposed_holders) -> dict:
     """One example, rendered as the WRITE TARGET beside its EVIDENCE.
 
     THIS IS THE CORRECTION THAT COST TEN RULINGS. The first cut reused
@@ -200,6 +296,19 @@ def _pair(row, context, sid_of, twins) -> dict:
 
     nb_regs, nb_hidden = ((R._registrations(nb_sid, context)) if nb_sid
                           else ([], 0))
+
+    # THE SECOND HOP. The operator rejected two cohorts on "depends on what the
+    # CELs children are" -- a question about the row sample's OWN children, one
+    # hop past the neighbour, which no view built so far could answer. On an
+    # ADD_CHILD row the row sample IS the child, so its children are the only
+    # place the answer can come from.
+    kids = sorted(children_of.get(int(row.sample_id), ()))[:MAX_CHILDREN]
+    children = [{
+        "uuid": context["uuid_of"].get(k, str(k)),
+        "type": context["types"].get(context["uuid_of"].get(k, ""), R.UNTYPED),
+        "holds": bool(proposed is not None and k in proposed_holders),
+    } for k in kids]
+    n_kids = len(children_of.get(int(row.sample_id), ()))
     own, own_hidden = R._registrations(row.sample_id, context)
     twin = twins.get(proposed)
     sample_type = str(row.sample_type)
@@ -225,6 +334,10 @@ def _pair(row, context, sid_of, twins) -> dict:
             proposed is not None
             and any(reg["internal"] == proposed for reg in nb_regs)),
         # the measurement-vs-analysis flag
+        "children": children,
+        "n_children": n_kids,
+        "n_children_hidden": max(0, n_kids - len(children)),
+        "n_children_holding": sum(1 for c in children if c["holds"]),
         "twin_id": None if twin is None else twin[0],
         "twin_title": None if twin is None else twin[1],
         "type_is_analysis": sample_type.startswith(ANALYSIS_TYPE_PREFIX),
@@ -260,12 +373,24 @@ def build_blocks(findings: pd.DataFrame, context: dict,
 
     sid_of = _neighbour_index(context)
     twins = context.get("analysis_twins", {})
+    children_of = _children_index(context)
+    # sample ids holding each proposed assay, so the second hop can be answered
+    # without a per-child registration scan inside the loop
+    wanted = {int(a) for a in m2.proposed_internal_assay_id.dropna().unique()}
+    proposed_holders = {
+        a: {sid for sid, regs in context["registrations"].items()
+            if any(r[1] == a for r in regs)}
+        for a in wanted}
 
     blocks = []
     for key, rows in m2.groupby(list(R.BLOCK_KEY), dropna=False, sort=False):
         rows = rows.sort_values("sample_id")
         examples = rows.head(R.MAX_EXAMPLES)
-        children = [_pair(r, context, sid_of, twins)
+        children = [_pair(r, context, sid_of, twins, children_of,
+                          proposed_holders.get(
+                              int(r.proposed_internal_assay_id)
+                              if pd.notna(r.proposed_internal_assay_id) else -1,
+                              set()))
                     for r in examples.itertuples(index=False)]
         dates = sorted(rows.date.unique())
         blocks.append(dict(
@@ -315,7 +440,7 @@ def build_blocks(findings: pd.DataFrame, context: dict,
     return blocks
 
 
-def to_csv(blocks: list[dict]) -> pd.DataFrame:
+def to_csv(blocks: list[dict], presets: dict | None = None) -> pd.DataFrame:
     """The cohort csv -- the operator reads this BEFORE the sheet.
 
     One row per cohort, carrying the key, the size, the precedent range that
@@ -342,7 +467,8 @@ def to_csv(blocks: list[dict]) -> pd.DataFrame:
                                else ""),
         "tiers": b["tiers"], "gates": b["gates"], "dates": b["dates"],
         "example_uuids": ";".join(c["uuid"] for c in b["children"]),
-        "ruling": "", "note": "",
+        "ruling": (presets or {}).get(R.cohort_key(b), ("", ""))[0],
+        "note": (presets or {}).get(R.cohort_key(b), ("", ""))[1],
     } for b in blocks])
 
 
@@ -386,11 +512,57 @@ def _pair_html(pair: dict) -> list[str]:
             "</div>"
             f'{R._metadata_html(pair["neighbour_meta"])}'
             "</div>")
+    # the second hop, rendered compactly: types and whether each holds the
+    # proposed assay is the whole question, so no metadata is expanded here
+    if pair["children"]:
+        held = pair["n_children_holding"]
+        kids = ", ".join(
+            f'<code>{R._e(c["uuid"])}</code> '
+            f'<span class="{"ok" if c["holds"] else "mut"}">{R._e(c["type"])}'
+            f'{" &check;" if c["holds"] else ""}</span>'
+            for c in pair["children"])
+        more = (f' &middot; {pair["n_children_hidden"]} more of '
+                f'{pair["n_children"]}' if pair["n_children_hidden"] else "")
+        out.append(
+            f'<div class="kids"><span class="lbl">ITS CHILDREN</span> '
+            f'{kids}{more} &middot; '
+            f'{held} of {len(pair["children"])} shown hold the proposed assay'
+            "</div>")
+    else:
+        out.append('<div class="kids"><span class="lbl">ITS CHILDREN</span> '
+                   '<span class="empty">none</span></div>')
     out.append("</div>")
     return out
 
 
-def _cohort_html(block: dict) -> list[str]:
+def _notes_html(block: dict, presets: dict) -> str:
+    """The ruling control, with a PRESET rendered as the selected option.
+
+    `review._notes_html` renders every option unselected and lets the script
+    restore from storage. This one also accepts a preset, and marks it both in
+    the markup AND visibly on the page, because a verdict that appears in a
+    reviewer's export without their having chosen it must not be silent.
+    """
+    key = R.cohort_key(block)
+    ruling, note = presets.get(key, ("", ""))
+    options = "".join(
+        f'<option value="{R._e(value)}"'
+        f'{" selected" if ruling and value == ruling else ""}>'
+        f'{R._e(label)}</option>'
+        for value, label in R.RULING_OPTIONS)
+    banner = ("" if not ruling else
+              f'<div class="preset">pre-filled <b>{R._e(ruling)}</b> from your '
+              "earlier export &mdash; change it if it is wrong</div>")
+    return (
+        f'<div class="notes{" done" if ruling or note else ""}">{banner}'
+        f'<label>ruling <select class="dec" data-k="{R._e(key)}">{options}'
+        "</select></label>"
+        f'<textarea class="note" data-k="{R._e(key)}" rows="2" '
+        'placeholder="Why. What the right answer is, if it is not this one."'
+        f">{R._e(note)}</textarea></div>")
+
+
+def _cohort_html(block: dict, presets: dict) -> list[str]:
     held = block["n_corroborated_shown"]
     badge = (f'<span class="ok">{held} of {block["shown"]} shown have a '
              f'{R._e(block["children"][0]["neighbour_role"].lower())} ALREADY '
@@ -424,13 +596,14 @@ def _cohort_html(block: dict) -> list[str]:
         f'of {block["n_rows"]:,} &middot; {badge}</div>')
     for pair in block["children"]:
         out += _pair_html(pair)
-    out.append(R._notes_html(block))
+    out.append(_notes_html(block, presets))
     out.append("</section>")
     return out
 
 
 def render(blocks: list[dict], floor: float = FLOOR,
-           excluded: int | None = None, no_rate: int | None = None) -> str:
+           excluded: int | None = None, no_rate: int | None = None,
+           presets: dict | None = None) -> str:
     """The whole page: one file, no network, both themes. See `review.render`."""
     assert _LS_MODE1 in R.SCRIPT, (
         "review.SCRIPT no longer declares the Mode 1 storage prefix verbatim, "
@@ -438,6 +611,7 @@ def render(blocks: list[dict], floor: float = FLOOR,
         "keyspace -- a Mode 2 ruling would overwrite a Mode 1 one. Re-pin it.")
     script = R.SCRIPT.replace(_LS_MODE1, _LS_MODE2)
 
+    presets = presets or {}
     total = sum(b["n_rows"] for b in blocks)
     parts = []
     for band, letter, blurb in BANDS:
@@ -451,7 +625,7 @@ def render(blocks: list[dict], floor: float = FLOOR,
             f"{rows:,} row(s)</span></h2>"
             f'<p class="bandblurb">{R._e(blurb)}</p>')
         for block in in_band:
-            parts += _cohort_html(block)
+            parts += _cohort_html(block, presets)
 
     excl = ("" if excluded is None else
             f" {excluded:,} row(s) below the floor are NOT on this page.")
@@ -460,7 +634,7 @@ def render(blocks: list[dict], floor: float = FLOOR,
                  "mostly the co-registration lane, whose evidence is a "
                  "different measure and which this page does not rank.")
     return (f"<title>Mode 2 review, {len(blocks)} cohorts</title>"
-            f"<style>{R.CSS}</style>"
+            f"<style>{R.CSS}{_CSS_EXTRA}</style>"
             f'<h1>Mode 2 &mdash; {len(blocks):,} cohort(s), '
             f"{total:,} proposal(s)</h1>"
             f'<p class="lede">Samples that ARE registered somewhere, whose '
@@ -469,6 +643,16 @@ def render(blocks: list[dict], floor: float = FLOOR,
             f"often the parent is too. Floor {floor:g}.{R._e(excl)} Up to "
             f"{R.MAX_EXAMPLES} examples per cohort.</p>"
             f"{_CALLOUT}{''.join(parts)}{R.BAR}{script}\n")
+
+
+_CSS_EXTRA = """
+.kids{margin:.35rem 0 .1rem 1.1rem;font-size:.83rem;color:var(--mut);
+ line-height:1.7}
+.kids .lbl{margin-right:.4rem}
+.kids .mut{color:var(--mut)}
+.kids .ok{color:var(--ok);font-weight:600}
+.preset{font-size:.8rem;color:var(--warn);margin-bottom:.35rem}
+"""
 
 
 _CALLOUT = (
@@ -495,7 +679,8 @@ _CALLOUT = (
     "</div>")
 
 
-def main(artifacts="assay-hygiene", extract=None, floor: float = FLOOR) -> int:
+def main(artifacts="assay-hygiene", extract=None, floor: float = FLOOR,
+         expect_presets: int = 0) -> int:
     a = Path(artifacts)
     e = Path(extract) if extract else a / "extract"
     findings = pd.read_csv(a / "findings.csv", low_memory=False)
@@ -520,10 +705,17 @@ def main(artifacts="assay-hygiene", extract=None, floor: float = FLOOR) -> int:
             "in exactly one bucket, or this run is hiding proposals behind a "
             "number that does not describe them.")
 
-    to_csv(blocks).to_csv(a / CSV_NAME, index=False)
+    presets = load_presets(a / PRESET_NAME)
+    check_presets(presets, blocks, expect_presets)
+
+    to_csv(blocks, presets).to_csv(a / CSV_NAME, index=False)
     (a / REVIEW_NAME).write_text(
-        render(blocks, floor=floor, excluded=below, no_rate=no_rate))
+        render(blocks, floor=floor, excluded=below, no_rate=no_rate,
+               presets=presets))
     print(f"wrote {a / CSV_NAME} and {a / REVIEW_NAME}")
+    if presets:
+        print(f"  PRE-FILLED {len(presets)} ruling(s) from {PRESET_NAME}; the "
+              "sheet's storage prefix is bumped so they take effect")
     print(f"  {len(blocks):,} cohort(s), {kept:,} row(s) at precedent >= {floor:g}")
     print(f"  EXCLUDED {below:,} of {all_m2:,} Mode 2 row(s) BELOW the floor")
     print(f"  EXCLUDED {no_rate:,} more carrying NO propagation rate at all, "

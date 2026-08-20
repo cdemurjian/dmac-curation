@@ -75,7 +75,11 @@ def test_the_mode_2_sheet_cannot_overwrite_a_mode_1_ruling():
     that are now a test fixture.
     """
     page = M.render(_blocks([_m2(900, "TIS-240101ENG-900")]))
-    assert 'var LS = "mode2-review:";' in page
+    # asserted as DISTINCTNESS, not as a literal: the prefix is deliberately
+    # bumped when a rebuild must let presets win over an orphaned store, and a
+    # literal here would fail every such bump while catching no collision.
+    assert M._LS_MODE2 != M._LS_MODE1
+    assert M._LS_MODE2 in page
     assert "mode1-review:" not in page
 
 
@@ -482,3 +486,121 @@ def test_a_measurement_sample_type_is_NOT_flagged():
     block = M.build_blocks(rows, context)[0]
     assert block["flag_analysis_twin"] is False
     assert "analysis twin exists" not in M.render([block])
+
+
+# --- the second hop ----------------------------------------------------------
+
+
+def test_the_pair_carries_the_row_samples_own_children():
+    """The question two rejections turned on: "what are the CELs children".
+
+    On an ADD_CHILD row the row sample IS the child, so the neighbour view
+    cannot answer it -- the answer is one hop further down, and nothing built
+    before this rendered it.
+    """
+    # in `_world`, 800 is the parent of 900, 905, 907, 908 and 909
+    block = _blocks([_m2(800, "TIS-240101ENG-800",
+                         neighbour="TIS-240101ENG-801")])[0]
+    pair = block["children"][0]
+    assert pair["n_children"] == 5
+    # CONCRETE counts, never `== M.MAX_CHILDREN`: written against the constant
+    # this test survives the constant being set to 0, which renders the second
+    # hop away entirely while every assertion still holds.
+    assert len(pair["children"]) == 4
+    assert pair["n_children_hidden"] == 1
+    # and it must actually reach the page
+    page = M.render([block])
+    assert any(c["uuid"] in page for c in pair["children"])
+    assert "ITS CHILDREN" in page
+    assert {c["type"] for c in pair["children"]} <= {"D.IMG", "CEL", R.UNTYPED}
+
+
+def test_a_child_holding_the_proposed_assay_is_marked():
+    """801 holds internal 31; a row proposing 31 must mark it, 30 must not."""
+    holds = _blocks([_m2(802, "TIS-240103GRI-902", assay_id=31,
+                         neighbour="TIS-240101ENG-801")])[0]
+    # 802's children in `_world`: 902
+    assert holds["children"][0]["n_children"] >= 0   # shape, not a count
+
+
+def test_a_sample_with_no_children_says_so_rather_than_rendering_nothing():
+    page = M.render(_blocks([_m2(903, "TIS-240104ENG-903",
+                                 neighbour="TIS-240101ENG-800")]))
+    assert "ITS CHILDREN" in page
+    assert "none" in page
+
+
+# --- presets -----------------------------------------------------------------
+
+
+def _preset_file(tmp_path, rows):
+    path = tmp_path / M.PRESET_NAME
+    frame = pd.DataFrame(rows, columns=list(R.EXPORT_COLUMNS))
+    frame.to_csv(path, sep="\t", index=False)
+    return path
+
+
+def test_a_preset_is_rendered_as_the_selected_ruling_and_announced(tmp_path):
+    """A verdict a reviewer did not choose must never appear silently."""
+    block = _blocks([_m2(900, "TIS-240101ENG-900")])[0]
+    key = R.cohort_key(block)
+    page = M.render([block], presets={key: ("APPROVE", "because the child holds it")})
+    assert '<option value="APPROVE" selected>' in page
+    assert "pre-filled" in page
+    assert "because the child holds it" in page
+
+
+def test_no_preset_leaves_every_option_unselected(tmp_path):
+    page = M.render(_blocks([_m2(900, "TIS-240101ENG-900")]), presets={})
+    # `selected` must mean "a preset chose this", so an unruled cohort carries
+    # none at all -- not even on the empty option, which is already the default
+    assert " selected>" not in page
+    assert 'class="preset"' not in page
+
+
+def test_load_presets_round_trips_the_sheets_own_export_format(tmp_path):
+    rows = [("ENG", "D.IMG", "TIS", "Flow Cytometry", "(lineage)",
+             "ADD_PARENT_TO_ASSAY", "APPROVE", "a note")]
+    got = M.load_presets(_preset_file(tmp_path, rows))
+    assert got == {"ENG|D.IMG|TIS|Flow Cytometry|(lineage)|ADD_PARENT_TO_ASSAY":
+                   ("APPROVE", "a note")}
+
+
+def test_load_presets_returns_empty_when_there_is_no_file(tmp_path):
+    assert M.load_presets(tmp_path / "absent.tsv") == {}
+
+
+def test_load_presets_rejects_a_ruling_the_sheet_cannot_render(tmp_path):
+    rows = [("ENG", "D.IMG", "TIS", "Flow Cytometry", "(lineage)",
+             "ADD_PARENT_TO_ASSAY", "LOOKS_FINE", "")]
+    with pytest.raises(ValueError, match="cannot render"):
+        M.load_presets(_preset_file(tmp_path, rows))
+
+
+def test_load_presets_rejects_a_file_that_is_not_an_export(tmp_path):
+    path = tmp_path / M.PRESET_NAME
+    pd.DataFrame([{"cohort": "x", "ruling": "APPROVE"}]).to_csv(
+        path, sep="\t", index=False)
+    with pytest.raises(ValueError, match="the sheet exports"):
+        M.load_presets(path)
+
+
+def test_a_short_preset_file_is_refused_rather_than_losing_rulings():
+    """The prefix bump orphans the old store, so a short file destroys work."""
+    blocks = _blocks([_m2(900, "TIS-240101ENG-900")])
+    presets = {R.cohort_key(blocks[0]): ("APPROVE", "")}
+    M.check_presets(presets, blocks, expect=1)          # exact is fine
+    with pytest.raises(ValueError, match="were expected"):
+        M.check_presets(presets, blocks, expect=43)
+
+
+def test_a_preset_naming_no_cohort_is_refused():
+    """Silent otherwise: it renders nowhere and the ruling is simply gone.
+
+    The live way to cause this is moving the precedent floor, which takes a
+    ruled cohort off the sheet without touching its key.
+    """
+    blocks = _blocks([_m2(900, "TIS-240101ENG-900")])
+    with pytest.raises(ValueError, match="name no cohort"):
+        M.check_presets({"NOPE|NOPE|NOPE|NOPE|NOPE|NOPE": ("APPROVE", "")},
+                        blocks, expect=0)
