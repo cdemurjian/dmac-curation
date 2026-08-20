@@ -39,6 +39,19 @@ rate of essentially 0.000 and 94.3% below 0.50 -- writing those would create
 registrations for which the database holds no example. The operator set the
 floor at 0.50 on that measurement; `FLOOR` records it and `main` prints what it
 excluded, so a run can never look like it covered everything.
+
+A PRECEDENT FLOOR EXCLUDES A WHOLE LANE, AND THAT IS REPORTED SEPARATELY. 115
+Mode 2 rows carry NO propagation rate, and `rate >= floor` is False on a null,
+so a floor drops them with the low ones while meaning something entirely
+different by it. 107 of the 115 are `CLS_ABSENCE_COMPAT`, proposed BY_CLAIM off
+the co-registration table rather than by lineage: they have no propagation rate
+because nothing propagated, and their evidence lives in `co_reg_rate` and
+`compat_band`. That is not weak evidence, it is OTHER evidence, and folding it
+into "below the floor" would hide an entire lane behind a number that does not
+describe it. The remaining 8 are lineage rows that genuinely have none.
+
+`main` therefore reports three buckets and never two. Reviewing the
+co-registration lane needs its own axis and is not attempted here.
 """
 from __future__ import annotations
 
@@ -192,7 +205,7 @@ def to_csv(blocks: list[dict]) -> pd.DataFrame:
 
 
 def render(blocks: list[dict], floor: float = FLOOR,
-           excluded: int | None = None) -> str:
+           excluded: int | None = None, no_rate: int | None = None) -> str:
     """The whole page: one file, no network, both themes. See `review.render`."""
     assert _LS_MODE1 in R.SCRIPT, (
         "review.SCRIPT no longer declares the Mode 1 storage prefix verbatim, "
@@ -217,6 +230,10 @@ def render(blocks: list[dict], floor: float = FLOOR,
 
     excl = ("" if excluded is None else
             f" {excluded:,} row(s) below the floor are NOT on this page.")
+    if no_rate:
+        excl += (f" A further {no_rate:,} carry NO propagation rate at all -- "
+                 "mostly the co-registration lane, whose evidence is a "
+                 "different measure and which this page does not rank.")
     return (f"<title>Mode 2 review, {len(blocks)} cohorts</title>"
             f"<style>{R.CSS}</style>"
             f'<h1>Mode 2 &mdash; {len(blocks):,} cohort(s), '
@@ -257,17 +274,35 @@ def main(artifacts="assay-hygiene", extract=None, floor: float = FLOOR) -> int:
     a = Path(artifacts)
     e = Path(extract) if extract else a / "extract"
     findings = pd.read_csv(a / "findings.csv", low_memory=False)
-    all_m2 = int((findings["mode"] == S.MODE_2).sum())
+    m2 = findings[findings["mode"] == S.MODE_2]
+    all_m2 = int(len(m2))
+    # THREE buckets, never two. See the module docstring: a null rate is not a
+    # low one, and 107 of the 115 nulls are a different lane entirely.
+    below = int((m2.precedent_rate < floor).sum())
+    no_rate = int(m2.precedent_rate.isna().sum())
+    no_rate_compat = int((m2.precedent_rate.isna()
+                          & (m2.classification == S.CLS_ABSENCE_COMPAT)).sum())
+
     context = R.load_context(e)
     blocks = build_blocks(findings, context, floor=floor)
     kept = sum(b["n_rows"] for b in blocks)
-    excluded = all_m2 - kept
+    if kept + below + no_rate != all_m2:
+        raise ValueError(
+            f"{kept:,} kept + {below:,} below the floor + {no_rate:,} with no "
+            f"rate != {all_m2:,} Mode 2 rows. Every row must be accounted for "
+            "in exactly one bucket, or this run is hiding proposals behind a "
+            "number that does not describe them.")
 
     to_csv(blocks).to_csv(a / CSV_NAME, index=False)
-    (a / REVIEW_NAME).write_text(render(blocks, floor=floor, excluded=excluded))
+    (a / REVIEW_NAME).write_text(
+        render(blocks, floor=floor, excluded=below, no_rate=no_rate))
     print(f"wrote {a / CSV_NAME} and {a / REVIEW_NAME}")
     print(f"  {len(blocks):,} cohort(s), {kept:,} row(s) at precedent >= {floor:g}")
-    print(f"  EXCLUDED {excluded:,} of {all_m2:,} Mode 2 row(s) below the floor")
+    print(f"  EXCLUDED {below:,} of {all_m2:,} Mode 2 row(s) BELOW the floor")
+    print(f"  EXCLUDED {no_rate:,} more carrying NO propagation rate at all, "
+          f"{no_rate_compat:,} of them CLS_ABSENCE_COMPAT -- the "
+          f"co-registration lane, whose evidence is co_reg_rate and which a "
+          f"precedent floor cannot rank. NOT reviewed here.")
     for band, _l, _b in BANDS:
         n = [b for b in blocks if b["band"] == band]
         if n:
