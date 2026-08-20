@@ -36,7 +36,7 @@ ARTIFACTS = REPO / "assay-hygiene"
 
 
 def _m2(sample_id, uuid, *, rate=0.80, action="ADD_PARENT_TO_ASSAY",
-        field=None, value=None, **kw):
+        field=None, value=None, neighbour=None, **kw):
     """One MODE_2 row. `field=None` is a LINEAGE row -- it carries no term.
 
     A lineage row also carries no tier and no gate, and setting them to None
@@ -48,6 +48,9 @@ def _m2(sample_id, uuid, *, rate=0.80, action="ADD_PARENT_TO_ASSAY",
     row["action"] = action
     row["source_field"] = field
     row["raw_value"] = value
+    row["lineage_neighbour_uuid"] = neighbour
+    row["lineage"] = ("LIN_CHILD" if action == "ADD_PARENT_TO_ASSAY"
+                      else "LIN_PARENT")
     if field is None:
         row["claim_tier"] = None
         row["gate"] = None
@@ -236,7 +239,7 @@ def test_the_csv_carries_the_key_the_evidence_and_empty_ruling_columns():
     frame = M.to_csv(_blocks([_m2(900, "TIS-240101ENG-900")]))
     for column in ("band", "lab", "sample_type", "parent_types", "assay",
                    "field", "value", "n_rows", "n_samples", "precedent_min",
-                   "precedent_max", "parents_already_holding_it",
+                   "precedent_max", "neighbours_holding_it",
                    "example_uuids", "ruling", "note"):
         assert column in frame.columns
     assert list(frame.ruling) == [""] and list(frame.note) == [""]
@@ -338,3 +341,144 @@ def test_a_null_rate_row_is_excluded_rather_than_treated_as_zero():
     row = _m2(900, "TIS-240101ENG-900")
     row["precedent_rate"] = None
     assert _blocks([row]) == []
+
+
+# --- the neighbour: the correction that cost ten rulings ---------------------
+
+
+def test_the_neighbour_shown_is_the_CHILD_on_an_add_parent_row():
+    """The defect that sent ten cohorts back rejected.
+
+    On an ADD_PARENT row the row's own sample IS the parent being written to,
+    so the evidence is its CHILD. The first cut reused `review._child`, which
+    walks PARENTS, and the page reported "no shown parent holds this assay"
+    while the child holding it sat one hop away, unrendered. The operator
+    rejected ten cohorts asking to see exactly that child, and every one of
+    them did hold the assay.
+    """
+    block = _blocks([_m2(900, "TIS-240101ENG-900",
+                         action="ADD_PARENT_TO_ASSAY",
+                         neighbour="TIS-240101ENG-800")])[0]
+    pair = block["children"][0]
+    assert pair["target_role"] == "PARENT"      # the row's sample is written to
+    assert pair["neighbour_role"] == "CHILD"    # ...and the child is the evidence
+    assert pair["neighbour_uuid"] == "TIS-240101ENG-800"
+
+
+def test_the_neighbour_shown_is_the_PARENT_on_an_add_child_row():
+    block = _blocks([_m2(900, "TIS-240101ENG-900",
+                         action="ADD_CHILD_TO_ASSAY",
+                         neighbour="TIS-240101ENG-800")])[0]
+    pair = block["children"][0]
+    assert pair["target_role"] == "CHILD"
+    assert pair["neighbour_role"] == "PARENT"
+
+
+def test_the_page_labels_the_neighbour_by_ROLE_and_never_by_a_constant():
+    """`review._child_html` prints CHILD then PARENT unconditionally.
+
+    That is right for every Mode 1 row and wrong for the 54,852 ADD_PARENT rows,
+    in the direction that HIDES the evidence. So the label is asserted to follow
+    the action rather than to be present.
+    """
+    add_parent = M.render(_blocks([_m2(900, "TIS-240101ENG-900",
+                                       action="ADD_PARENT_TO_ASSAY",
+                                       neighbour="TIS-240101ENG-800")]))
+    add_child = M.render(_blocks([_m2(900, "TIS-240101ENG-900",
+                                      action="ADD_CHILD_TO_ASSAY",
+                                      neighbour="TIS-240101ENG-800")]))
+    assert "PARENT &mdash; WRITE HERE" in add_parent
+    assert "CHILD &mdash; THE EVIDENCE" in add_parent
+    assert "CHILD &mdash; WRITE HERE" in add_child
+    assert "PARENT &mdash; THE EVIDENCE" in add_child
+
+
+def test_the_neighbour_registrations_are_rendered_not_just_its_uuid():
+    """A uuid alone does not answer "does the child have the assay"."""
+    page = M.render(_blocks([_m2(900, "TIS-240101ENG-900", assay_id=30,
+                                 neighbour="TIS-240101ENG-800")]))
+    assert "TIS-240101ENG-800" in page
+    assert "holds the proposed assay" in page
+
+
+def test_a_neighbour_holding_the_assay_is_recorded_on_the_cohort():
+    """800 holds internal 30; 801 holds 31. Same shape, opposite answer."""
+    holds = _blocks([_m2(900, "TIS-240101ENG-900", assay_id=30,
+                         neighbour="TIS-240101ENG-800")])[0]
+    misses = _blocks([_m2(901, "TIS-240102ENG-901", assay_id=30,
+                          neighbour="TIS-240101ENG-801")])[0]
+    assert holds["n_corroborated_shown"] == 1
+    assert misses["n_corroborated_shown"] == 0
+
+
+# --- the measurement / analysis twin -----------------------------------------
+
+
+def _assays_frame():
+    return pd.read_parquet(EXTRACT / "assays.parquet")
+
+
+def test_the_real_extract_derives_the_nine_suffix_pairs_rule_6_tables():
+    """DERIVED, not copied, so a new `X` / `X Analysis` pair needs no edit.
+
+    `/curate-assay-vocabulary` rule 6 tables nine pairs and every one of them
+    differs by the suffix ` Analysis`, which is why the suffix half of
+    `analysis_twins` is computed rather than written down.
+    """
+    if not (EXTRACT / "assays.parquet").exists():
+        pytest.skip("no extract")
+    twins = M.analysis_twins(_assays_frame())
+    for measurement, analysis in [(30, 31), (36, 118), (145, 187), (130, 47),
+                                  (25, 71), (76, 184), (89, 91), (112, 175),
+                                  (179, 178)]:
+        assert twins[measurement][0] == analysis
+
+
+def test_the_real_extract_carries_the_pairs_no_suffix_rule_can_find():
+    """No rule turns "Antibody-Dependent Functional Profiling (ADFP)" into
+    "ADFP Analysis". The operator found this one twice in 43 rulings."""
+    if not (EXTRACT / "assays.parquet").exists():
+        pytest.skip("no extract")
+    twins = M.analysis_twins(_assays_frame())
+    assert twins[153][0] == 186 and twins[153][1] == "ADFP Analysis"
+    assert twins[106][0] == 104          # Titer Assay -> Antibody Titer ...
+    assert twins[138][0] == 185          # CometChip Assay -> Comet Chip Analysis
+
+
+def test_an_explicit_pair_that_stops_existing_fails_the_run():
+    """A pair that silently flags nothing is worse than no flag."""
+    frame = pd.DataFrame(
+        [(1, "Flow Cytometry", 1, 1, 1, 1, "P", 30, "Flow Cytometry")],
+        columns=["assay_id", "title", "sample_type_id", "study_id",
+                 "investigation_id", "project_id", "project_title",
+                 "internal_assay_id", "internal_assay_title"])
+    with pytest.raises(ValueError, match="not an internal assay"):
+        M.analysis_twins(frame)
+
+
+def test_an_analysis_sample_type_proposed_into_a_measurement_assay_is_flagged():
+    """The operator's finding, as a guard.
+
+    A.ADNP proposed into 153 ADFP when 186 ADFP Analysis exists. A measurement
+    assay and its analysis twin are different assays with different memberships.
+    """
+    _, context = _world()
+    context["analysis_twins"] = {30: (31, "Flow Cytometry Analysis")}
+    rows = _findings([_m2(900, "TIS-240101ENG-900", sample_type="A.FLOW",
+                          assay_id=30, neighbour="TIS-240101ENG-800")])
+    block = M.build_blocks(rows, context)[0]
+    assert block["flag_analysis_twin"] is True
+    assert block["twin_title"] == "Flow Cytometry Analysis"
+    assert "ADFP Analysis" not in M.render([block])
+    assert "analysis twin exists" in M.render([block])
+
+
+def test_a_measurement_sample_type_is_NOT_flagged():
+    """The flag is about ANALYSIS types. D.FLOW belongs in Flow Cytometry."""
+    _, context = _world()
+    context["analysis_twins"] = {30: (31, "Flow Cytometry Analysis")}
+    rows = _findings([_m2(900, "TIS-240101ENG-900", sample_type="D.FLOW",
+                          assay_id=30, neighbour="TIS-240101ENG-800")])
+    block = M.build_blocks(rows, context)[0]
+    assert block["flag_analysis_twin"] is False
+    assert "analysis twin exists" not in M.render([block])

@@ -94,6 +94,60 @@ BAND_ORDER = {name: i for i, (name, _l, _b) in enumerate(BANDS)}
 
 LINEAGE_FIELD = "(lineage)"
 
+# A MEASUREMENT ASSAY AND ITS ANALYSIS TWIN ARE DIFFERENT ASSAYS WITH DIFFERENT
+# MEMBERSHIPS, and proposing one where the other belongs is a defect the
+# operator found twice in his first 43 rulings ("should be ADFP Analysis",
+# "ADFP Analysis"). `/curate-assay-vocabulary` rule 6 names the hazard and
+# tables nine pairs; the tabled nine are exactly the ones whose titles differ by
+# the suffix ` Analysis`, so they are DERIVED here rather than copied, and only
+# the pairs that do NOT follow the suffix are written down.
+#
+# Every id below was measured against `assays.parquet` on 2026-08-20 and
+# `analysis_twins` ASSERTS both halves still resolve, so a pair that stops
+# existing fails the run instead of silently flagging nothing.
+EXPLICIT_ANALYSIS_PAIRS = {
+    153: 186,   # Antibody-Dependent Functional Profiling (ADFP) -> ADFP Analysis
+    106: 104,   # Titer Assay -> Antibody Titer Assay Analysis
+    27: 177,    # Fc Receptor Binding Assay -> FC Receptor Binding Analysis
+    69: 2,      # Spatial Proteomics -> Analyzed Spatial Proteomics
+    138: 185,   # CometChip Assay -> Comet Chip Analysis
+    150: 154,   # Antibody-Dependent Neutrophil Phagocytosis (ADNP) -> ... Analysis
+    122: 180,   # Cyclic Immunofluorescence (CyCIF) -> cyCIF Analysis
+    90: 176,    # Magnetic Resonance Imaging (MRI) -> MRI Analysis
+}
+
+ANALYSIS_TYPE_PREFIX = "A."
+
+
+def analysis_twins(assays: pd.DataFrame) -> dict[int, tuple[int, str]]:
+    """measurement internal id -> (analysis twin id, its title).
+
+    The suffix half is DERIVED so a new `X` / `X Analysis` pair is picked up
+    without an edit here; the explicit half is written down because no rule
+    turns "Antibody-Dependent Functional Profiling (ADFP)" into "ADFP Analysis".
+    """
+    titles = {int(i): str(t) for i, t in
+              zip(assays.internal_assay_id, assays.internal_assay_title)
+              if pd.notna(i) and pd.notna(t)}
+    by_name = {t.strip().lower(): i for i, t in titles.items()}
+
+    out: dict[int, tuple[int, str]] = {}
+    for analysis_id, title in titles.items():
+        low = title.strip().lower()
+        if low.endswith(" analysis"):
+            measurement = by_name.get(low[: -len(" analysis")])
+            if measurement is not None:
+                out[measurement] = (analysis_id, title)
+    for measurement, analysis_id in EXPLICIT_ANALYSIS_PAIRS.items():
+        if measurement not in titles or analysis_id not in titles:
+            raise ValueError(
+                f"EXPLICIT_ANALYSIS_PAIRS names {measurement} -> {analysis_id} "
+                "and one of them is not an internal assay on this extract. A "
+                "pair that stopped existing must fail the run, not silently "
+                "flag nothing.")
+        out[measurement] = (analysis_id, titles[analysis_id])
+    return out
+
 
 def _band(rate: float) -> str:
     if rate >= 0.95:
@@ -103,6 +157,78 @@ def _band(rate: float) -> str:
     if rate >= 0.75:
         return BAND_C
     return BAND_D
+
+
+def _neighbour_index(context: dict) -> dict[str, int]:
+    """uuid -> sample_id, the inverse of `context["uuid_of"]`.
+
+    The findings frame names the lineage neighbour by UUID and every index in
+    `load_context` is keyed by sample id, so exactly one inversion is needed.
+    It is built once per run rather than per row.
+    """
+    return {uuid: sid for sid, uuid in context["uuid_of"].items()}
+
+
+def _pair(row, context, sid_of, twins) -> dict:
+    """One example, rendered as the WRITE TARGET beside its EVIDENCE.
+
+    THIS IS THE CORRECTION THAT COST TEN RULINGS. The first cut reused
+    `review._child`, which walks the sample's PARENTS -- correct for Mode 1,
+    where the evidence is a parent, and wrong for half of Mode 2. On an
+    ADD_PARENT row the row's own sample IS the parent being written to and the
+    evidence is its CHILD, so the page reported "no shown parent holds this
+    assay" while the child holding it sat one hop away, unrendered. The operator
+    rejected ten cohorts asking to see exactly that child.
+
+    `lineage` names the direction and it is 1:1 with the action, measured over
+    all 167,347 rows: LIN_CHILD <-> ADD_PARENT_TO_ASSAY (54,852), LIN_PARENT
+    <-> ADD_CHILD_TO_ASSAY (112,495). So the neighbour is read off the row
+    rather than guessed from the type.
+
+    `neighbour_holds` is True on every Mode 2 row by construction -- the
+    neighbour carrying the assay is WHY the row exists -- and it is rendered
+    anyway. It is not a discriminator and the page must not imply it is; it is
+    the evidence the reviewer asked to see, and its VALUE is in the neighbour's
+    uuid and TYPE, which is what the operator actually reasons about ("if this
+    has a child that is A.TITR, then yes").
+    """
+    nb_uuid = None if pd.isna(row.lineage_neighbour_uuid) else str(
+        row.lineage_neighbour_uuid)
+    nb_sid = sid_of.get(nb_uuid) if nb_uuid else None
+    proposed = row.proposed_internal_assay_id
+    proposed = int(proposed) if pd.notna(proposed) else None
+
+    nb_regs, nb_hidden = ((R._registrations(nb_sid, context)) if nb_sid
+                          else ([], 0))
+    own, own_hidden = R._registrations(row.sample_id, context)
+    twin = twins.get(proposed)
+    sample_type = str(row.sample_type)
+    return {
+        "uuid": str(row.uuid),
+        "sample_id": int(row.sample_id),
+        "sample_type": sample_type,
+        "projects": "--" if pd.isna(row.project_ids) else str(row.project_ids),
+        "action": str(row.action),
+        # which of the two is being WRITTEN to, in the reviewer's words
+        "target_role": ("PARENT" if str(row.action) == "ADD_PARENT_TO_ASSAY"
+                        else "CHILD"),
+        "neighbour_role": ("CHILD" if str(row.action) == "ADD_PARENT_TO_ASSAY"
+                           else "PARENT"),
+        "own_regs": own, "n_own_regs_hidden": own_hidden,
+        "meta": R._metadata(row.sample_id, context),
+        "neighbour_uuid": nb_uuid,
+        "neighbour_type": context["types"].get(nb_uuid, R.UNTYPED)
+                          if nb_uuid else None,
+        "neighbour_regs": nb_regs, "n_neighbour_regs_hidden": nb_hidden,
+        "neighbour_meta": R._metadata(nb_sid, context) if nb_sid else {},
+        "neighbour_holds": bool(
+            proposed is not None
+            and any(reg["internal"] == proposed for reg in nb_regs)),
+        # the measurement-vs-analysis flag
+        "twin_id": None if twin is None else twin[0],
+        "twin_title": None if twin is None else twin[1],
+        "type_is_analysis": sample_type.startswith(ANALYSIS_TYPE_PREFIX),
+    }
 
 
 def build_blocks(findings: pd.DataFrame, context: dict,
@@ -132,11 +258,14 @@ def build_blocks(findings: pd.DataFrame, context: dict,
     m2["band"] = [_band(r) for r in m2.precedent_rate]
     m2["contested_flag"] = m2.contested.fillna(False).astype(bool)
 
+    sid_of = _neighbour_index(context)
+    twins = context.get("analysis_twins", {})
+
     blocks = []
     for key, rows in m2.groupby(list(R.BLOCK_KEY), dropna=False, sort=False):
         rows = rows.sort_values("sample_id")
         examples = rows.head(R.MAX_EXAMPLES)
-        children = [R._child(r, context)
+        children = [_pair(r, context, sid_of, twins)
                     for r in examples.itertuples(index=False)]
         dates = sorted(rows.date.unique())
         blocks.append(dict(
@@ -161,7 +290,13 @@ def build_blocks(findings: pd.DataFrame, context: dict,
             n_dates=len(dates),
             shown=len(children),
             n_corroborated_shown=sum(1 for c in children
-                                     if c["parent_has_proposed"]),
+                                     if c["neighbour_holds"]),
+            # the measurement-vs-analysis flag rides on the COHORT because it is
+            # a property of (sample type, proposed assay) and not of a sample
+            twin_id=children[0]["twin_id"],
+            twin_title=children[0]["twin_title"],
+            flag_analysis_twin=bool(children[0]["type_is_analysis"]
+                                    and children[0]["twin_id"] is not None),
             children=children,
         ))
 
@@ -197,11 +332,101 @@ def to_csv(blocks: list[dict]) -> pd.DataFrame:
         "precedent_min": round(b["precedent_min"], 4),
         "precedent_max": round(b["precedent_max"], 4),
         "n_contested": b["n_contested"],
-        "parents_already_holding_it": f'{b["n_corroborated_shown"]}/{b["shown"]}',
+        "neighbour_role": b["children"][0]["neighbour_role"],
+        "neighbours_holding_it": f'{b["n_corroborated_shown"]}/{b["shown"]}',
+        "example_neighbours": ";".join(
+            str(c["neighbour_uuid"]) for c in b["children"]),
+        "example_neighbour_types": ";".join(
+            str(c["neighbour_type"]) for c in b["children"]),
+        "FLAG_analysis_twin": (b["twin_title"] if b["flag_analysis_twin"]
+                               else ""),
         "tiers": b["tiers"], "gates": b["gates"], "dates": b["dates"],
         "example_uuids": ";".join(c["uuid"] for c in b["children"]),
         "ruling": "", "note": "",
     } for b in blocks])
+
+
+def _pair_html(pair: dict) -> list[str]:
+    """The write target, then the neighbour that is the evidence for it.
+
+    THE LABELS ARE COMPUTED, NEVER CONSTANT. `review._child_html` prints CHILD
+    then PARENT because in Mode 1 that is always what they are. In Mode 2 the
+    row's own sample is the PARENT on an ADD_PARENT row, so a constant label is
+    wrong on 54,852 of 167,347 rows -- and wrong in the direction that hides the
+    evidence, which is how ten cohorts came back rejected for want of it.
+    """
+    role = pair["target_role"]
+    nb_role = pair["neighbour_role"]
+    out = [
+        f'<div class="pair{" corroborated" if pair["neighbour_holds"] else ""}">',
+        f'<div class="child"><span class="lbl">{R._e(role)} &mdash; WRITE HERE'
+        f'</span> <code>{R._e(pair["uuid"])}</code>'
+        f'<span class="ids">{R._e(pair["sample_type"])} &middot; project '
+        f'{R._e(pair["projects"])} &middot; {R._e(pair["action"])}</span>'
+        '<div class="regline">holds: '
+        f'{R._registrations_html(pair["own_regs"], pair["n_own_regs_hidden"])}'
+        "</div>"
+        f'{R._metadata_html(pair["meta"])}'
+        "</div>",
+    ]
+    if not pair["neighbour_uuid"]:
+        out.append('<div class="parent"><span class="empty">'
+                   "no lineage neighbour on this row</span></div>")
+    else:
+        holds = ('<span class="ok">holds the proposed assay</span>'
+                 if pair["neighbour_holds"] else
+                 '<span class="warn">does NOT hold the proposed assay</span>')
+        out.append(
+            f'<div class="parent"><span class="lbl">{R._e(nb_role)} &mdash; '
+            f'THE EVIDENCE</span> <code>{R._e(pair["neighbour_uuid"])}</code>'
+            f'<span class="ids">{R._e(pair["neighbour_type"])} &middot; '
+            f'{holds}</span>'
+            '<div class="regline">holds: '
+            f'{R._registrations_html(pair["neighbour_regs"], pair["n_neighbour_regs_hidden"])}'
+            "</div>"
+            f'{R._metadata_html(pair["neighbour_meta"])}'
+            "</div>")
+    out.append("</div>")
+    return out
+
+
+def _cohort_html(block: dict) -> list[str]:
+    held = block["n_corroborated_shown"]
+    badge = (f'<span class="ok">{held} of {block["shown"]} shown have a '
+             f'{R._e(block["children"][0]["neighbour_role"].lower())} ALREADY '
+             "in this assay</span>" if held else
+             '<span class="warn">no shown neighbour holds this assay</span>')
+    out = [
+        '<section class="cohort">'
+        f'<h3>{R._e(block["lab"])} &middot; {R._e(block["sample_type"])} '
+        f'<span class="arrow">&larr;</span> parent '
+        f'{R._e(block["parent_types"])}</h3>'
+        f'<div class="propose">propose <b>{R._e(block["assay"])}</b>'
+        f'<span class="ids">from {R._e(block["field"])} = '
+        f'&ldquo;{R._clip(block["value"])}&rdquo; &middot; precedent '
+        f'{block["precedent_min"]:.3f}&ndash;{block["precedent_max"]:.3f}'
+        "</span></div>"
+    ]
+    if block["flag_analysis_twin"]:
+        out.append(
+            '<div class="callout"><b>Check the assay, not just the pair.</b> '
+            f'This is an <code>{R._e(block["sample_type"])}</code> sample &mdash; '
+            "an ANALYSIS type &mdash; proposed into a MEASUREMENT assay whose "
+            f'analysis twin exists: <b>{R._e(block["twin_title"])}</b> '
+            f'(internal {block["twin_id"]}). A measurement assay and its '
+            "analysis twin are different assays with different memberships."
+            "</div>")
+    out.append(
+        f'<div class="stats">{block["n_rows"]:,} row(s) &middot; '
+        f'{block["n_samples"]:,} sample(s) &middot; tier(s) '
+        f'{R._e(block["tiers"])} &middot; gate(s) {R._e(block["gates"])} '
+        f'&middot; {R._e(block["dates"])} &middot; showing {block["shown"]} '
+        f'of {block["n_rows"]:,} &middot; {badge}</div>')
+    for pair in block["children"]:
+        out += _pair_html(pair)
+    out.append(R._notes_html(block))
+    out.append("</section>")
+    return out
 
 
 def render(blocks: list[dict], floor: float = FLOOR,
@@ -226,7 +451,7 @@ def render(blocks: list[dict], floor: float = FLOOR,
             f"{rows:,} row(s)</span></h2>"
             f'<p class="bandblurb">{R._e(blurb)}</p>')
         for block in in_band:
-            parts += R._cohort_html(block)
+            parts += _cohort_html(block)
 
     excl = ("" if excluded is None else
             f" {excluded:,} row(s) below the floor are NOT on this page.")
@@ -284,6 +509,8 @@ def main(artifacts="assay-hygiene", extract=None, floor: float = FLOOR) -> int:
                           & (m2.classification == S.CLS_ABSENCE_COMPAT)).sum())
 
     context = R.load_context(e)
+    context["analysis_twins"] = analysis_twins(
+        pd.read_parquet(e / "assays.parquet"))
     blocks = build_blocks(findings, context, floor=floor)
     kept = sum(b["n_rows"] for b in blocks)
     if kept + below + no_rate != all_m2:
