@@ -73,8 +73,10 @@ REPORT_NAME = "detect-report.md"
 # Every file THIS module's `main` creates, named once. The report asserts it
 # names each of them and a test reads this tuple rather than four literals, so
 # adding a fifth output and forgetting to mention it is what goes red.
+COHORTS_NAME = "cohorts-to-review.csv"
+
 ARTIFACTS = ("vocabulary-defects.csv", "findings.csv", "mode3-disposition.csv",
-             REPORT_NAME)
+             COHORTS_NAME, REPORT_NAME)
 
 # THE KEY CARRIES `raw_value`, and that is the whole point of it. Under
 # `(sample_type, proposed_assay)` the PAV `Blood` and `Necropsy` populations
@@ -309,6 +311,91 @@ def _term_contrast_note(findings: pd.DataFrame) -> list[str]:
     ]
 
 
+NO_MODE = "NO_MODE"          # rendered, never blank -- see `_join`
+
+COHORT_COLUMNS = PATTERN_KEY + [
+    "proposed_internal_assay_title", "raised_by",
+    "n_rows", "n_samples", "n_mode_1", "n_mode_2", "n_no_mode",
+    "classifications", "actions", "tiers", "gates",
+    "precedent_min", "precedent_max", "co_reg_max", "n_projects",
+]
+
+
+def cohort_table(findings: pd.DataFrame) -> pd.DataFrame:
+    """One row per cohort, carrying the evidence a curator rules on.
+
+    THE REVIEW SURFACE. `findings.csv` is 176,428 rows and 110 MB; nobody rules
+    on that. The same rows keyed on `PATTERN_KEY` collapse to a few hundred
+    cohorts, and one ruling settles every row under one. The report shows the
+    largest fifteen of each kind; this is all of them.
+
+    THE MODE COUNTS ARE COLUMNS, NOT A JOINED LABEL, and that is the whole
+    difference between this and the draft it replaces. A joined `modes` string
+    built with `dropna()` renders a cohort that is 94% NO-MODE as `MODE_1`,
+    because the null state -- a row in no mode, proposing nothing -- has no
+    label to join. Measured on the real extract, `D.IMG` / CometChip Assay /
+    `TIF` is 2,447 rows of which the overwhelming majority are `CLS_ALT_LABEL`
+    and reach no mode, and the draft labelled that cohort `MODE_1`. A curator
+    reading it would have seen a 2,447-row registration proposal where the
+    finding is "this term is a different name for something already
+    registered, propose nothing".
+
+    So the three counts are explicit and they are ASSERTED to sum to `n_rows`.
+    That is the same guard `findings_census` and `disposition_breakdown` carry,
+    for the same reason: this package has now produced three separate defects
+    from a null dropped by a default.
+
+    `raised_by` splits the two populations that must not be ranked together.
+    A cohort with no term was raised by a lineage neighbour rather than by
+    anything the sample says about itself, and a vocabulary ruling cannot
+    touch it.
+    """
+    rollup = pattern_rollup(findings)
+    if not len(rollup):
+        return pd.DataFrame(columns=COHORT_COLUMNS)
+
+    f = findings.copy()
+    f["_mode"] = f["mode"].fillna(NO_MODE)
+
+    def _join(s):
+        """Distinct values, sorted, with the NULL STATE RENDERED rather than dropped."""
+        vals = {NO_MODE if pd.isna(v) else str(v) for v in s}
+        return ";".join(sorted(vals)) or NO_MODE
+
+    g = f.groupby(PATTERN_KEY, dropna=False)
+    extra = g.agg(
+        n_mode_1=("_mode", lambda s: int((s == S.MODE_1).sum())),
+        n_mode_2=("_mode", lambda s: int((s == S.MODE_2).sum())),
+        n_no_mode=("_mode", lambda s: int((s == NO_MODE).sum())),
+        classifications=("classification", _join),
+        actions=("action", _join),
+        tiers=("claim_tier", _join),
+        gates=("gate", _join),
+        precedent_min=("precedent_rate", "min"),
+        precedent_max=("precedent_rate", "max"),
+        co_reg_max=("co_reg_rate", "max"),
+        n_projects=("project_ids", lambda s: int(s.dropna().nunique())),
+    ).reset_index()
+
+    out = rollup.drop(columns=["modes", "classifications", "actions"]).merge(
+        extra, on=PATTERN_KEY, how="left")
+    out["raised_by"] = out.raw_value.notna().map(
+        {True: "metadata_term", False: "lineage_only"})
+
+    bad = out[out.n_mode_1 + out.n_mode_2 + out.n_no_mode != out.n_rows]
+    if len(bad):
+        raise ValueError(
+            f"{len(bad)} cohort(s) have mode counts that do not sum to their "
+            "row count, so a row is in no column. A mode column built by "
+            "dropping nulls is exactly how a NO_MODE cohort gets labelled as a "
+            f"proposal:\n{bad.head()}")
+
+    # metadata_term first: those are the cohorts a vocabulary ruling can fix,
+    # and ranked by size alone they sit under the lineage bulk.
+    out = out.sort_values(["raised_by", "n_rows"], ascending=[True, False])
+    return out[COHORT_COLUMNS].reset_index(drop=True)
+
+
 def build_report(findings: pd.DataFrame,
                  disposition: pd.DataFrame,
                  defects: pd.DataFrame,
@@ -327,6 +414,7 @@ def build_report(findings: pd.DataFrame,
     last week fails without anyone having to predict which sentence went stale.
     """
     n_findings, n_flags = len(findings), len(disposition)
+    cohorts = cohort_table(findings)
     counts = findings["mode"].value_counts(dropna=False) if n_findings \
         else pd.Series(dtype=int)
     classes = findings.classification.value_counts(dropna=False) if n_findings \
@@ -409,6 +497,11 @@ def build_report(findings: pd.DataFrame,
         "output is superseded traceably rather than deleted",
         f"- `vocabulary-defects.csv` -- **{len(defects):,}** defective mappings, "
         "routed to `/curate-assay-vocabulary` and to no mode",
+        f"- `{COHORTS_NAME}` -- **{len(cohorts):,}** cohorts covering every "
+        "finding, keyed on (sample type, proposed assay, term). **START HERE**: "
+        "one ruling settles every row under a cohort, and the per-mode counts "
+        "are separate columns so a cohort that proposes nothing cannot read as "
+        "one that does",
         f"- `{REPORT_NAME}` -- this file",
         "",
     ]
@@ -706,6 +799,7 @@ def main(extract_dir: str = "assay-hygiene/extract",
     defects = pd.read_csv(out / "vocabulary-defects.csv")
     ceiling, integrity = _lineage_facts(d)
 
+    cohort_table(findings).to_csv(out / COHORTS_NAME, index=False)
     report = build_report(findings, disposition, defects,
                           ceiling=ceiling, integrity=integrity,
                           out_dir=out_dir)

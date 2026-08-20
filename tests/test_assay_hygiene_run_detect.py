@@ -109,9 +109,9 @@ def _run(tmp_path):
 # --- the artifacts -----------------------------------------------------------
 
 
-def test_main_writes_the_four_artifacts_and_leaves_every_input_byte_unchanged(
+def test_main_writes_exactly_the_declared_artifacts_and_no_input_byte_changes(
         tmp_path):
-    """The definition of done names four files. This asserts the DIRECTORY.
+    """`ARTIFACTS` names them. This asserts the DIRECTORY, not the tuple.
 
     Hashed before and after and diffed, rather than checked for four names:
     "it wrote exactly these" is a claim about the tree, and the half that
@@ -471,6 +471,90 @@ def test_a_nonzero_integrity_count_cannot_be_omitted(tmp_path):
 
 
 # --- the pattern key ---------------------------------------------------------
+
+
+def test_a_cohort_reports_its_no_mode_rows_rather_than_dropping_them(tmp_path):
+    """The review surface, and the regression for how its draft lied.
+
+    THE DRAFT JOINED THE MODE COLUMN WITH `dropna()`. A row in NO mode --
+    `CLS_ALT_LABEL`, proposing nothing, because the term is a different name
+    for something already registered -- has no label to join, so it vanished
+    from the string. Measured on the real extract, `D.IMG` / CometChip Assay /
+    `TIF` is 2,447 rows whose overwhelming majority reach no mode, and the
+    draft labelled that cohort `MODE_1`. A curator would have read a
+    2,447-row registration proposal where the finding is "propose nothing".
+
+    So the three counts are COLUMNS and they are asserted to sum. This is the
+    third defect in this package from a null dropped by a default, after
+    `disposition_breakdown` and `findings_census`.
+    """
+    out, _ = _run(tmp_path)
+    findings = pd.read_csv(out / "findings.csv", low_memory=False)
+    cohorts = pd.read_csv(out / RD.COHORTS_NAME)
+
+    assert list(cohorts.columns) == RD.COHORT_COLUMNS
+    # every finding is in exactly one cohort, and in exactly one mode column
+    assert int(cohorts.n_rows.sum()) == len(findings)
+    assert (cohorts.n_mode_1 + cohorts.n_mode_2 + cohorts.n_no_mode
+            == cohorts.n_rows).all()
+    # ...and the per-mode totals equal the frame's own
+    for mode, col in ((S.MODE_1, "n_mode_1"), (S.MODE_2, "n_mode_2")):
+        assert int(cohorts[col].sum()) == int((findings["mode"] == mode).sum())
+    assert int(cohorts.n_no_mode.sum()) == int(findings["mode"].isna().sum())
+
+    # THE NULL STATE IS RENDERED, never blank. A blank cell reads as "not
+    # measured"; these rows were measured and reach no mode on purpose.
+    if int(cohorts.n_no_mode.sum()):
+        assert RD.NO_MODE in " ".join(cohorts.classifications.astype(str))
+
+    # A MIXED COHORT IS THE ONLY ONE THAT CAN CATCH THE DROP, and the fixture
+    # has none, so it is built here. `_join` falls back to `NO_MODE` when it
+    # renders nothing at all, which means an ALL-null cohort looks identical
+    # under both rules -- the mutation that drops nulls survived this test
+    # until the case below was added. The real extract's `D.IMG` / CometChip /
+    # `TIF` cohort is exactly this shape: 39 rows classified and 2,408 not.
+    mixed = pd.DataFrame({
+        "sample_type": ["D.IMG", "D.IMG"],
+        "proposed_internal_assay_id": [138, 138],
+        "proposed_internal_assay_title": ["CometChip Assay"] * 2,
+        "raw_value": ["TIF", "TIF"],
+        "source_field": ["Type", "Type"],
+        "sample_id": [1, 2],
+        "mode": [S.MODE_1, None],                  # one in a mode, one not
+        "classification": [None, S.CLS_ALT_LABEL],  # ...and the inverse
+        "action": ["ADD_TO_ASSAY", "NONE"],
+        "claim_tier": [S.T_WEAK, S.T_WEAK], "gate": [S.GATE_PASS] * 2,
+        "precedent_rate": [None, None], "co_reg_rate": [None, 0.0],
+        "project_ids": ["1", "1"],
+    })
+    row = RD.cohort_table(mixed).iloc[0]
+    assert (row.n_rows, row.n_mode_1, row.n_mode_2, row.n_no_mode) == (2, 1, 0, 1)
+    assert row.classifications == f"{S.CLS_ALT_LABEL};{RD.NO_MODE}", (
+        "one row of this cohort carries no classification and one carries "
+        f"{S.CLS_ALT_LABEL}; dropping the null renders the cohort as though "
+        "every row were classified, which is how a 2,408-row 'propose "
+        "nothing' finding reads as a registration proposal")
+
+
+def test_the_cohort_table_refuses_mode_counts_that_do_not_sum(tmp_path):
+    """The guard is a raise, not a comment. Verified by feeding it a hole.
+
+    `cohort_table` asserts its own identity at runtime rather than trusting
+    the groupby, because the failure it guards against is silent by
+    construction: a mode value that matches none of the three buckets simply
+    counts nowhere and the row totals still look plausible.
+    """
+    f = pd.DataFrame({
+        "sample_type": ["TIS"], "proposed_internal_assay_id": [11],
+        "proposed_internal_assay_title": ["Tissue Collection"],
+        "raw_value": ["Blood"], "source_field": ["Type"], "sample_id": [1],
+        "mode": ["MODE_UNKNOWN"],           # in none of the three buckets
+        "classification": [S.CLS_ABSENCE_COMPAT], "action": ["ADD_TO_ASSAY"],
+        "claim_tier": [S.T_STRONG], "gate": [S.GATE_PASS],
+        "precedent_rate": [0.9], "co_reg_rate": [0.9], "project_ids": ["1"],
+    })
+    with pytest.raises(ValueError, match="do not sum"):
+        RD.cohort_table(f)
 
 
 def test_every_pattern_table_is_keyed_on_the_triple_including_raw_value():
