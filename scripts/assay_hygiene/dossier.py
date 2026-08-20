@@ -16,6 +16,10 @@ self-contained dossier that a reader can answer from, WITHOUT a database.
 
 WHAT A DOSSIER CARRIES, and why each part is needed:
 
+  the_evidence          the SPECIFIC relative that raised this proposal, named
+                        by the finding row rather than guessed from a capped
+                        list, with whether it holds the assay. Without it 86
+                        cohorts asked the question with the answer invisible.
   the three hops        parent -> sample -> child, with the TYPE and the
                         REGISTERED ASSAYS of all three. This is the operator's
                         own framing and it is the thing the sheet was missing:
@@ -117,6 +121,7 @@ def build_dossiers(findings: pd.DataFrame, context: dict) -> list[dict]:
 
     children_of = M2._children_index(context)
     parents_of = context["parents_of"]
+    sid_of = {uuid: sid for sid, uuid in context["uuid_of"].items()}
 
     out = []
     for key, rows in m2.groupby(list(R.BLOCK_KEY), dropna=False, sort=False):
@@ -126,7 +131,28 @@ def build_dossiers(findings: pd.DataFrame, context: dict) -> list[dict]:
         examples = []
         for r in rows.head(MAX_EXAMPLES).itertuples(index=False):
             sid = int(r.sample_id)
+            # THE SPECIFIC RELATIVE THAT RAISED THIS ROW, named separately.
+            # `parents` and `children` below are capped, and a capped list is
+            # not evidence: measured on the first build, 8.1% of examples and 86
+            # whole cohorts showed the assay-holding relative in NO example,
+            # so a reader was asked "does this belong" with the reason it was
+            # proposed invisible. That is the same defect the html sheet shipped
+            # and it is fixed the same way -- carry the neighbour the finding
+            # row NAMES, never the first few relatives and a hope.
+            nb_uuid = (None if pd.isna(r.lineage_neighbour_uuid)
+                       else str(r.lineage_neighbour_uuid))
+            nb_sid = sid_of.get(nb_uuid) if nb_uuid else None
+            evidence = None
+            if nb_sid is not None:
+                evidence = _relative(nb_sid, context)
+                evidence["relationship"] = (
+                    "CHILD of this sample"
+                    if action == "ADD_PARENT_TO_ASSAY" else
+                    "PARENT of this sample")
+                evidence["holds_the_proposed_assay"] = (
+                    str(key[3]) in evidence["registered_assays"])
             examples.append({
+                "the_evidence": evidence,
                 "sample": {
                     "uuid": str(r.uuid),
                     "type": str(r.sample_type),
