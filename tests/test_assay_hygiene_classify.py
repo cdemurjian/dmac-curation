@@ -180,12 +180,29 @@ def _world():
     comma-joined multi-project form (108 carries "6,2", which is 1,052 of the
     real population), a DUPLICATED id (105 carries "2,2", which occurs 34 times),
     and a NULL (106, which is 193 of the real population).
+
+    THE UUIDS ARE REAL UIDs, `<TYPE>-<YYMMDD><LAB>-<serial>`, and they were not
+    always. They read `TIS-100` until `assay_hygiene.review` shipped, which
+    parses the LAB and the DATE out of the uuid -- neither is a modelled field
+    anywhere in this extract -- and REFUSES a uuid it cannot parse rather than
+    grouping it under a null lab. `run_detect.main` writes that sheet, so a
+    fixture carrying uuids the real database could not contain now fails the
+    wired run.
+
+    NOTHING IN THIS DOCSTRING'S COUNTS DEPENDS ON THE SHAPE. The sample type is
+    read off `nodes.type` and never off the uuid prefix (`gate.sample_type_
+    index` records five real uuids that disagree with their own node's type),
+    and the serial is the sample_id, so `100` is still findable by eye. The lab
+    is `ENG` except for 107 and 108, which are `GRI`, so the Mode 1 population
+    spans two labs and a review cohort keyed on the lab has something to split.
     """
     nodes, membership, samples = [], [], []
+    labs = {107: "GRI", 108: "GRI"}
 
     def add(sid, stype, meta, projects="3", assay_ids=()):
-        nodes.append((f"{stype}-{sid}", sid, stype))
-        samples.append((sid, f"{stype}-{sid}", meta, None, projects))
+        uuid = f"{stype}-2401{sid % 28 + 1:02d}{labs.get(sid, 'ENG')}-{sid}"
+        nodes.append((uuid, sid, stype))
+        samples.append((sid, uuid, meta, None, projects))
         for a in assay_ids:
             membership.append((sid, a))
 
@@ -282,7 +299,7 @@ def test_a_sample_registered_in_nothing_with_a_gate_passing_claim_becomes_a_mode
     is the whole point of Mode 1: the sample's registrations were measured and
     there are none. A null there would say the question was never asked.
     """
-    _, _, _, _, _, findings = _pipeline()
+    w, _, _, _, _, findings = _pipeline()
 
     rows = findings[findings.sample_id == 100]
     assert len(rows) == 1
@@ -294,7 +311,12 @@ def test_a_sample_registered_in_nothing_with_a_gate_passing_claim_becomes_a_mode
     assert row.claim_tier == S.T_STRONG
     assert row.gate == S.GATE_PASS
     assert row.proposed_by == X.BY_CLAIM
-    assert row.uuid == "TIS-100" and row.sample_type == "TIS"
+    # The uuid is read OFF THE WORLD rather than pinned as a literal: it is a
+    # UID whose shape `assay_hygiene.review` parses, and the last time it was
+    # pinned here a change to the fixture's uuids stranded this one assertion.
+    assert row.uuid == dict(zip(w["samples"].sample_id,
+                                w["samples"].uuid))[100]
+    assert row.uuid.startswith("TIS-") and row.sample_type == "TIS"
     # measured and empty, never "not measured"
     assert row.registered_internal_assay_ids == ""
     assert row.registered_internal_assay_titles == ""

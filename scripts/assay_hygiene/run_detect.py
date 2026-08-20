@@ -67,6 +67,7 @@ from . import classify as X
 from . import gate as G
 from . import lineage as L
 from . import mode2 as M2
+from . import review as RV
 
 REPORT_NAME = "detect-report.md"
 
@@ -76,7 +77,7 @@ REPORT_NAME = "detect-report.md"
 COHORTS_NAME = "cohorts-to-review.csv"
 
 ARTIFACTS = ("vocabulary-defects.csv", "findings.csv", "mode3-disposition.csv",
-             COHORTS_NAME, REPORT_NAME)
+             COHORTS_NAME, RV.REVIEW_NAME, REPORT_NAME)
 
 # THE KEY CARRIES `raw_value`, and that is the whole point of it. Under
 # `(sample_type, proposed_assay)` the PAV `Blood` and `Necropsy` populations
@@ -110,18 +111,13 @@ def _cell(v) -> str:
     return str(v).replace("|", "\\|")
 
 
-def _truthy(series: pd.Series) -> pd.Series:
-    """A boolean column that has been through csv, coerced back.
-
-    `contested` round-trips as the STRINGS "True"/"False" when the frame is
-    read back off disk, and a bare `.astype(bool)` on those is True for both --
-    a non-empty string is truthy -- so the contested count would equal the row
-    count and look like a finding. This report reads its frames off csv by
-    design, so the coercion belongs here rather than in the caller.
-    """
-    if series.dtype == bool:
-        return series
-    return series.astype(str).str.strip().str.lower().isin(("true", "1"))
+# A boolean column that has been through csv, coerced back. THE DEFINITION
+# MOVED TO `review` AND THIS IS THE SAME OBJECT, not a second spelling: the
+# sheet groups on `contested` too, the import direction is `run_detect ->
+# review`, and two copies of one coercion a module apart is the shape of three
+# defects this branch has already found. See `review._truthy` for why the
+# coercion is needed at all.
+_truthy = RV._truthy
 
 
 def _integrity_cell(value) -> tuple[str, str]:
@@ -512,6 +508,16 @@ def build_report(findings: pd.DataFrame,
         "one ruling settles every row under a cohort, and the per-mode counts "
         "are separate columns so a cohort that proposes nothing cannot read as "
         "one that does",
+        f"- `{RV.REVIEW_NAME}` -- the MODE_1 review surface, an HTML page for a "
+        f"browser, carrying all **{_mode(S.MODE_1):,}** of its proposals "
+        "grouped on (lab, sample type, parent types, proposed assay, source "
+        "field, term). It is keyed more finely than the csv above ON PURPOSE: "
+        "a curator rules lab by lab, and the same term under a different "
+        "parent type is a different question. Each cohort shows up to five "
+        "example children with their metadata and the assays their "
+        "DERIVED_FROM parents already hold, which is the evidence a count "
+        "cannot carry. It records a ruling as text you EXPORT; nothing in this "
+        "package reads that text back, and the page writes nothing anywhere",
         f"- `{REPORT_NAME}` -- this file",
         "",
         "**A PROPOSAL NAMES AN INTERNAL ASSAY ID, AND THAT IS NOT A WRITABLE",
@@ -825,6 +831,12 @@ def main(extract_dir: str = "assay-hygiene/extract",
     ceiling, integrity = _lineage_facts(d)
 
     cohort_table(findings).to_csv(out / COHORTS_NAME, index=False)
+    # THE SHEET IS BUILT FROM THIS FRAME, NOT FROM THE CSV IT CAME OUT OF.
+    # `review` has no `main` and reads no csv precisely so that this line is
+    # the only way to build it: the prototype was separate scripts reading each
+    # other's output and its cohort context and its findings disagreed twice,
+    # once naming internal assay 31 where the findings said 30.
+    RV.write_review(findings, RV.load_context(d), out)
     report = build_report(findings, disposition, defects,
                           ceiling=ceiling, integrity=integrity,
                           out_dir=out_dir)
