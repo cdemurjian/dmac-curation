@@ -964,10 +964,30 @@ def test_the_24_flowjo_and_mass_spectra_rows_are_all_rejected_by_the_gate():
       13  A.SPC registered in 47 Mass Spectrometry ANALYSIS, claiming 130 Mass
           Spectrometry, an assay NO A.SPC sample is registered in anywhere
 
-    Both are the analysis-versus-measurement pair. If they still pass the gate,
-    the gate does not work, whatever the aggregate numbers say -- so this test
-    asserts the population size first (or it could pass vacuously on an empty
-    filter) and then that not one of them reaches a mode.
+    Both are the analysis-versus-measurement pair.
+
+    THE TWO HALVES ARE NOW STOPPED AT DIFFERENT LAYERS, and that is the point of
+    this revision rather than an accident to paper over. On 2026-08-20 the
+    operator retired the whole `Software: flowjo` family in
+    `vocabulary-curator.csv`, so the A.FLOW half no longer reaches the gate at
+    all: `claim_index` skips a null `internal_assay_id`, no claim is built, and
+    the 11 flags are ELIMINATED UPSTREAM. That is strictly stronger than being
+    rejected by the gate -- a claim that is never made cannot be laundered by a
+    later change to the gate's thresholds -- so the assertion is tightened to 0
+    rather than relaxed.
+
+    It is asserted together with its CAUSE. A bare `len(...) == 0` would go
+    green if the A.FLOW samples simply vanished from the extract, which is the
+    vacuous pass this test's own "re-measure before editing" guard exists to
+    prevent. So the retirement itself is asserted first: six curator rows, every
+    one with a null id, and zero claims carrying a flowjo value anywhere.
+
+    The A.SPC half is UNCHANGED at 13 and still the gate's job: no vocabulary
+    ruling touches it, because its defect is not the term but the fact that no
+    A.SPC sample is registered in 130 anywhere. If those still pass the gate,
+    the gate does not work, whatever the aggregate numbers say -- so that half
+    still asserts its population size first and then that not one of them
+    reaches a mode.
     """
     if not (EXTRACT / "assays.parquet").exists():
         pytest.skip(f"no extract at {EXTRACT}; run driver_extract.py first")
@@ -980,15 +1000,29 @@ def test_the_24_flowjo_and_mass_spectra_rows_are_all_rejected_by_the_gate():
     claims = pd.read_parquet(ARTIFACTS / "claims.parquet")
     vocab = V.load_vocabulary(ARTIFACTS / "vocabulary.csv")
 
+    # --- the A.FLOW half: eliminated upstream, asserted WITH its cause -------
+    flowjo = vocab[vocab.raw_value.astype(str).str.startswith("flowjo")]
+    assert len(flowjo) == 6, f"the flowjo family moved: {len(flowjo)} rows"
+    assert flowjo.internal_assay_id.isna().all(), (
+        "a flowjo term still maps an assay; the A.FLOW assertion below would "
+        "then be testing the gate, not the retirement")
+    assert (flowjo.provenance == S.P_CURATOR).all()
+    assert not claims.raw_value.astype(str).str.lower().str.startswith(
+        "flowjo").any(), "a retired term still built a claim"
+
     flags = A.audit_contradictions(claims, membership, assays, nodes)
-    twenty_four = flags[
-        ((flags.sample_type == "A.FLOW")
-         & (flags.claimed_internal_assay_id == 30)
-         & (flags.registered_internal_assay_ids == "31"))
-        | ((flags.sample_type == "A.SPC")
-           & (flags.claimed_internal_assay_id == 130)
-           & (flags.registered_internal_assay_ids == "47"))]
-    assert len(twenty_four) == 24, "the population moved; re-measure before editing"
+    a_flow = flags[(flags.sample_type == "A.FLOW")
+                   & (flags.claimed_internal_assay_id == 30)
+                   & (flags.registered_internal_assay_ids == "31")]
+    assert len(a_flow) == 0, (
+        f"{len(a_flow)} A.FLOW 30-over-31 flag(s) survived a retirement that "
+        "should have stopped them being claimed at all")
+
+    # --- the A.SPC half: unchanged, and still the gate's job ----------------
+    thirteen = flags[(flags.sample_type == "A.SPC")
+                     & (flags.claimed_internal_assay_id == 130)
+                     & (flags.registered_internal_assay_ids == "47")]
+    assert len(thirteen) == 13, "the population moved; re-measure before editing"
 
     gated = G.gate_claims(
         claims, vocab,
@@ -997,15 +1031,13 @@ def test_the_24_flowjo_and_mass_spectra_rows_are_all_rejected_by_the_gate():
     )
     keyed = gated.set_index(["sample_id", "internal_assay_id"])
     verdicts = keyed.loc[
-        list(zip(twenty_four.sample_id, twenty_four.claimed_internal_assay_id))]
+        list(zip(thirteen.sample_id, thirteen.claimed_internal_assay_id))]
     assert set(verdicts.gate) <= set(S.GATE_REJECTIONS), (
         f"{verdicts.gate.value_counts().to_dict()} -- the gate does not work")
     assert not G.reaches_modes(verdicts).any()
 
     # ...and each is caught by the test that names its actual defect
-    by_type = dict(zip(verdicts.sample_type, verdicts.gate))
-    assert by_type["A.FLOW"] == S.GATE_INCOHERENT
-    assert by_type["A.SPC"] == S.GATE_UNREACHABLE
+    assert set(verdicts.gate) == {S.GATE_UNREACHABLE}
 
 
 def test_a_claim_surviving_from_before_a_retirement_raises_rather_than_passing():

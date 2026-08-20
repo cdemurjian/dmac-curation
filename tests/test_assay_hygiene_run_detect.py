@@ -613,10 +613,25 @@ def test_the_real_extract_names_the_illumina_mapping_with_its_measured_share():
     this against an extract it does not have.
 
     The spec says 212 of 250 `ABSENCE_COMPAT` flags. Measured off the
-    disposition Task 8 wrote, the denominator is 247 and the numerator still
+    disposition Task 8 wrote, the denominator was 247 and the numerator still
     212 -- so the sentence has to carry the measured pair and not the
     remembered one. This asserts the report agrees with the csv, whatever the
     csv says today.
+
+    "WHATEVER THE CSV SAYS" NOW INCLUDES ZERO, and that is this revision. On
+    2026-08-20 the operator retired `Type: illumina library` -- a term naming a
+    MATERIAL rather than an assay, whose carriers span six assays (Short Read
+    Sequencing 2,390 / DNA Extraction 1,884 / cDNA Synthesis 408 / Library
+    Creation 394 / Bulk DNA Sequencing 68 / Single Cell Expression 4) -- and the
+    mapping left the disposition entirely, taking `ABSENCE_COMPAT` from 247 to
+    35. The report correctly stopped naming it.
+
+    The original body asserted the report names the mapping UNCONDITIONALLY,
+    which made a retirement indistinguishable from the report silently dropping
+    a figure it should still carry. Both directions are now asserted: named with
+    the measured pair while the csv holds rows, and NOT named once it holds none
+    -- because a sentence quoting a share for a mapping with zero flags is
+    exactly the stale-figure defect this test exists to catch.
     """
     d = ARTIFACTS / "mode3-disposition.csv"
     report = ARTIFACTS / RD.REPORT_NAME
@@ -627,6 +642,21 @@ def test_the_real_extract_names_the_illumina_mapping_with_its_measured_share():
     compat = disposition[disposition.classification == S.CLS_ABSENCE_COMPAT]
     illumina = compat[compat.raw_value.astype(str).str.strip().str.lower()
                       == "illumina library"]
+
+    if len(illumina) == 0:
+        # the retired case. Assert the RETIREMENT is why, so this branch cannot
+        # go green on a report that simply lost the sentence.
+        vocab = V.load_vocabulary(ARTIFACTS / "vocabulary.csv")
+        row = vocab[(vocab.source_field == "Type")
+                    & (vocab.raw_value == "illumina library")]
+        assert len(row) == 1 and pd.isna(row.iloc[0].internal_assay_id), (
+            "no illumina flags remain, but the term is not retired either -- "
+            "the mapping vanished for some other reason; re-measure")
+        assert "illumina library" not in md.lower(), (
+            "the report still quotes a share for a mapping that now carries "
+            "zero flags")
+        return
+
     assert "illumina library" in md.lower()
     line = _line(md.lower(), "illumina library")
     assert f"{len(illumina):,}" in line and f"{len(compat):,}" in line, (

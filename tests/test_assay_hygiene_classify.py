@@ -2480,6 +2480,29 @@ def test_the_real_extract_reproduces_mode_1s_population_before_and_after_the_gat
     All four before-gate figures carried into this task were exact, which is the
     first brief on this branch that needed no correction. The after-gate figures
     had never been measured by anyone and are published here.
+
+    RE-MEASURED 2026-08-20 after the operator retired `DataType: tif`,
+    `DataType: png`, `Type: illumina library` and the `Software: flowjo` family
+    in `vocabulary-curator.csv`. Every figure below was re-derived from the
+    parquet rather than adjusted to fit; the ones that did not move are left
+    exactly as they were, which is what makes the ones that did informative.
+
+    The claim counts fall by 793 -- tif's 544, png's 245 and illumina's 4, the
+    Mode 1 rows those three terms raised -- and that number appears twice,
+    before and after the gate, because none of the 793 was gate-blocked:
+      claim_rows           2,912 -> 2,119
+      claim_rows_proposed  2,166 -> 1,373
+    `claim_rows_blocked` (746) and `population_all_claims_blocked` (170) are
+    UNCHANGED, which is the cross-check: a retirement removes claims that were
+    passing, never claims the gate was already stopping. 1,373 + 746 = 2,119
+    still holds, as does 1,537 + 4,705 = 6,242.
+
+    `low_support` falls hardest, 612 -> 64, because every one of tif's 544 rows
+    carried GATE_LOW_SUPPORT -- the gate already distrusted the mapping and said
+    so on every row; retiring it is that verdict made permanent.
+
+    The population itself (6,242), the 82, and the 362 absent rows are untouched:
+    they are facts about MEMBERSHIP, and no vocabulary ruling can move them.
     """
     r = _real()
     population = X.unregistered_samples(r["samples"], r["membership"],
@@ -2495,26 +2518,26 @@ def test_the_real_extract_reproduces_mode_1s_population_before_and_after_the_gat
     census = X.mode1_census(attached, population, findings)
 
     # BEFORE the gate
-    assert census["claim_rows"] == 2912
-    assert census["population_with_claim"] == 1827
-    assert census["population_no_claim"] == 4415
+    assert census["claim_rows"] == 2119
+    assert census["population_with_claim"] == 1537
+    assert census["population_no_claim"] == 4705
     pre = attached[attached.sample_id.isin(set(population))]
     at_floor = pre[pre.tier.isin((S.T_STRONG, S.T_CORROBORATED))]
-    assert len(at_floor) == 671 and at_floor.sample_id.nunique() == 671
+    assert len(at_floor) == 667 and at_floor.sample_id.nunique() == 667
 
     # AFTER the gate
-    assert census["claim_rows_proposed"] == 2166
-    assert census["population_proposed"] == 1657
+    assert census["claim_rows_proposed"] == 1373
+    assert census["population_proposed"] == 1367
     assert census["claim_rows_blocked"] == 746
     assert census["population_all_claims_blocked"] == 170
     strong = findings[findings.claim_tier.isin((S.T_STRONG, S.T_CORROBORATED))]
-    assert len(strong) == 590 and strong.sample_id.nunique() == 590
+    assert len(strong) == 586 and strong.sample_id.nunique() == 586
     # every blocked row is unreachable; no term family splits on this population
     blocked = pre[~G.reaches_modes(pre)]
     assert set(blocked.gate) == {S.GATE_UNREACHABLE}
     # the recorded-but-not-blocking floor, which is the whole reason the two
     # rules differ: 612 rows reach Mode 1 carrying a floor failure
-    assert int((findings.gate == S.GATE_LOW_SUPPORT).sum()) == 612
+    assert int((findings.gate == S.GATE_LOW_SUPPORT).sum()) == 64
 
     # the 82, measured rather than quoted
     from assay_hygiene.precedent import fallback_assay_ids
@@ -2609,8 +2632,16 @@ def test_the_real_extract_reproduces_the_ceiling_and_both_directions_separately(
     # the two evidence populations
     assert census["rows_without_precedent"] == 10
     assert census["rows_with_multiple_supports"] == 31180
-    assert census["rows_proposed_by_both"] == 1656
-    assert census["rows_with_a_blocked_claim"] == 4255
+    # RE-MEASURED 2026-08-20 after the tif/png/illumina/flowjo retirement.
+    # These two are the ONLY census figures the retirement moves, and both are
+    # claim-dependent by definition: `proposed_by_both` counts rows a metadata
+    # term AND lineage propose (1,656 -> 1,510, the term half retiring), and
+    # `with_a_blocked_claim` counts rows whose claim the gate stopped
+    # (4,255 -> 4,242, the flowjo family no longer producing a claim TO block).
+    # Every other figure above is a membership-and-lineage fact and is unchanged
+    # to the row, which is the cross-check that the retirement stayed in its lane.
+    assert census["rows_proposed_by_both"] == 1510
+    assert census["rows_with_a_blocked_claim"] == 4242
     assert census["rows_without_a_samples_row"] == 448
     assert census["rows_without_a_sample_type"] == 0
 
@@ -3605,11 +3636,11 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
                           registered=registered, candidates=candidates)
     steps = X.precedence_steps(keys)
     counts = Counter(steps.values())
-    assert len(keys) == 180995
-    assert counts[X.PRE_GATE] == 4567
-    assert counts[X.PRE_MODE_1] == 2166
-    assert counts[X.PRE_LINEAGE] == 167330
-    assert counts[X.PRE_COMPAT] == 6932
+    assert len(keys) == 175339
+    assert counts[X.PRE_GATE] == 4553
+    assert counts[X.PRE_MODE_1] == 1373
+    assert counts[X.PRE_LINEAGE] == 167347
+    assert counts[X.PRE_COMPAT] == 2066
     assert counts[X.PRE_MODE_3] == 0
     assert sum(counts.values()) == len(keys)
 
@@ -3621,7 +3652,7 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
         moved.append(sum(1 for e in keys.values()
                          if X.precedence_step(e)
                          != X.precedence_step(e, tuple(wrong))))
-    assert moved == [746, 753, 903, 0]
+    assert moved == [746, 749, 761, 0]
 
     # ...and the THREE FIGURES THE MODULE DOCSTRING STATES are those same
     # measured values, read out of the source rather than eyeballed. Task 6
@@ -3636,7 +3667,7 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
         r"with LINEAGE ([\d,]+), LINEAGE with COMPAT ([\d,]+)", flat)
     assert claim is not None, "the docstring sentence changed shape; re-pin it"
     stated = [int(g.replace(",", "")) for g in claim.groups()]
-    assert stated == [len(keys)] + moved[:3] == [180995, 746, 753, 903]
+    assert stated == [len(keys)] + moved[:3] == [175339, 746, 749, 761]
 
     m1 = X.mode1_findings(attached, population, projects)
     m2 = M2.mode2_findings(
@@ -3655,26 +3686,26 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
     agreeing = X.claims_agreeing_with_a_registration(attached, registered)
     census = X.findings_census(keys, steps, findings, lanes, agreeing=agreeing)
 
-    assert census["claims_agreeing_with_a_registration"] == 123439
-    assert len(attached) == 138007
-    assert census["rows"] == len(findings) == 176428
-    assert census["rows_mode_1"] == 2166
-    assert census["rows_mode_2"] == 168074 == 167330 + 744
+    assert census["claims_agreeing_with_a_registration"] == 122011
+    assert len(attached) == 130764
+    assert census["rows"] == len(findings) == 170786
+    assert census["rows_mode_1"] == 1373
+    assert census["rows_mode_2"] == 167454 == 167347 + 107
     assert census["rows_mode_3"] == 0
-    assert census["rows_no_mode"] == 6188
-    assert census["rows_cls_absence_lineage"] == 167330
-    assert census["rows_cls_absence_compat"] == 744
-    assert census["rows_cls_alt_label"] == 5181
+    assert census["rows_no_mode"] == 1959
+    assert census["rows_cls_absence_lineage"] == 167347
+    assert census["rows_cls_absence_compat"] == 107
+    assert census["rows_cls_alt_label"] == 952
     assert census["rows_cls_unresolved"] == 1007
-    assert census["rows_without_a_classification"] == 2166
+    assert census["rows_without_a_classification"] == 1373
 
     # THE CEILING IS A CEILING, and the precedence takes 5,008 off it
     assert census["lineage_ceiling_offered"] == 172338
-    assert census["lineage_refused_by_the_gate"] == 4255
-    assert census["lineage_taken_by_mode_1"] == 753
-    assert census["keys_lineage"] == 172338 - 4255 - 753
+    assert census["lineage_refused_by_the_gate"] == 4242
+    assert census["lineage_taken_by_mode_1"] == 749
+    assert census["keys_lineage"] == 172338 - 4242 - 749
     assert census["keys_from_lineage"] == census["lineage_ceiling_offered"]
-    assert census["keys_from_a_claim"] == 14568 == 138007 - 123439
+    assert census["keys_from_a_claim"] == 8753 == 130764 - 122011
 
     # ONE ROW PER PROPOSAL over the whole extract, which is what makes the
     # artifact safe for a curator to approve row by row
@@ -3684,18 +3715,18 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
     # --- the 866, re-disposed -------------------------------------------------
     flags = A.audit_contradictions(r["claims"], r["membership"], r["assays"],
                                    r["nodes"])
-    assert len(flags) == 866
+    assert len(flags) == 585
     disposition = X.mode3_disposition(flags, steps, findings, attached)
-    assert len(disposition) == 866
+    assert len(disposition) == 585
     lane = Counter(
         s if s != X.PRE_COMPAT else c
         for s, c in zip(disposition.precedence_step, disposition.classification))
-    assert lane[X.PRE_GATE] == 43
-    assert lane[X.PRE_LINEAGE] == 326
-    assert lane[S.CLS_ABSENCE_COMPAT] == 247
+    assert lane[X.PRE_GATE] == 31
+    assert lane[X.PRE_LINEAGE] == 269
+    assert lane[S.CLS_ABSENCE_COMPAT] == 35
     assert lane[S.CLS_UNRESOLVED] == 205
     assert lane[S.CLS_ALT_LABEL] == 45
-    assert sum(lane.values()) == 866
+    assert sum(lane.values()) == 585
     assert lane[X.PRE_MODE_1] == 0, "a flagged sample is registered by definition"
     assert not (set(disposition["mode"].dropna()) & {S.MODE_3})
 
@@ -3716,7 +3747,7 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
         ((flags.sample_type == "A.FLOW") & (flags.claimed_internal_assay_id == 30))
         | ((flags.sample_type == "A.SPC")
            & (flags.claimed_internal_assay_id == 130))]
-    assert len(twenty_four) == 24
+    assert len(twenty_four) == 13
     k24 = set(zip(twenty_four.sample_id.astype(int),
                   twenty_four.claimed_internal_assay_id.astype(int)))
     assert k24 <= set(candidates), "all 24 must be lineage candidates"

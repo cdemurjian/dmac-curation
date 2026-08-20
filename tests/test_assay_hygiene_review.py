@@ -56,6 +56,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 from assay_hygiene import _schema as S  # noqa: E402
 from assay_hygiene import review as R  # noqa: E402
 from assay_hygiene import run_detect as RD  # noqa: E402
+from assay_hygiene import vocabulary as V  # noqa: E402
 
 EXTRACT = REPO / "assay-hygiene" / "extract"
 ARTIFACTS = REPO / "assay-hygiene"
@@ -948,10 +949,31 @@ def test_run_detect_declares_the_review_sheet_as_one_of_its_artifacts():
 def test_the_real_extract_round_trips_the_operators_seventeen_rulings():
     """Requirement 6, against a REAL ruling file a real curator exported.
 
-    Every key in `tests/fixtures/mode1-rulings.tsv` must resolve to exactly one
-    emitted cohort. A key that resolves to none means the sheet regenerated
-    with a different grouping and every ruling in that file is orphaned -- the
-    silent outcome this whole increment is built to avoid.
+    A key that resolves to no cohort means the sheet regenerated with a
+    different grouping and every ruling in that file is orphaned -- the silent
+    outcome this whole increment is built to avoid.
+
+    A RETIREMENT IS THE ONE LEGITIMATE WAY TO LOSE A KEY, and telling the two
+    apart is what this revision adds. On 2026-08-20 the operator retired
+    `DataType: tif` and `DataType: png`, and 7 of his 9 WRONG_ASSAY cohorts --
+    every tif and png one -- stopped being emitted because the mapping that
+    raised them is gone. That is the vocabulary fix WORKING: the ruling was
+    "this proposal is wrong", and the proposal no longer exists. Failing on it
+    would mean the suite goes red every time a curator's own ruling is acted on.
+
+    So the two outcomes are separated rather than merged:
+
+      * EVERY `APPROVE` key must still resolve, with no exception. Those are the
+        write candidates; losing one silently is the failure that matters most,
+        and a retirement must never take one. Measured after the retirement: all
+        8 still resolve.
+      * A `WRONG_ASSAY` key may resolve to nothing ONLY IF its term is now
+        retired in the vocabulary -- asserted against `vocabulary.csv`, not
+        assumed. Measured: 7 gone (5 tif, 2 png), 2 still emitted (the SeqWell
+        protocol and the Macrophages cohort), because no vocabulary ruling
+        reaches those two and they still need an answer.
+
+    Anything else is still the orphaning this test was written to catch.
     """
     if not (EXTRACT / "samples.parquet").exists() or \
             not (ARTIFACTS / "findings.csv").exists():
@@ -964,12 +986,32 @@ def test_the_real_extract_round_trips_the_operators_seventeen_rulings():
     rulings = pd.read_csv(RULINGS, sep="\t")
     assert list(rulings.columns) == ["key", "ruling", "note"]
     assert len(rulings) == 17
-    missing = [k for k in rulings.key if k not in emitted]
-    assert not missing, (
-        f"{len(missing)} of {len(rulings)} operator rulings resolve to no "
-        f"cohort: {missing[:3]}")
     for key in rulings.key:
         assert len(key.split("|")) == len(R.BLOCK_KEY)
+
+    vocab = V.load_vocabulary(ARTIFACTS / "vocabulary.csv")
+    retired = {(str(r.source_field), str(r.raw_value))
+               for r in vocab.itertuples(index=False)
+               if pd.isna(r.internal_assay_id)}
+
+    orphaned = []
+    for key, ruling in zip(rulings.key, rulings.ruling):
+        if key in emitted:
+            continue
+        field, value = key.split("|")[4], key.split("|")[5]
+        term = (field, S.normalise_value(value))
+        if ruling == "WRONG_ASSAY" and term in retired:
+            continue          # discharged by a retirement -- the fix working
+        orphaned.append(f"{key} [{ruling}]")
+    assert not orphaned, (
+        f"{len(orphaned)} of {len(rulings)} rulings resolve to no cohort and "
+        f"were NOT discharged by a retirement: {orphaned[:3]}")
+
+    # the strong half, stated separately so it cannot be weakened by the
+    # exemption above: no APPROVE key may go missing for any reason at all.
+    lost = [k for k, r in zip(rulings.key, rulings.ruling)
+            if r == "APPROVE" and k not in emitted]
+    assert not lost, f"a retirement took {len(lost)} APPROVE cohort(s): {lost}"
 
 
 def test_the_real_extract_renders_a_sheet_that_is_still_inert(tmp_path):

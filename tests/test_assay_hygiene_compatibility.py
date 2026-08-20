@@ -1033,21 +1033,38 @@ def test_the_census_counts_only_rows_a_finding_could_actually_be_written_for():
                     or not (ARTIFACTS / "claims.parquet").exists(),
                     reason="the extract and stage B outputs are gitignored")
 def test_the_census_reproduces_the_figures_that_justified_the_two_columns():
-    """7,831 / 5,839 / 625 / 428, and the 408 that are one known-bad mapping.
+    """2,827 / 1,209 / 217 / 20, and the 408-row defect that is no longer here.
 
     These four numbers are why `co_reg_alt_label_internal_assay_id` and
     `co_reg_alt_label_pop` exist. They appeared only as prose in a report until
     2026-08-17; this is the assertion that makes them re-derivable, and it fails
     if the population definition drifts.
 
-    408 of the 428 conflicts are ONE pattern and it is the spec's own flagship
-    vocabulary defect: DNA samples proposed 24 DNA Extraction through
-    `Type: Illumina Library` (purity 0.707, 212 of 250 compat flags), whose
-    winner is 64 Short Read Sequencing at 0.797 over 5,437 while 173 cDNA
-    Synthesis -- which the sample already holds -- never co-registers with 24
-    over 420 samples. The counter-evidence points at rows the spec identified as
-    wrong by a completely different route, which is the strongest evidence
-    available that it is measuring something real.
+    THE FLAGSHIP DEFECT THESE COLUMNS FOUND HAS SINCE BEEN FIXED, and that is
+    what this revision records. The 2026-08-17 reading was 7,831 / 5,839 / 625 /
+    428, and 408 of those 428 routine-band conflicts were ONE pattern: DNA
+    samples proposed 24 DNA Extraction through `Type: Illumina Library` (purity
+    0.707), whose winner is 64 Short Read Sequencing at 0.797 over 5,437 while
+    173 cDNA Synthesis -- which the sample already holds -- never co-registers
+    with 24 over 420 samples.
+
+    On 2026-08-20 the operator RETIRED `Type: illumina library`, on exactly that
+    evidence plus the measurement that its carriers span six assays. So the
+    counter-evidence machinery did its job and the mapping it indicted is gone:
+
+        conflicts_at_band_routine   428 -> 20   (the 408 pattern, eliminated)
+        self_consistent_alt_labels  5,214 -> 992
+
+    The alt-label bucket collapsed for the same reason, one term over: its
+    largest entry was 1,755 D.IMG rows proposing 138 CometChip Assay as an
+    alternative label for 37 Device Imaging, raised through `DataType: tif` and
+    `png`, both retired the same day. The largest bucket is now 604.
+
+    THE TWO `table` ASSERTIONS AT THE END ARE THE CROSS-CHECK and they are
+    deliberately left at their original values. `co_registration` reads
+    MEMBERSHIP, not claims, so no vocabulary ruling may move it -- if either
+    changes, the retirement escaped its lane and these figures are measuring
+    something other than what the docstring says.
     """
     membership = pd.read_parquet(EXTRACT / "membership.parquet")
     assays = pd.read_parquet(EXTRACT / "assays.parquet")
@@ -1063,23 +1080,32 @@ def test_the_census_reproduces_the_figures_that_justified_the_two_columns():
         gated, table, A.registered_internal(membership, assays),
         G.sample_type_sets(nodes))
 
-    assert counts["rows"] == 7_831
-    assert counts["rows_with_counter_evidence"] == 5_839
-    assert counts["conflicts_any_band"] == 625
-    assert counts["conflicts_at_band_routine"] == 428
-    assert counts["self_consistent_alt_labels"] == 5_214
+    assert counts["rows"] == 2_827
+    assert counts["rows_with_counter_evidence"] == 1_209
+    assert counts["conflicts_any_band"] == 217
+    assert counts["conflicts_at_band_routine"] == 20
+    assert counts["self_consistent_alt_labels"] == 992
 
     # the two conflict senses are DIFFERENT numbers, which is why they are two
     # keys; a write-up quoted one for the other before they were named apart
     assert counts["conflicts_any_band"] != counts["conflicts_at_band_routine"]
 
-    # 408 of the 428 are the Illumina-Library mapping the spec already flags
-    assert conflicts[0] == (408, ("DNA", 24, 64, 173))
-    assert table[("DNA", 64, 24)] == pytest.approx((0.797, 5437), abs=1e-3)
-    assert table[("DNA", 173, 24)] == (0.0, 420)
-    assert sum(n for n, _ in conflicts[:2]) == 428, (
-        "the top two patterns account for every conflict")
+    # the Illumina-Library pattern is GONE, not merely smaller. Asserted by
+    # ABSENCE over every pattern rather than by the top one alone, so a
+    # reordering cannot hide it.
+    assert not any(key[:2] == ("DNA", 24) for _, key in conflicts), (
+        "the retired Illumina-Library mapping is still raising conflicts")
+    # what remains is a single pattern accounting for all 20
+    assert len(conflicts) == 1
+    assert conflicts[0] == (20, ("RNA", 61, 137, 99))
 
     # and the largest self-consistent bucket names what the proposal duplicates
-    assert alt_labels[0] == (1_755, ("D.IMG", 138, 37))
+    assert alt_labels[0] == (604, ("D.IMG", 145, 69))
+    assert not any(key == ("D.IMG", 138, 37) for _, key in alt_labels), (
+        "the retired tif/png mapping is still proposing CometChip as an "
+        "alternative label for Device Imaging")
+
+    # MEMBERSHIP FACTS -- unchanged by any vocabulary ruling, by construction
+    assert table[("DNA", 64, 24)] == pytest.approx((0.797, 5437), abs=1e-3)
+    assert table[("DNA", 173, 24)] == (0.0, 420)
     assert table[("D.IMG", 37, 138)] == (0.0, 8179)

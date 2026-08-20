@@ -23,10 +23,18 @@ order of five `if` branches a later edit could reorder without failing anything:
     5. MODE 3    emits nothing; no detector exists
 
 Three of the four adjacent swaps in that list change a measured number, which is
-what makes it a contract rather than a comment. Measured 2026-08-17 over the
-180,995 input keys: GATE with MODE 1 moves 746 keys, MODE 1 with LINEAGE 753,
-LINEAGE with COMPAT 903. The fourth moves none, because `PRE_MODE_3` claims no
+what makes it a contract rather than a comment. Re-measured 2026-08-20 over the
+175,339 input keys: GATE with MODE 1 moves 746 keys, MODE 1 with LINEAGE 749,
+LINEAGE with COMPAT 761. The fourth moves none, because `PRE_MODE_3` claims no
 key under any evidence at all -- which is a finding and not an oversight.
+
+The 2026-08-17 reading of that sentence was 180,995 / 746 / 753 / 903, against a
+vocabulary with no curator rows. The operator then retired `DataType: tif`,
+`DataType: png`, `Type: illumina library` and the `Software: flowjo` family, and
+every figure here was re-derived rather than adjusted. The FIRST swap is
+unchanged at 746 -- it counts keys the gate refuses, and a retired term raises no
+key for the gate to refuse -- which is the cross-check that the retirement moved
+what it should and nothing else.
 
 MODE 3 EMITS ZERO ROWS AND THAT IS MEASURED, NOT ASSUMED. Increment 1 reported
 866 contradictions. Under this precedence not one survives: 43 are gate rejects,
