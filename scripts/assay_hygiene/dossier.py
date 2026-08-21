@@ -45,6 +45,7 @@ verdict logic and writes to no database.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -60,6 +61,97 @@ MAX_RELATIVES = 4
 MAX_META_FIELDS = 12
 MAX_META_CHARS = 140
 DOSSIER_NAME = "mode2-dossiers.json"
+
+
+SIBLING_OVERLAP = 0.6
+MAX_SIBLINGS = 6
+MAX_TYPE_ASSAYS = 8
+
+
+def _title_tokens(title: str) -> set:
+    """Words that distinguish one assay title from another.
+
+    `assay` and `analysis` are dropped: they are the two words that appear
+    across the whole vocabulary and would make everything look alike, and
+    `analysis` in particular is the exact distinction a sibling list exists to
+    SURFACE rather than to collapse.
+    """
+    return set(re.findall(r"[a-z]+", title.lower())) - {
+        "assay", "analysis", "the", "of", "and", "a", "for", "in"}
+
+
+def sibling_assays(assays: pd.DataFrame) -> dict[int, list[dict]]:
+    """internal id -> the assays whose NAME is close enough to be confusable.
+
+    62 of the 137 internal assays sit in such a pair on the 2026-08-20 extract.
+    A reader handed one title and asked "does this belong" cannot answer well
+    without knowing that `MALDI Mass Spectrometry Imaging`, `High Resolution
+    Mass Spectrometry (HRMS)` and `Mass Spectrometry Analysis` all exist beside
+    `Mass Spectrometry` -- the question is usually WHICH of them, not whether.
+    """
+    titles = {int(i): str(t) for i, t in
+              zip(assays.internal_assay_id, assays.internal_assay_title)
+              if pd.notna(i) and pd.notna(t)}
+    toks = {i: _title_tokens(t) for i, t in titles.items()}
+    out: dict[int, list[dict]] = defaultdict(list)
+    for i, a_t in toks.items():
+        if not a_t:
+            continue
+        for j, b_t in toks.items():
+            if i == j or not b_t:
+                continue
+            if len(a_t & b_t) / min(len(a_t), len(b_t)) >= SIBLING_OVERLAP:
+                out[i].append({"internal_id": j, "title": titles[j]})
+    return {k: v[:MAX_SIBLINGS] for k, v in out.items()}
+
+
+def type_assay_counts(membership, assays, nodes) -> dict:
+    """(sample_type, internal assay id) -> how many samples the house registers.
+
+    THIS IS THE HOUSE CONVENTION, AS DATA. The agents' one consistent weakness
+    in calibration was not knowing it: they approved NHP into Tissue Collection
+    on sound biology, where the house puts NHP in Patient Visit 616 times and in
+    Tissue Collection 54. Nobody has to write that rule down -- the memberships
+    already state it, and stating it as a COUNT rather than a rule keeps "rare"
+    distinguishable from "never".
+    """
+    idx = assays.dropna(subset=["internal_assay_id"]).set_index("assay_id")
+    j = membership.join(idx[["internal_assay_id"]], on="assay_id").dropna(
+        subset=["internal_assay_id"])
+    types = dict(zip(nodes.sample_id, nodes.type))
+    j = j.assign(type=j.sample_id.map(types)).dropna(subset=["type"])
+    pair = j.groupby(["type", "internal_assay_id"]).sample_id.nunique()
+    by_type: dict[str, list] = defaultdict(list)
+    titles = {int(i): str(t) for i, t in
+              zip(assays.internal_assay_id, assays.internal_assay_title)
+              if pd.notna(i) and pd.notna(t)}
+    for (t, aid), n in pair.items():
+        by_type[str(t)].append((titles.get(int(aid), str(int(aid))), int(aid),
+                                int(n)))
+    for t in by_type:
+        by_type[t].sort(key=lambda x: -x[2])
+    return {"pair": {(str(t), int(a)): int(n) for (t, a), n in pair.items()},
+            "by_type": dict(by_type)}
+
+
+def seek_records(assays: pd.DataFrame, internal_id, project_ids) -> list[dict]:
+    """The PROJECT-SCOPED seek records for an internal assay.
+
+    The internal title is a harmonisation key and loses what the project calls
+    the thing. On the 2026-08-20 extract internal 130 `Mass Spectrometry` is
+    instantiated in project 9 as `Mass Spectrometry PROTEOMICS` -- so a proposal
+    to add a MALDI metabolomics image to "Mass Spectrometry" is really a
+    proposal to file it under proteomics, which is obvious in the seek title and
+    invisible in the internal one. An agent approved exactly that in
+    calibration.
+    """
+    if internal_id is None:
+        return []
+    hit = assays[(assays.internal_assay_id == internal_id)
+                 & (assays.project_id.isin(project_ids))]
+    return [{"assay_id": int(r.assay_id), "title": str(r.title),
+             "project_id": int(r.project_id)}
+            for r in hit.itertuples(index=False)][:MAX_SIBLINGS]
 
 
 def _regs(sample_id, context) -> list[str]:
@@ -103,7 +195,8 @@ def _meta(sample_id, context) -> dict:
     return live
 
 
-def build_dossiers(findings: pd.DataFrame, context: dict) -> list[dict]:
+def build_dossiers(findings: pd.DataFrame, context: dict,
+                   assays=None, membership=None, nodes=None) -> list[dict]:
     """One dossier per Mode 2 cohort, over the WHOLE population.
 
     No floor. The floor was the thing that made 157,839 rows unreviewable, and
@@ -122,6 +215,11 @@ def build_dossiers(findings: pd.DataFrame, context: dict) -> list[dict]:
     children_of = M2._children_index(context)
     parents_of = context["parents_of"]
     sid_of = {uuid: sid for sid, uuid in context["uuid_of"].items()}
+    sibs = sibling_assays(assays) if assays is not None else {}
+    conv = (type_assay_counts(membership, assays, nodes)
+            if assays is not None and membership is not None else
+            {"pair": {}, "by_type": {}})
+    projects_of = dict(zip(m2.sample_id, m2.project_ids.astype(str)))
 
     out = []
     for key, rows in m2.groupby(list(R.BLOCK_KEY), dropna=False, sort=False):
@@ -166,6 +264,21 @@ def build_dossiers(findings: pd.DataFrame, context: dict) -> list[dict]:
                              for c in sorted(children_of.get(sid, ()))
                              [:MAX_RELATIVES]],
             })
+        # --- the three derived aids, per cohort -------------------------
+        iaid = (int(first.proposed_internal_assay_id)
+                if pd.notna(first.proposed_internal_assay_id) else None)
+        sample_type = str(key[1])
+        projs = set()
+        for r in rows.head(MAX_EXAMPLES).itertuples(index=False):
+            for tok in str(projects_of.get(r.sample_id, "")).replace(
+                    ";", ",").split(","):
+                if tok.strip().isdigit():
+                    projs.add(int(tok))
+        already = conv["pair"].get((sample_type, iaid), 0)
+        usual = [{"assay": t, "internal_id": a, "samples": n}
+                 for t, a, n in conv["by_type"].get(sample_type, ())
+                 ][:MAX_TYPE_ASSAYS]
+
         n_both = first.precedent_n_both
         n_missing = (first.precedent_n_child_only
                      if action == "ADD_PARENT_TO_ASSAY"
@@ -189,6 +302,45 @@ def build_dossiers(findings: pd.DataFrame, context: dict) -> list[dict]:
                 if action == "ADD_PARENT_TO_ASSAY" else
                 "ADD_CHILD: a PARENT of this sample is registered in the "
                 "assay; the proposal is to register THIS sample too."),
+            "proposed_assay_detail": {
+                "internal_id": iaid,
+                "internal_title": str(key[3]),
+                "what_the_project_actually_calls_it": seek_records(
+                    assays, iaid, projs) if assays is not None else [],
+                "confusable_sibling_assays": sibs.get(iaid, []),
+                # 48 cohorts over 2,906 rows have NO seek record in the
+                # sample's own project. A membership row is written against a
+                # seek id, so those cannot be written whatever anyone rules --
+                # said in words here rather than left as an empty list, which
+                # reads as "not looked up".
+                # THREE STATES, NEVER TWO. `project_ids` is null on some
+                # findings rows -- the sample is absent from samples.parquet, as
+                # the 448 `rows_without_a_samples_row` in the detect census --
+                # and an empty project set finds no seek record, which the first
+                # cut reported as NOT WRITABLE. That is an absence rendered as a
+                # verdict, and two round-3 agents rejected real cohorts on it.
+                # "I cannot tell" is its own answer here as everywhere else.
+                "IS_WRITABLE_IN_THIS_PROJECT": (
+                    None if assays is None or not projs
+                    else bool(seek_records(assays, iaid, projs))),
+                "writability_note": (
+                    "UNKNOWN -- no project recorded for these samples, so "
+                    "writability could not be checked. Do NOT treat this as "
+                    "unwritable." if not projs else
+                    "checked against the seek records in the sample's own "
+                    "project(s)"),
+                "note": ("the internal title is a harmonisation key. The seek "
+                         "record is what the project calls it and is the thing "
+                         "a membership row is written against."),
+            },
+            "house_convention": {
+                "samples_of_this_type_already_in_this_assay": already,
+                "assays_this_sample_type_usually_holds": usual,
+                "note": ("what the house ALREADY does, as counts. A type that "
+                         "appears in an assay 54 times and in a sibling 616 "
+                         "times is not forbidden there -- it is unusual, and "
+                         "the sibling is the house's answer."),
+            },
             "n_rows": int(len(rows)),
             "n_samples": int(rows.sample_id.nunique()),
             "precedent": {
@@ -214,7 +366,10 @@ def main(artifacts="assay-hygiene", extract=None) -> int:
     e = Path(extract) if extract else a / "extract"
     findings = pd.read_csv(a / "findings.csv", low_memory=False)
     context = R.load_context(e)
-    dossiers = build_dossiers(findings, context)
+    assays = pd.read_parquet(e / "assays.parquet")
+    membership = pd.read_parquet(e / "membership.parquet")
+    nodes = pd.read_parquet(e / "nodes.parquet")
+    dossiers = build_dossiers(findings, context, assays, membership, nodes)
     (a / DOSSIER_NAME).write_text(json.dumps(dossiers, indent=1))
     rows = sum(d["n_rows"] for d in dossiers)
     print(f"wrote {a / DOSSIER_NAME}")
