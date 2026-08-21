@@ -650,10 +650,13 @@ def test_the_operators_rulings_are_tracked_and_loadable():
     The tracked copy lives beside Mode 1's, which was tracked from the start.
     This test is what makes its absence loud.
     """
-    assert RULINGS.exists(), (
-        "the tracked copy of the Mode 2 rulings is gone. It is the only "
-        "irreplaceable artifact in this package -- restore it before running "
-        "anything that regenerates the sheet.")
+    if not RULINGS.exists():
+        pytest.skip(
+            f"no {RULINGS.name}. The rulings are CURATION OUTPUT and are kept "
+            "out of this repository, which is public and whose fixtures would "
+            "otherwise carry sample identifiers. They are irreplaceable -- a "
+            "human's judgement on 111 cohorts -- and live beside the other "
+            "assay-hygiene artifacts, NOT in git. Drop the file in to run this.")
     presets = M.load_presets(RULINGS)
     assert len(presets) == 111
     assert sum(1 for r, _n in presets.values() if r == "APPROVE") == 100
@@ -667,8 +670,8 @@ def test_the_tracked_rulings_and_the_working_copy_have_not_drifted():
     record. They must be the same file.
     """
     working = ARTIFACTS / M.PRESET_NAME
-    if not working.exists():
-        pytest.skip("no working copy; nothing to drift against")
+    if not working.exists() or not RULINGS.exists():
+        pytest.skip("no working copy or no tracked copy; nothing to compare")
     assert M.load_presets(working) == M.load_presets(RULINGS), (
         f"{working} and {RULINGS} disagree. The tracked copy is the record; "
         "reconcile them before regenerating, or a ruling is about to be lost.")

@@ -978,6 +978,12 @@ def test_the_real_extract_round_trips_the_operators_seventeen_rulings():
     if not (EXTRACT / "samples.parquet").exists() or \
             not (ARTIFACTS / "findings.csv").exists():
         pytest.skip("no extract or findings; run run_detect.py first")
+    if not RULINGS.exists():
+        pytest.skip(
+            f"no {RULINGS.name}. The rulings are CURATION OUTPUT and are kept "
+            "out of this repository, which is public and whose fixtures would "
+            "otherwise carry sample identifiers. They live beside the other "
+            "assay-hygiene artifacts; drop the file in to run this test.")
     findings = pd.read_csv(ARTIFACTS / "findings.csv", low_memory=False)
     context = R.load_context(EXTRACT)
     blocks = R.build_blocks(findings, context)
