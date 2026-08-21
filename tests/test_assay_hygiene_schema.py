@@ -851,7 +851,7 @@ def test_every_stage_c_family_is_closed():
     # The class vocabulary is the one the spec names as closed, so it is pinned
     # literally as well: closure against a tuple that itself grew is vacuous.
     assert S.CLASSES == (S.CLS_ABSENCE_LINEAGE, S.CLS_ABSENCE_COMPAT,
-                         S.CLS_ALT_LABEL, S.CLS_UNRESOLVED)
+                         S.CLS_ALT_LABEL, S.CLS_UNRESOLVED, S.CLS_UNREACHABLE)
     # Rejections are a SUBSET of the outcomes, in the same shape
     # EVIDENCE_PROVENANCES takes to PROVENANCES: precedence rule 1 ("a rejected
     # claim reaches no mode, ever") is then a membership test rather than three

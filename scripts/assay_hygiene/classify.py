@@ -12,21 +12,24 @@ and one csv, and it writes exactly two csv files under `out_dir` --
 database is touched, no workbook is produced, and there is no APPROVE column.
 
 THE PRECEDENCE IS THE CONTRACT, and it is the tuple `PRECEDENCE` rather than the
-order of five `if` branches a later edit could reorder without failing anything:
+order of six `if` branches a later edit could reorder without failing anything:
 
-    1. GATE      a rejected claim reaches no mode, ever
-    2. MODE 1    registered in nothing (the ANY-membership definition)
-    3. LINEAGE   a neighbour carries it -> Mode 2
-    4. COMPAT    routinely coexists -> Mode 2 candidate, unproven
-                 never coexists     -> CLS_ALT_LABEL, no action
-                 otherwise          -> CLS_UNRESOLVED
-    5. MODE 3    emits nothing; no detector exists
+    1. GATE        a rejected claim reaches no mode, ever
+    2. MODE 1      registered in nothing (the ANY-membership definition)
+    3. LINEAGE     a neighbour carries it AND the pair is reachable -> Mode 2
+    4. UNREACHABLE a neighbour carries it and NO sample of this type is
+                   registered in this assay anywhere -> Mode 2, GATE_UNREACHABLE
+    5. COMPAT      routinely coexists -> Mode 2 candidate, unproven
+                   never coexists     -> CLS_ALT_LABEL, no action
+                   otherwise          -> CLS_UNRESOLVED
+    6. MODE 3      emits nothing; no detector exists
 
-Three of the four adjacent swaps in that list change a measured number, which is
-what makes it a contract rather than a comment. Re-measured 2026-08-20 over the
+Three of the five adjacent swaps in that list change a measured number, which is
+what makes it a contract rather than a comment. Re-measured 2026-08-21 over the
 175,339 input keys: GATE with MODE 1 moves 746 keys, MODE 1 with LINEAGE 749,
-LINEAGE with COMPAT 761. The fourth moves none, because `PRE_MODE_3` claims no
-key under any evidence at all -- which is a finding and not an oversight.
+LINEAGE with UNREACHABLE 67,898, UNREACHABLE with COMPAT 0. The fifth moves none
+either, because `PRE_MODE_3` claims no key under any evidence at all -- which is
+a finding and not an oversight.
 
 The 2026-08-17 reading of that sentence was 180,995 / 746 / 753 / 903, against a
 vocabulary with no curator rows. The operator then retired `DataType: tif`,
@@ -34,7 +37,23 @@ vocabulary with no curator rows. The operator then retired `DataType: tif`,
 every figure here was re-derived rather than adjusted. The FIRST swap is
 unchanged at 746 -- it counts keys the gate refuses, and a retired term raises no
 key for the gate to refuse -- which is the cross-check that the retirement moved
-what it should and nothing else.
+what it should and nothing else. That reading had no UNREACHABLE step at all;
+its third figure, 903, is the LINEAGE-with-COMPAT swap this list no longer has,
+and the 761 it later became is likewise gone rather than restated.
+
+STEP 4 IS NEW ON 2026-08-21 AND IT IS NOT A NEW POPULATION. Step 3 used to claim
+every lineage key without asking the question `gate.type_registration_index`
+exists to answer -- so 99,449 of the 167,454 emitted MODE_2 rows proposed a
+(type, assay) pair the house has never once made, while a metadata CLAIM on the
+same pair was refused. Those rows are still emitted and `rows` did not move:
+they now carry `GATE_UNREACHABLE` and `CLS_UNREACHABLE` and are counted as
+`keys_unreachable`, so a curator can see and override them.
+
+THE FOURTH SWAP'S ZERO IS THE DESIGN ARGUMENT FOR WHERE STEP 4 SITS, not a gap.
+It could only move a key whose claim PASSED the gate on a pair the lineage lane
+calls unreachable, and `gate.gate_claims` BLOCKS a claim on `registrations == 0`
+outright, so `PRE_GATE` takes such a key three steps earlier. Step 4 therefore
+sees only lineage-only keys and can test `e.lineage` alone.
 
 MODE 3 EMITS ZERO ROWS AND THAT IS MEASURED, NOT ASSUMED. Increment 1 reported
 866 contradictions. Under this precedence not one survives: 43 are gate rejects,
@@ -683,7 +702,7 @@ def _registered_columns(
 
 # --- the precedence ----------------------------------------------------------
 #
-# THE CONTRACT, AS DATA. Five steps in one tuple, each with one test, walked in
+# THE CONTRACT, AS DATA. Six steps in one tuple, each with one test, walked in
 # order. An `if` chain would encode the same order and could be reordered by a
 # later edit with nothing failing, which is the exact hazard the brief for this
 # task names; a declared tuple is something a test can permute and re-run.
@@ -695,23 +714,46 @@ def _registered_columns(
 # each key and exactly one row is emitted for it -- or none, where the step that
 # claimed it emits nothing.
 #
-# MEASURED 2026-08-17, EACH ADJACENT SWAP, over the 180,995 input keys:
+# MEASURED 2026-08-21 ON THE SAME EXTRACT, EACH ADJACENT SWAP, over the 175,339
+# input keys. The four-swap table this comment carried before that date was
+# measured over "180,995 input keys", a population no test on this branch has
+# reproduced since; these five were re-derived by permuting `PRECEDENCE` over
+# the real extract and are the values
+# `test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness`
+# asserts.
 #
-#     GATE    <-> MODE 1        746 keys change step
-#     MODE 1  <-> LINEAGE       753
-#     LINEAGE <-> COMPAT        903
-#     COMPAT  <-> MODE 3          0
+#     GATE        <-> MODE 1          746 keys change step
+#     MODE 1      <-> LINEAGE         749
+#     LINEAGE     <-> UNREACHABLE  67,898
+#     UNREACHABLE <-> COMPAT            0
+#     COMPAT      <-> MODE 3            0
 #
 # The last is zero because `PRE_MODE_3` claims no key under ANY evidence, which
 # `test_the_precedence_is_a_declared_order_and_three_of_its_four_swaps_move_a_key`
-# proves exhaustively over all sixteen evidence tuples rather than over one
-# world. That is the finding this increment exists to report.
+# proves exhaustively over all thirty-two evidence tuples rather than over one
+# world. That is the finding increment 2 exists to report.
+#
+# THE THIRD SWAP IS THE SIZE OF THIS REWORK. Putting `PRE_UNREACHABLE` before
+# `PRE_LINEAGE` moves 67,898 keys -- every REACHABLE lineage key -- because its
+# test is `e.lineage` alone and relies on `PRE_LINEAGE` having taken them
+# already. That is the cascade rule working as designed and is why neither test
+# restates the other's condition.
+#
+# THE FOURTH IS ZERO STRUCTURALLY AND THAT IS WHY STEP 4 SITS HERE. It could
+# only move a key whose claim PASSED the gate on a pair this step calls
+# unreachable, and `gate.gate_claims` blocks a claim on `registrations == 0`
+# outright, so `PRE_GATE` claims such a key three steps earlier. The real
+# extract test asserts the combination is absent directly rather than inferring
+# it from this zero.
 PRE_GATE = "PRE_GATE"          # a rejected claim reaches no mode, ever
 PRE_MODE_1 = "PRE_MODE_1"      # the sample is registered in NOTHING
 PRE_LINEAGE = "PRE_LINEAGE"    # a lineage neighbour carries the assay
+PRE_UNREACHABLE = "PRE_UNREACHABLE"   # a neighbour carries it, but no sample of
+                                      # this type ever has
 PRE_COMPAT = "PRE_COMPAT"      # neither, so the co-registration test rules
 PRE_MODE_3 = "PRE_MODE_3"      # the residue, and there is none
-PRECEDENCE = (PRE_GATE, PRE_MODE_1, PRE_LINEAGE, PRE_COMPAT, PRE_MODE_3)
+PRECEDENCE = (PRE_GATE, PRE_MODE_1, PRE_LINEAGE, PRE_UNREACHABLE, PRE_COMPAT,
+              PRE_MODE_3)
 
 # The steps that claim a key and emit NO row, DECLARED rather than implied.
 #
@@ -738,15 +780,21 @@ NON_EMITTING_STEPS = (PRE_GATE,)
 class Evidence(NamedTuple):
     """What is known about ONE absence key, and nothing else.
 
-    FOUR BOOLEANS AND NOT THE ROW THEY CAME FROM, deliberately. The precedence
+    FIVE BOOLEANS AND NOT THE ROW THEY CAME FROM, deliberately. The precedence
     is a statement about which EVIDENCE outranks which, and handing it a frame
     row would let a later edit reach past the evidence into the claim's tier,
     its vocabulary support or its co-registration rate -- every one of which is
     a tuned number, and none of which may decide whether a proposal is made.
-    With four booleans there is nothing in scope to gate on.
+    With five booleans there is nothing in scope to gate on.
 
-    A NAMEDTUPLE AND NOT A 4-TUPLE, for the reason `compatibility.CoRegistration`
-    and `mode2.Rule` give: all four fields are `bool` and any two of them
+    `reachable` IS A BOOLEAN AND NOT THE CELL COUNT, on that same rule. The
+    reachability evidence is a distinct-sample count and a threshold on it would
+    be a tuned number; the only question the precedence may ask is the one
+    `gate.gate_claims` already asks of a claim -- has the house EVER made this
+    (type, assay) registration -- so only the answer crosses this boundary.
+
+    A NAMEDTUPLE AND NOT A 5-TUPLE, for the reason `compatibility.CoRegistration`
+    and `mode2.Rule` give: all five fields are `bool` and any two of them
     transpose silently. `claim` and `claim_reaches` are one word apart and mean
     "a claim names this pair" against "...and the gate did not reject it", which
     is the distinction the whole first step is about.
@@ -760,6 +808,9 @@ class Evidence(NamedTuple):
     claim_reaches: bool     # ...and `gate.reaches_modes` is true for it
     unregistered: bool      # the sample is registered in NO assay at all
     lineage: bool           # a lineage neighbour registers this assay
+    reachable: bool         # a sample of this TYPE is registered in this assay
+                            # SOMEWHERE -- or no type could be resolved, which is
+                            # not the same as a measured zero and does not block
 
 
 # ONE TEST PER STEP, and the dict is what makes the tuple above load-bearing:
@@ -767,12 +818,14 @@ class Evidence(NamedTuple):
 # the tuple permutes the contract and nothing else has to change.
 #
 # READ THEM AS A CASCADE. Every test after the first assumes the earlier ones
-# declined, which is why `PRE_MODE_1` does not re-check `claim_reaches` and
-# `PRE_COMPAT` does not re-check `lineage`. That is not an oversight to tidy up:
-# a test that restates its predecessor's condition makes the ORDER unobservable,
-# and an order no test can distinguish from its reverse is a comment. Measured,
+# declined, which is why `PRE_MODE_1` does not re-check `claim_reaches`,
+# `PRE_UNREACHABLE` does not re-check `not e.reachable`, and `PRE_COMPAT` does
+# not re-check `lineage`. That is not an oversight to tidy up: a test that
+# restates its predecessor's condition makes the ORDER unobservable, and an
+# order no test can distinguish from its reverse is a comment. Measured,
 # re-checking `claim_reaches` in `PRE_MODE_1` alone would make the first swap
-# move 0 keys instead of 746.
+# move 0 keys instead of 746, and adding `not e.reachable` to `PRE_UNREACHABLE`
+# would make the LINEAGE <-> UNREACHABLE swap move 0 instead of the count below.
 _PRECEDENCE_TESTS = {
     # 1. the vocabulary gate. A rejected claim is not evidence, and the key it
     #    named is refused OUTRIGHT rather than falling through to the neighbour
@@ -786,13 +839,21 @@ _PRECEDENCE_TESTS = {
     # 2. Mode 1. Registered in nothing, so there is no registration to reason
     #    from and metadata is the only evidence there is.
     PRE_MODE_1: lambda e: e.claim and e.unregistered,
-    # 3. lineage. A neighbour holds it, which settles the absence without any
-    #    claim at all -- 166,427 of these keys carry none.
-    PRE_LINEAGE: lambda e: e.lineage,
-    # 4. co-registration. A claim on a registered sample with no neighbour: the
+    # 3. lineage. A neighbour holds it AND the house has made this (type, assay)
+    #    registration before. The second half is new: `gate.
+    #    type_registration_index` calls a pair absent from it "INCREDIBLE
+    #    whatever the term's support" and BLOCKS a claim on it, and until
+    #    2026-08-21 this lane never met that rule.
+    PRE_LINEAGE: lambda e: e.lineage and e.reachable,
+    # 4. a neighbour holds it and NO sample of this type ever has. Its own step
+    #    and its own lane: the row is still emitted, carrying GATE_UNREACHABLE,
+    #    so a curator can override it. Dropping it here would delete 99,449
+    #    proposals with nothing in any artifact saying they existed.
+    PRE_UNREACHABLE: lambda e: e.lineage,
+    # 5. co-registration. A claim on a registered sample with no neighbour: the
     #    only test left asks whether this TYPE routinely holds both assays.
     PRE_COMPAT: lambda e: e.claim,
-    # 5. Mode 3, which claims nothing. NOT `True` with an empty emitter: a step
+    # 6. Mode 3, which claims nothing. NOT `True` with an empty emitter: a step
     #    that swallowed the residue would make every later reader's "Mode 3
     #    found nothing" mean "Mode 3 was handed nothing", and undetected is a
     #    different and worse finding than small.
@@ -829,12 +890,37 @@ def precedence_step(evidence: Evidence, order=PRECEDENCE) -> str:
         "a key assembled by hand out of an absence of evidence.")
 
 
+def _reachable(sample_id, assay_id, type_reg, types, uuid_of) -> bool:
+    """Is a sample of this TYPE registered in this assay anywhere?
+
+    THREE STATES COLLAPSED TO TWO, AND THE DIRECTION IS DELIBERATE. A missing
+    (type, assay) CELL is a measured zero -- `type_registration_index` holds a
+    cell for every pair that occurs. A missing TYPE is not measured at all, and
+    that answer is True: the gate refuses to assert what was not established,
+    which is the same direction `audit.audit_contradictions` refuses a
+    contradiction it cannot resolve.
+
+    THE SAME DERIVATION `mode2.mode2_findings` RUNS FOR `type_registrations`,
+    over the same two indexes, which is why both are handed the caller's own
+    objects rather than building their own: the precedence deciding a key is
+    unreachable while the row it emits reads a positive cell would be one world
+    described twice.
+    """
+    stype = types.get(uuid_of.get(sample_id))
+    if stype is None:
+        return True
+    return type_reg.get((stype, assay_id), 0) > 0
+
+
 def absence_keys(
     attached: pd.DataFrame,
     *,
     population,
     registered: dict[int, set[int]],
     candidates,
+    type_reg: dict[tuple[str, int], int],
+    types: dict[str, str],
+    uuid_of: dict[int, str],
 ) -> dict[tuple[int, int], Evidence]:
     """THE INPUT. Every (sample, proposed assay) absence, with its evidence.
 
@@ -868,6 +954,20 @@ def absence_keys(
     reason `mode1_findings` takes its population: a second opinion here about
     which samples are registered, or about which pairs a neighbour offers, would
     put the precedence and the lanes on two different worlds.
+
+    `type_reg`, `types` and `uuid_of` ARE PASSED IN ON THAT SAME RULE, and it
+    binds harder here than anywhere else in the function. They are the three
+    objects `gate.gate_claims` and `mode2.mode2_findings` already hold --
+    `gate.type_registration_index`, `gate.sample_type_index` and
+    `lineage.lineage_index`'s uuid map -- and `_reachable` reads them to decide
+    whether a lineage key is claimed by `PRE_LINEAGE` or by `PRE_UNREACHABLE`.
+    A second opinion here about which pairs are reachable would put the
+    PRECEDENCE and the GATE on two different worlds: a key the precedence sent
+    down the ordinary lineage lane while the gate would have blocked the same
+    pair as a claim is exactly the disagreement this step exists to end. Note
+    `types` is keyed on UUID and not on `sample_id` -- see `gate.sample_type_index`,
+    where 86 sample_ids carry two node rows and 51 of those disagree on type --
+    so `uuid_of` is the third argument rather than a convenience.
     """
     pop = {int(s) for s in population}
     out: dict[tuple[int, int], Evidence] = {}
@@ -879,7 +979,8 @@ def absence_keys(
             continue                      # an absence of nothing
         out[(sample_id, assay_id)] = Evidence(
             claim=True, claim_reaches=bool(reaches),
-            unregistered=sample_id in pop, lineage=False)
+            unregistered=sample_id in pop, lineage=False,
+            reachable=_reachable(sample_id, assay_id, type_reg, types, uuid_of))
 
     for pair in candidates:
         sample_id, assay_id = int(pair[0]), int(pair[1])
@@ -887,7 +988,10 @@ def absence_keys(
         out[(sample_id, assay_id)] = Evidence(
             claim=was.claim if was else False,
             claim_reaches=was.claim_reaches if was else False,
-            unregistered=sample_id in pop, lineage=True)
+            unregistered=sample_id in pop, lineage=True,
+            reachable=(was.reachable if was else
+                       _reachable(sample_id, assay_id, type_reg, types,
+                                  uuid_of)))
     return out
 
 
@@ -1250,10 +1354,17 @@ def unify_findings(
     checkable, and `expected` below is derived from it rather than from `lanes`,
     which is how the omission got through in the first place.
 
+    ONE FRAME MAY APPEAR UNDER TWO STEPS, and the lineage frame does: it is
+    handed in at both `PRE_LINEAGE` and `PRE_UNREACHABLE` because one lane
+    generates both populations and the precedence, not the generator, decides
+    which key is which. Each pass keeps only the rows the step below OWNS, so
+    the pair partitions the frame rather than duplicating it -- and the
+    duplicate-pair assertion below is what proves that rather than assuming it.
+
     Emitted in `PRECEDENCE` order and then SORTED on
     `(sample_id, proposed_internal_assay_id)`, a total order on this output. The
-    three lanes each sort themselves and their concatenation does not, so the
-    sort has work to do.
+    lanes each sort themselves and their concatenation does not, so the sort has
+    work to do.
     """
     unknown = sorted(set(lanes) - set(PRECEDENCE))
     if unknown:
@@ -1316,10 +1427,20 @@ def unify_findings(
 # FOUR IDENTITIES HOLD OVER THEM and a test asserts all four:
 #
 #     input_keys  = keys_refused_by_the_gate + keys_mode_1 + keys_lineage
-#                   + keys_compat + keys_mode_3
+#                   + keys_unreachable + keys_compat + keys_mode_3
 #     rows        = input_keys - the keys claimed by NON_EMITTING_STEPS
 #     rows        = rows_mode_1 + rows_mode_2 + rows_mode_3 + rows_no_mode
-#     rows        = the four rows_cls_* + rows_without_a_classification
+#     rows        = the five rows_cls_* + rows_without_a_classification
+#
+# `keys_unreachable` AND `rows_cls_unreachable` ARE NOT A NEW POPULATION. They
+# are a cut through the one `keys_lineage` used to hold whole: the lineage lane
+# offers a pair no sample of the type is registered in anywhere, which
+# `gate.type_registration_index` calls incredible and `gate.gate_claims` already
+# blocks a CLAIM on. Before 2026-08-21 nothing tested it here, so
+# `keys_unreachable + keys_lineage` equals the old `keys_lineage` exactly, and
+# the rows are RECLASSIFIED rather than removed -- `rows` does not move.
+# `PRE_UNREACHABLE` is deliberately NOT in `NON_EMITTING_STEPS`: it has a lane
+# and it emits, so the second identity keeps subtracting `PRE_GATE` alone.
 #
 # THE SECOND IDENTITY SUBTRACTS `NON_EMITTING_STEPS` AND NOTHING ELSE, and this
 # comment said "`input_keys - keys_refused_by_the_gate - keys_mode_3`" and "the
@@ -1352,6 +1473,7 @@ FINDINGS_CENSUS_KEYS = (
     "keys_refused_by_the_gate",
     "keys_mode_1",
     "keys_lineage",
+    "keys_unreachable",
     "keys_compat",
     "keys_mode_3",
     "rows",
@@ -1363,6 +1485,7 @@ FINDINGS_CENSUS_KEYS = (
     "rows_cls_absence_compat",
     "rows_cls_alt_label",
     "rows_cls_unresolved",
+    "rows_cls_unreachable",
     "rows_without_a_classification",
     "lineage_ceiling_offered",
     "lineage_refused_by_the_gate",
@@ -1427,6 +1550,7 @@ def findings_census(
         "keys_refused_by_the_gate": counts[PRE_GATE],
         "keys_mode_1": counts[PRE_MODE_1],
         "keys_lineage": counts[PRE_LINEAGE],
+        "keys_unreachable": counts[PRE_UNREACHABLE],
         "keys_compat": counts[PRE_COMPAT],
         "keys_mode_3": counts[PRE_MODE_3],
         "rows": len(findings),
@@ -1438,6 +1562,7 @@ def findings_census(
         "rows_cls_absence_compat": int((cls == S.CLS_ABSENCE_COMPAT).sum()),
         "rows_cls_alt_label": int((cls == S.CLS_ALT_LABEL).sum()),
         "rows_cls_unresolved": int((cls == S.CLS_UNRESOLVED).sum()),
+        "rows_cls_unreachable": int((cls == S.CLS_UNREACHABLE).sum()),
         "rows_without_a_classification": int(cls.isna().sum()),
         "lineage_ceiling_offered": offered,
         "lineage_refused_by_the_gate": refused_gate,
@@ -1675,7 +1800,14 @@ def main(extract_dir: str = "assay-hygiene/extract",
     vocab = V.load_vocabulary(out / "vocabulary.csv")
 
     type_reg = G.type_registration_index(membership, assays, nodes)
-    gated = G.gate_claims(claims, vocab, type_reg, G.sample_type_index(nodes))
+    # ONE type index, BOUND ONCE and handed to all three of `gate_claims`,
+    # `mode2_findings` and `absence_keys`. It was built inline at each of the
+    # first two before 2026-08-21, which was harmless while nothing else read
+    # it; the precedence now decides reachability off the same map the gate
+    # blocks a claim on, and two separately-constructed copies would be two
+    # answers to "what type is this sample" one line apart.
+    types = G.sample_type_index(nodes)
+    gated = G.gate_claims(claims, vocab, type_reg, types)
     attached = attach_gate(claims, gated)
     population = unregistered_samples(samples, membership, assays)
     findings = mode1_findings(attached, population, project_index(samples))
@@ -1706,7 +1838,7 @@ def main(extract_dir: str = "assay-hygiene/extract",
         registered=registered,
         rules=M2.precedent_rules(B.mine_precedent(edges, membership, assays)),
         reg_projects=M2.registration_projects(membership, assays),
-        types=G.sample_type_index(nodes),
+        types=types,
         type_reg=type_reg,
         titles=M2.assay_titles(assays),
         projects=project_index(samples),
@@ -1745,7 +1877,8 @@ def main(extract_dir: str = "assay-hygiene/extract",
     # --- the unified pass ---------------------------------------------------
     candidates = M2.mode2_candidates(children_of, parents_of, registered)
     keys = absence_keys(attached, population=population,
-                        registered=registered, candidates=candidates)
+                        registered=registered, candidates=candidates,
+                        type_reg=type_reg, types=types, uuid_of=uuid_of)
     steps = precedence_steps(keys)
     titles = M2.assay_titles(assays)
     projects = project_index(samples)
@@ -1753,8 +1886,15 @@ def main(extract_dir: str = "assay-hygiene/extract",
         attached, steps=steps, registered=registered,
         table=CP.co_registration(membership, assays, nodes),
         titles=titles, projects=projects)
-    lanes = {PRE_MODE_1: findings, PRE_LINEAGE: m2, PRE_COMPAT: compat,
-             PRE_MODE_3: mode3_findings()}
+    lanes = {
+        PRE_MODE_1: findings,
+        PRE_LINEAGE: m2,
+        PRE_UNREACHABLE: m2,        # the SAME frame; `unify_findings` filters
+                                    # each lane by the step that owns each key,
+                                    # so every row lands in exactly one
+        PRE_COMPAT: compat,
+        PRE_MODE_3: mode3_findings(),
+    }
     unified = unify_findings(steps, lanes)
     agreeing = claims_agreeing_with_a_registration(attached, registered)
     ucensus = findings_census(keys, steps, unified, lanes, agreeing=agreeing)

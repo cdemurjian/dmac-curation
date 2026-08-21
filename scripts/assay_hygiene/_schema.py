@@ -616,11 +616,24 @@ GATE_REJECTIONS = (GATE_UNREACHABLE, GATE_INCOHERENT, GATE_LOW_SUPPORT)
 # that is not an error either. CLS_UNRESOLVED is reported at its own size rather
 # than banded into a mode; silently absorbing what the pipeline cannot classify
 # is how a bucket ends up named for what someone assumed was in it.
+#
+# CLS_UNREACHABLE IS A FIFTH CLASS AND NOT A REFUSAL. `gate.type_registration_index`
+# calls a (type, assay) pair absent from it incredible whatever the term's
+# support, and `gate.gate_claims` already BLOCKS a claim on one -- but a lineage
+# neighbour carries no claim, so until 2026-08-21 nothing put the lineage lane in
+# front of that rule. Measured on the 2026-08-21 artifact tree, 99,449 of the
+# 167,454 emitted MODE_2 rows read `type_registrations == 0`. They are CLASSED
+# here rather than dropped: every one is still emitted, carrying
+# GATE_UNREACHABLE, because a proposal that vanishes reads to a curator exactly
+# like one that was never generated.
 CLS_ABSENCE_LINEAGE = "CLS_ABSENCE_LINEAGE"   # a neighbour already carries it
 CLS_ABSENCE_COMPAT = "CLS_ABSENCE_COMPAT"     # no neighbour, but the pair coexists
 CLS_ALT_LABEL = "CLS_ALT_LABEL"               # the pair never coexists
 CLS_UNRESOLVED = "CLS_UNRESOLVED"             # neither test settles it
-CLASSES = (CLS_ABSENCE_LINEAGE, CLS_ABSENCE_COMPAT, CLS_ALT_LABEL, CLS_UNRESOLVED)
+CLS_UNREACHABLE = "CLS_UNREACHABLE"           # no sample of this type is ever
+                                              # registered in this assay
+CLASSES = (CLS_ABSENCE_LINEAGE, CLS_ABSENCE_COMPAT, CLS_ALT_LABEL,
+           CLS_UNRESOLVED, CLS_UNREACHABLE)
 
 # Which lineage neighbour carries the claimed assay, over DERIVED_FROM. Stated
 # once and binding: precedent is mined over DERIVED_FROM, so a lineage test run

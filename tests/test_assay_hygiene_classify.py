@@ -1834,18 +1834,45 @@ def test_a_gate_rejected_claim_corroborates_nothing_and_the_row_records_it():
 
     That is `GATE_UNREACHABLE`, which BLOCKS: a claim the gate rejected reaches
     no mode, so it cannot promote a Mode 2 row to BY_BOTH either. The row still
-    exists -- its evidence is the parent's registration, which the gate has no
-    opinion about -- and it stays BY_PRECEDENT.
+    exists -- its evidence is the parent's registration -- and it stays
+    BY_PRECEDENT.
 
     The claim is not dropped silently: the census counts it and the summary says
     a rejected claim was found.
+
+    THE `gate` COLUMN CHANGED MEANING ON 2026-08-21 AND THIS ROW IS WHERE IT
+    SHOWS. It used to be null here, with the comment "the gate ruled on the
+    CLAIM, not on this proposal". The lane now runs the reachability rule on its
+    OWN evidence and records the outcome, so the column reads GATE_UNREACHABLE
+    -- and NOT because the claim's outcome was copied onto the row, which is
+    what the assertions below rule out.
     """
     w, bundle, findings = _pipeline2()
 
     row = _row(findings, 290, 14)
     assert row.proposed_by == X.BY_PRECEDENT
-    assert pd.isna(row.gate), "the gate ruled on the CLAIM, not on this proposal"
     assert "rejected" in row.evidence_summary
+
+    # the lane's own reachability outcome, on the lane's own evidence
+    assert row.gate == S.GATE_UNREACHABLE
+    assert row.classification == S.CLS_UNREACHABLE
+    assert row.type_registrations == 0
+    # ...and it did NOT come from the claim. A blocked claim never enters
+    # `claim_of`, so it contributes nothing to this row: every other claim
+    # column is null, which is what makes the `gate` value the lane's.
+    for col in ("claim_tier", "contested", "source_field", "raw_value",
+                "vocab_support", "vocab_purity", "vocab_provenance"):
+        assert pd.isna(row[col]), f"{col} would mean the claim reached this row"
+    # THE OLD RULE, RUN BY HAND: `claim.gate if claim is not None else None`
+    # over the same `claim_of` this lane builds. It answers None, and the two
+    # DIFFER -- without this the assertion above cannot tell the lane's own
+    # measurement from a value copied off a claim that happens to agree.
+    attached = _attached2(w)
+    reaching = {(int(r.sample_id), int(r.internal_assay_id)): r
+                for r, ok in zip(attached.itertuples(index=False),
+                                 G.reaches_modes(attached)) if ok}
+    old = reaching[(290, 14)].gate if (290, 14) in reaching else None
+    assert old is None and row.gate != old
 
     census = _census2(w, bundle, findings)
     assert census["rows_with_a_blocked_claim"] == 1
@@ -1993,7 +2020,15 @@ def test_mode_2_asserts_nothing_about_the_co_registration_test_it_never_ran():
     # ...while the test lineage DID run is asserted, on every row
     assert set(findings.lineage) <= {S.LIN_CHILD, S.LIN_PARENT}
     assert S.LIN_NONE not in set(findings.lineage)
-    assert set(findings.classification) == {S.CLS_ABSENCE_LINEAGE}
+    # ...and the classification is never NULL, which is the statement here. It
+    # is one of exactly two values, and which one is decided by the
+    # reachability cell and by nothing in the co-registration block above.
+    assert set(findings.classification) == {S.CLS_ABSENCE_LINEAGE,
+                                            S.CLS_UNREACHABLE}
+    assert set(findings.classification) <= set(S.CLASSES)
+    by_cell = {S.CLS_UNREACHABLE if n == 0 else S.CLS_ABSENCE_LINEAGE
+               for n in findings.type_registrations}
+    assert by_cell == set(findings.classification)
     assert set(findings["mode"]) == {S.MODE_2}
 
 
@@ -2983,6 +3018,9 @@ def _pipeline3(w=None):
     w = w or _world3()
     attached = _attached2(w)
     type_reg = G.type_registration_index(w["membership"], w["assays"], w["nodes"])
+    # ONE type index for the whole pipeline, as `classify.main` binds it: the
+    # precedence reads reachability off the same map the gate blocks a claim on.
+    types = G.sample_type_index(w["nodes"])
     registered = A.registered_internal(w["membership"], w["assays"])
     children_of, parents_of, uuid_of, _ = L.lineage_index(
         w["edges"], w["samples"], w["membership"])
@@ -2993,7 +3031,8 @@ def _pipeline3(w=None):
     table = CP.co_registration(w["membership"], w["assays"], w["nodes"])
 
     keys = X.absence_keys(attached, population=population,
-                          registered=registered, candidates=candidates)
+                          registered=registered, candidates=candidates,
+                          type_reg=type_reg, types=types, uuid_of=uuid_of)
     steps = X.precedence_steps(keys)
     m1 = X.mode1_findings(attached, population, projects)
     m2 = M2.mode2_findings(
@@ -3001,12 +3040,12 @@ def _pipeline3(w=None):
         uuid_of=uuid_of, registered=registered,
         rules=M2.precedent_rules(w["precedent"]),
         reg_projects=M2.registration_projects(w["membership"], w["assays"]),
-        types=G.sample_type_index(w["nodes"]), type_reg=type_reg,
+        types=types, type_reg=type_reg,
         titles=titles, projects=projects)
     compat = X.compat_findings(attached, steps=steps, registered=registered,
                                table=table, titles=titles, projects=projects)
-    lanes = {X.PRE_MODE_1: m1, X.PRE_LINEAGE: m2, X.PRE_COMPAT: compat,
-             X.PRE_MODE_3: X.mode3_findings()}
+    lanes = {X.PRE_MODE_1: m1, X.PRE_LINEAGE: m2, X.PRE_UNREACHABLE: m2,
+             X.PRE_COMPAT: compat, X.PRE_MODE_3: X.mode3_findings()}
     findings = X.unify_findings(steps, lanes)
     census = X.findings_census(keys, steps, findings, lanes,
                                agreeing=X.claims_agreeing_with_a_registration(
@@ -3083,19 +3122,20 @@ def test_the_precedence_is_a_declared_order_and_three_of_its_four_swaps_move_a_k
 
     THE POINT OF THE TASK, in one test. An `if` chain in `precedence_step` would
     encode the same order and could be reordered by a later edit with nothing
-    failing; a declared tuple that three of its four adjacent swaps demonstrably
-    move cannot.
+    failing; a declared tuple whose adjacent swaps demonstrably move keys cannot.
 
-    The fourth swap moves nothing, and that is the finding rather than a gap:
-    `PRE_MODE_3` claims no key under any evidence at all, because Mode 3 has no
-    detector. The exhaustive check below proves that over all sixteen possible
-    evidence tuples rather than over this world's ten.
+    The name says four swaps and the tuple now has five, because
+    `PRE_UNREACHABLE` was inserted on 2026-08-21; the name is kept so the
+    history is greppable. The LAST swap moves nothing, and that is the finding
+    rather than a gap: `PRE_MODE_3` claims no key under any evidence at all,
+    because Mode 3 has no detector. The exhaustive check below proves that over
+    all thirty-two possible evidence tuples rather than over this world's few.
     """
     _, parts = _pipeline3()
     keys = parts["keys"]
     assert X.PRECEDENCE == (X.PRE_GATE, X.PRE_MODE_1, X.PRE_LINEAGE,
-                            X.PRE_COMPAT, X.PRE_MODE_3)
-    assert len(set(X.PRECEDENCE)) == len(X.PRECEDENCE) == 5
+                            X.PRE_UNREACHABLE, X.PRE_COMPAT, X.PRE_MODE_3)
+    assert len(set(X.PRECEDENCE)) == len(X.PRECEDENCE) == 6
 
     moved = []
     for i in range(len(X.PRECEDENCE) - 1):
@@ -3104,19 +3144,46 @@ def test_the_precedence_is_a_declared_order_and_three_of_its_four_swaps_move_a_k
         n = sum(1 for e in keys.values()
                 if X.precedence_step(e) != X.precedence_step(e, tuple(wrong)))
         moved.append(n)
-    # GATE over MODE 1, MODE 1 over LINEAGE, LINEAGE over COMPAT, and the fourth
-    assert moved == [1, 1, 1, 0], moved
+    # GATE over MODE 1, MODE 1 over LINEAGE, LINEAGE over UNREACHABLE,
+    # UNREACHABLE over COMPAT, and the fifth
+    #
+    # BOTH ZEROS ARE PROPERTIES OF THE RULE AND NEITHER IS A GAP IN THIS WORLD.
+    # The fifth: `PRE_MODE_3` claims no key under any evidence, proved
+    # exhaustively below. The fourth: swapping `PRE_UNREACHABLE` with
+    # `PRE_COMPAT` could only move a key whose claim PASSED the gate on a pair
+    # the lineage lane calls unreachable, and `gate.gate_claims` blocks a claim
+    # on `registrations == 0` outright -- so `PRE_GATE` takes it three steps
+    # earlier. The real extract measures the same zero over 175,339 keys, in
+    # `test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness`.
+    assert moved == [1, 1, 2, 0, 0], moved
 
-    # ...and each of the three is a NAMED key rather than an anonymous count
+    # ...and the ORDER of those two is still well defined on a tuple the input
+    # cannot produce, which is why it is built by hand here rather than looked
+    # for in a world: a lineage neighbour carries the pair, no sample of the
+    # type is registered there, AND a claim passed the gate on it anyway.
+    both = X.Evidence(claim=True, claim_reaches=True, unregistered=False,
+                      lineage=True, reachable=False)
+    assert both not in set(keys.values()), "the gate should make this absent"
+    swapped = (X.PRE_GATE, X.PRE_MODE_1, X.PRE_LINEAGE, X.PRE_COMPAT,
+               X.PRE_UNREACHABLE, X.PRE_MODE_3)
+    assert X.precedence_step(both) == X.PRE_UNREACHABLE
+    assert X.precedence_step(both, order=swapped) == X.PRE_COMPAT
+
+    # ...and each is a NAMED key rather than an anonymous count
     assert _key_step(parts, 730, 15) == X.PRE_GATE
     assert _key_step(parts, 710, 12) == X.PRE_MODE_1
     assert _key_step(parts, 720, 12) == X.PRE_LINEAGE
+    # the third swap's two keys, named: both are lineage candidates whose
+    # (type, assay) cell is empty, which is what sends them to their own step
+    assert {k for k, s in parts["steps"].items() if s == X.PRE_UNREACHABLE}
+    for key in (k for k, s in parts["steps"].items() if s == X.PRE_UNREACHABLE):
+        assert parts["keys"][key].lineage and not parts["keys"][key].reachable
 
-    # MODE 3 CLAIMS NO KEY UNDER ANY EVIDENCE. Sixteen tuples, exhaustively, so
-    # this is a proof rather than an observation about one world.
+    # MODE 3 CLAIMS NO KEY UNDER ANY EVIDENCE. Thirty-two tuples, exhaustively,
+    # so this is a proof rather than an observation about one world.
     reached = set()
-    for bits in range(16):
-        e = X.Evidence(*(bool(bits >> b & 1) for b in range(4)))
+    for bits in range(32):
+        e = X.Evidence(*(bool(bits >> b & 1) for b in range(5)))
         if e.claim_reaches and not e.claim:
             continue                      # not a state the input can produce
         try:
@@ -3125,7 +3192,97 @@ def test_the_precedence_is_a_declared_order_and_three_of_its_four_swaps_move_a_k
             reached.add(None)             # no evidence at all: not an input key
     assert X.PRE_MODE_3 not in reached
     assert reached == {None, X.PRE_GATE, X.PRE_MODE_1, X.PRE_LINEAGE,
-                       X.PRE_COMPAT}
+                       X.PRE_UNREACHABLE, X.PRE_COMPAT}
+
+
+def test_an_unreachable_lineage_key_is_claimed_by_its_own_step_not_dropped():
+    """The defect this rework exists to fix.
+
+    A lineage neighbour holds an assay no sample of this type has ever been
+    registered in. Before this change the key went to PRE_LINEAGE and was
+    emitted as an ordinary proposal; 99,449 of 167,454 Mode 2 rows on the
+    2026-08-17 extract were of this shape.
+    """
+    e = X.Evidence(claim=False, claim_reaches=False, unregistered=False,
+                   lineage=True, reachable=False)
+    assert X.precedence_step(e) == X.PRE_UNREACHABLE
+
+    # ...and the OLD rule, simulated by hand, gives a different answer. Without
+    # this the test cannot tell the new contract from the old one.
+    #
+    # THE OLD *ORDER* ALONE DOES NOT RESTORE THE OLD RULE, and passing it to
+    # `precedence_step` is the trap: `_PRECEDENCE_TESTS[PRE_LINEAGE]` is now
+    # `e.lineage and e.reachable`, so under the five-step order EVERY step
+    # declines and the call RAISES rather than answering PRE_LINEAGE. The old
+    # contract was an order AND a test, so both halves are rebuilt here.
+    old = (X.PRE_GATE, X.PRE_MODE_1, X.PRE_LINEAGE, X.PRE_COMPAT, X.PRE_MODE_3)
+    with pytest.raises(ValueError, match="no step in"):
+        X.precedence_step(e, order=old)
+    old_tests = {s: t for s, t in X._PRECEDENCE_TESTS.items()
+                 if s != X.PRE_UNREACHABLE}
+    old_tests[X.PRE_LINEAGE] = lambda ev: ev.lineage   # reachability untested
+    was = next(s for s in old if old_tests[s](e))
+    assert was == X.PRE_LINEAGE
+    assert was != X.precedence_step(e)
+    # the reachable twin is where the two rules AGREE, so the difference above
+    # is about reachability and not about the extra step existing
+    ok = e._replace(reachable=True)
+    assert next(s for s in old if old_tests[s](ok)) == X.precedence_step(ok)
+
+
+def test_a_reachable_lineage_key_is_unaffected():
+    e = X.Evidence(claim=False, claim_reaches=False, unregistered=False,
+                   lineage=True, reachable=True)
+    assert X.precedence_step(e) == X.PRE_LINEAGE
+
+
+def test_a_sample_with_no_resolvable_type_is_not_blocked():
+    """AN ABSENCE IS NOT A VERDICT -- the bug class both audits name.
+
+    `type_registration_index` has no cell for a sample carrying no type, so
+    nothing was measured. Reading that as 'never registered' would block a
+    proposal on evidence nobody gathered. `absence_keys` maps unknown to
+    reachable=True for exactly this reason.
+
+    The mapping itself is asserted here and not only its consequence: an
+    untyped sample is fed to `_reachable` directly and the answer compared
+    against the one the WRONG rule -- `type_reg.get(...) > 0` with the missing
+    type read as a measured zero -- would give, so the two must DIFFER.
+    """
+    e = X.Evidence(claim=False, claim_reaches=False, unregistered=False,
+                   lineage=True, reachable=True)   # unknown -> True
+    assert X.precedence_step(e) == X.PRE_LINEAGE
+
+    # the derivation that produces that True, over a sample with no node row
+    type_reg = {("TIS", 11): 5}
+    types = {"TIS-1": "TIS"}
+    uuid_of = {200: "TIS-1", 999: "NOT-IN-NODES"}
+    assert X._reachable(999, 11, type_reg, types, uuid_of) is True
+    # ...and the wrong rule, run by hand: no type read as a measured zero
+    wrong = type_reg.get((types.get(uuid_of.get(999)), 11), 0) > 0
+    assert wrong is False
+    assert X._reachable(999, 11, type_reg, types, uuid_of) != wrong
+    # while a type that IS resolvable and has no cell is a measured zero
+    assert X._reachable(200, 12, type_reg, types, uuid_of) is False
+    assert X._reachable(200, 11, type_reg, types, uuid_of) is True
+
+
+def test_every_evidence_tuple_is_still_claimed_by_exactly_one_step():
+    """Exhaustive over all 32 combinations. No key may fall through."""
+    import itertools
+    for bits in itertools.product([False, True], repeat=5):
+        e = X.Evidence(*bits)
+        if e.claim_reaches and not e.claim:
+            continue                      # constructible by hand, refused by design
+        if not (e.claim or e.lineage):
+            continue                      # no evidence at all: not an input key
+        step = X.precedence_step(e)
+        assert step in X.PRECEDENCE
+        # exactly one, and not merely at least one: every OTHER step's test is
+        # run by hand and the claiming step is asserted to be the first that
+        # fires, so a second step also matching would not go unnoticed.
+        firing = [s for s in X.PRECEDENCE if X._PRECEDENCE_TESTS[s](e)]
+        assert firing[0] == step, (e, firing)
 
 
 def test_a_gate_rejected_claim_reaches_no_mode_even_when_a_lineage_neighbour_carries_the_pair():
@@ -3160,7 +3317,10 @@ def test_a_gate_rejected_claim_reaches_no_mode_even_when_a_lineage_neighbour_car
 
     # ...and a lineage neighbour DOES carry the pair, so this is the "even when"
     assert (700, 15) in set(parts["candidates"])
-    assert X.Evidence(True, False, False, True) == parts["keys"][(700, 15)]
+    # `reachable=False` on the same evidence the gate rejected the claim on:
+    # the two now read one map, which is the whole of Task 3. The KEY is still
+    # the gate's, because `PRE_GATE` outranks both lineage steps.
+    assert X.Evidence(True, False, False, True, False) == parts["keys"][(700, 15)]
 
     # the key is the gate's, and NOTHING is emitted for it
     assert _key_step(parts, 700, 15) == X.PRE_GATE
@@ -3176,11 +3336,23 @@ def test_a_gate_rejected_claim_reaches_no_mode_even_when_a_lineage_neighbour_car
                            & (lineage_lane.proposed_internal_assay_id == 15)]
     assert len(offered) == 1, "the lane must offer it or this proves nothing"
     assert offered.iloc[0]["mode"] == S.MODE_2
-    assert offered.iloc[0].classification == S.CLS_ABSENCE_LINEAGE
-    wrong = list(X.PRECEDENCE)
-    wrong[0], wrong[2] = wrong[2], wrong[0]
-    assert X.precedence_step(parts["keys"][(700, 15)],
-                             tuple(wrong)) == X.PRE_LINEAGE
+    # the lane files it UNREACHABLE, since no A.SPC sample holds 15 -- the same
+    # cell the gate rejected the claim on. Both readings agree and the row is
+    # still refused by the PRECEDENCE, which is the stronger statement.
+    assert offered.iloc[0].classification == S.CLS_UNREACHABLE
+    assert offered.iloc[0].gate == S.GATE_UNREACHABLE
+    # BOTH lineage steps before the gate, which is the wrong rule stated for a
+    # six-step precedence. Moving `PRE_LINEAGE` alone is no longer the
+    # counterfactual: this key is unreachable, so `PRE_LINEAGE` declines it and
+    # the gate would take it anyway -- the test would pass while proving
+    # nothing.
+    wrong = (X.PRE_LINEAGE, X.PRE_UNREACHABLE, X.PRE_GATE, X.PRE_MODE_1,
+             X.PRE_COMPAT, X.PRE_MODE_3)
+    assert set(wrong) == set(X.PRECEDENCE)
+    was = X.precedence_step(parts["keys"][(700, 15)], wrong)
+    assert was == X.PRE_UNREACHABLE
+    assert was not in X.NON_EMITTING_STEPS, (
+        "the wrong rule must EMIT the row, or the refusal above proves nothing")
 
 
 def test_a_row_corroborated_by_lineage_is_mode_2_and_carries_no_error_class():
@@ -3212,10 +3384,16 @@ def test_a_row_corroborated_by_lineage_is_mode_2_and_carries_no_error_class():
     # THE WRONG RULE: compatibility before lineage. The pair `(TIS, 11, 12)`
     # bands ROUTINE, so the row would read CLS_ABSENCE_COMPAT and lose the
     # neighbour that actually settles it.
-    wrong = list(X.PRECEDENCE)
-    wrong[2], wrong[3] = wrong[3], wrong[2]
-    assert X.precedence_step(parts["keys"][(720, 12)],
-                             tuple(wrong)) == X.PRE_COMPAT
+    #
+    # SPELLED OUT AND NOT BUILT BY INDEX. `wrong[2], wrong[3] = ...` used to say
+    # "compatibility before lineage" because those were the two steps at those
+    # positions; inserting `PRE_UNREACHABLE` between them made the same line
+    # mean "unreachable before lineage" and the test kept passing while
+    # asserting something else.
+    wrong = (X.PRE_GATE, X.PRE_MODE_1, X.PRE_COMPAT, X.PRE_LINEAGE,
+             X.PRE_UNREACHABLE, X.PRE_MODE_3)
+    assert set(wrong) == set(X.PRECEDENCE)
+    assert X.precedence_step(parts["keys"][(720, 12)], wrong) == X.PRE_COMPAT
     assert CP.compat_band(*parts["table"][("TIS", 11, 12)]) == S.BAND_ROUTINE
 
 
@@ -3384,7 +3562,7 @@ def test_the_classes_partition_every_claim_backed_absence_and_every_lineage_pair
     and is in no key; 123,439 claims on the real extract are that shape, which
     is 89% of the 138,007, and they are counted by name rather than dropped.
 
-    Every key gets exactly one step, the five steps sum to the input, and the
+    Every key gets exactly one step, the six steps sum to the input, and the
     keys claimed by `NON_EMITTING_STEPS` are the difference between the input
     and the emitted rows. Every emitted row gets exactly one classification or
     an explicit null, and those sum to the rows.
@@ -3414,7 +3592,11 @@ def test_the_classes_partition_every_claim_backed_absence_and_every_lineage_pair
 
     counts = Counter(steps.values())
     assert dict(counts) == {X.PRE_GATE: 2, X.PRE_MODE_1: 1,
-                            X.PRE_LINEAGE: 3, X.PRE_COMPAT: 4}
+                            X.PRE_LINEAGE: 2, X.PRE_UNREACHABLE: 1,
+                            X.PRE_COMPAT: 4}
+    # ...and the split of the old three-key lineage step is the whole rework:
+    # the population did not change, the step that claims part of it did.
+    assert counts[X.PRE_LINEAGE] + counts[X.PRE_UNREACHABLE] == 3
     assert sum(counts.values()) == len(keys) == census["input_keys"]
     assert set(counts) <= set(X.PRECEDENCE)
 
@@ -3442,9 +3624,17 @@ def test_the_classes_partition_every_claim_backed_absence_and_every_lineage_pair
 
     # ...and the CLASSES partition them too, with the unclassified counted
     by_class = Counter(findings.classification.dropna())
-    assert dict(by_class) == {S.CLS_ABSENCE_LINEAGE: 3, S.CLS_ABSENCE_COMPAT: 1,
+    assert dict(by_class) == {S.CLS_ABSENCE_LINEAGE: 2, S.CLS_UNREACHABLE: 1,
+                              S.CLS_ABSENCE_COMPAT: 1,
                               S.CLS_ALT_LABEL: 1, S.CLS_UNRESOLVED: 2}
     assert set(by_class) <= set(S.CLASSES)
+    # the class and the step agree row for row, which is what "one lane, two
+    # steps" has to mean: `unify_findings` filtered the frame by step and the
+    # frame classified itself off the same cell.
+    assert {(int(r.sample_id), int(r.proposed_internal_assay_id))
+            for r in findings.itertuples(index=False)
+            if r.classification == S.CLS_UNREACHABLE} == {
+        k for k, s in steps.items() if s == X.PRE_UNREACHABLE}
     assert (sum(by_class.values())
             + census["rows_without_a_classification"]) == census["rows"]
     assert census["rows_without_a_classification"] == 1   # Mode 1 asserts none
@@ -3480,8 +3670,15 @@ def test_mode_1_takes_a_key_a_lineage_neighbour_also_offers_and_the_refusal_is_c
     census = parts["census"]
     assert census["lineage_taken_by_mode_1"] == 1
     assert census["lineage_ceiling_offered"] == len(lineage_lane) == 6
-    assert (census["keys_lineage"] + census["lineage_refused_by_the_gate"]
+    # THE CEILING NOW SPLITS FOUR WAYS AND NOT THREE. `keys_unreachable` is the
+    # fourth term: the lane still offers those rows and still emits them, they
+    # are simply claimed by their own step. Omitting the term would make this
+    # identity fail by exactly the population Task 3 named, which is how a
+    # reader would learn the rows had been dropped -- they have not.
+    assert (census["keys_lineage"] + census["keys_unreachable"]
+            + census["lineage_refused_by_the_gate"]
             + census["lineage_taken_by_mode_1"]) == census["lineage_ceiling_offered"]
+    assert census["keys_unreachable"] > 0, "the fourth term must not be vacuous"
     # (700,15) and (730,15) -- a DIFFERENT number from the one above, so a rule
     # that confused the two refusals could not pass this world
     assert census["lineage_refused_by_the_gate"] == 2
@@ -3717,8 +3914,8 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
     """
     r = _real2()
     type_reg = G.type_registration_index(r["membership"], r["assays"], r["nodes"])
-    gated = G.gate_claims(r["claims"], r["vocabulary"], type_reg,
-                          G.sample_type_index(r["nodes"]))
+    types = G.sample_type_index(r["nodes"])
+    gated = G.gate_claims(r["claims"], r["vocabulary"], type_reg, types)
     attached = X.attach_gate(r["claims"], gated)
     registered = A.registered_internal(r["membership"], r["assays"])
     population = X.unregistered_samples(r["samples"], r["membership"],
@@ -3731,16 +3928,22 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
     table = CP.co_registration(r["membership"], r["assays"], r["nodes"])
 
     keys = X.absence_keys(attached, population=population,
-                          registered=registered, candidates=candidates)
+                          registered=registered, candidates=candidates,
+                          type_reg=type_reg, types=types, uuid_of=uuid_of)
     steps = X.precedence_steps(keys)
     counts = Counter(steps.values())
     assert len(keys) == 175339
     assert counts[X.PRE_GATE] == 4553
     assert counts[X.PRE_MODE_1] == 1373
-    assert counts[X.PRE_LINEAGE] == 167347
+    assert counts[X.PRE_LINEAGE] == 67898
+    assert counts[X.PRE_UNREACHABLE] == 99449
     assert counts[X.PRE_COMPAT] == 2066
     assert counts[X.PRE_MODE_3] == 0
     assert sum(counts.values()) == len(keys)
+    # THE INPUT DID NOT MOVE, and the old lineage step's whole population is
+    # still accounted for: this is the identity that says 99,449 proposals were
+    # RECLASSIFIED rather than deleted.
+    assert counts[X.PRE_LINEAGE] + counts[X.PRE_UNREACHABLE] == 167347
 
     # THE PRECEDENCE IS LOAD-BEARING ON THIS DATA, not only on the fixture
     moved = []
@@ -3750,22 +3953,40 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
         moved.append(sum(1 for e in keys.values()
                          if X.precedence_step(e)
                          != X.precedence_step(e, tuple(wrong))))
-    assert moved == [746, 749, 761, 0]
+    assert moved == [746, 749, 67898, 0, 0]
+    # THE FOURTH ZERO IS STRUCTURAL AND IT IS THE DESIGN ARGUMENT FOR WHERE
+    # `PRE_UNREACHABLE` SITS. Swapping it with `PRE_COMPAT` could only move a
+    # key carrying a claim that PASSED the gate on a pair the lineage lane calls
+    # unreachable -- and `gate.gate_claims` blocks a claim on `registrations ==
+    # 0` outright, so `PRE_GATE` takes such a key three steps earlier. The
+    # combination is asserted absent directly rather than inferred from the
+    # zero, because the two indexes can in principle disagree: `gate_claims`
+    # types a claim by the claim row's OWN uuid while `_reachable` types the
+    # sample through `lineage_index`'s `uuid_of`, and 86 sample_ids carry two
+    # node rows. Today that disagreement produces no key.
+    assert not [e for e in keys.values() if e.claim_reaches and not e.reachable]
 
-    # ...and the THREE FIGURES THE MODULE DOCSTRING STATES are those same
+    # ...and the FOUR FIGURES THE MODULE DOCSTRING STATES are those same
     # measured values, read out of the source rather than eyeballed. Task 6
     # closed the identical gap for `main`'s printed sentence and it reopened
     # here: a hard-coded figure in a docstring with no test behind it is the
     # same class as the stale fixture docstring this branch has already paid
     # for twice. The source is normalised first, since the sentence is wrapped
-    # across three literals.
+    # across several literals.
     flat = re.sub(r"\s+", " ", (PACKAGE / "classify.py").read_text())
     claim = re.search(
         r"([\d,]+) input keys: GATE with MODE 1 moves ([\d,]+) keys, MODE 1 "
-        r"with LINEAGE ([\d,]+), LINEAGE with COMPAT ([\d,]+)", flat)
+        r"with LINEAGE ([\d,]+), LINEAGE with UNREACHABLE ([\d,]+), "
+        r"UNREACHABLE with COMPAT ([\d,]+)", flat)
     assert claim is not None, "the docstring sentence changed shape; re-pin it"
     stated = [int(g.replace(",", "")) for g in claim.groups()]
-    assert stated == [len(keys)] + moved[:3] == [175339, 746, 749, 761]
+    assert stated == [len(keys)] + moved[:4] == [175339, 746, 749, 67898, 0]
+    # ...and so is the five-row swap table beside `PRECEDENCE`, which stated
+    # four swaps over a population no test reproduces until this run pinned it.
+    table_claim = re.findall(
+        r"# +(?:GATE|MODE 1|LINEAGE|UNREACHABLE|COMPAT) +<-> +"
+        r"(?:MODE 1|LINEAGE|UNREACHABLE|COMPAT|MODE 3) +([\d,]+)", flat)
+    assert [int(g.replace(",", "")) for g in table_claim] == moved
 
     m1 = X.mode1_findings(attached, population, projects)
     m2 = M2.mode2_findings(
@@ -3774,12 +3995,12 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
         rules=M2.precedent_rules(
             P.mine_precedent(r["edges"], r["membership"], r["assays"])),
         reg_projects=M2.registration_projects(r["membership"], r["assays"]),
-        types=G.sample_type_index(r["nodes"]), type_reg=type_reg,
+        types=types, type_reg=type_reg,
         titles=titles, projects=projects)
     compat = X.compat_findings(attached, steps=steps, registered=registered,
                                table=table, titles=titles, projects=projects)
-    lanes = {X.PRE_MODE_1: m1, X.PRE_LINEAGE: m2, X.PRE_COMPAT: compat,
-             X.PRE_MODE_3: X.mode3_findings()}
+    lanes = {X.PRE_MODE_1: m1, X.PRE_LINEAGE: m2, X.PRE_UNREACHABLE: m2,
+             X.PRE_COMPAT: compat, X.PRE_MODE_3: X.mode3_findings()}
     findings = X.unify_findings(steps, lanes)
     agreeing = X.claims_agreeing_with_a_registration(attached, registered)
     census = X.findings_census(keys, steps, findings, lanes, agreeing=agreeing)
@@ -3791,17 +4012,30 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
     assert census["rows_mode_2"] == 167454 == 167347 + 107
     assert census["rows_mode_3"] == 0
     assert census["rows_no_mode"] == 1959
-    assert census["rows_cls_absence_lineage"] == 167347
+    assert census["rows_cls_absence_lineage"] == 67898
+    assert census["rows_cls_unreachable"] == 99449
     assert census["rows_cls_absence_compat"] == 107
     assert census["rows_cls_alt_label"] == 952
     assert census["rows_cls_unresolved"] == 1007
     assert census["rows_without_a_classification"] == 1373
+    # THE FIVE CLASSES AND THE NULL STILL SUM TO THE ROWS -- the fourth stated
+    # identity, over five `rows_cls_*` keys instead of four. `rows` itself is
+    # unchanged at 170,786 above: 99,449 rows were reclassified, not removed.
+    assert (census["rows_cls_absence_lineage"] + census["rows_cls_unreachable"]
+            + census["rows_cls_absence_compat"] + census["rows_cls_alt_label"]
+            + census["rows_cls_unresolved"]
+            + census["rows_without_a_classification"]) == census["rows"]
+    assert (census["rows_cls_absence_lineage"]
+            + census["rows_cls_unreachable"]) == 167347
 
-    # THE CEILING IS A CEILING, and the precedence takes 5,008 off it
+    # THE CEILING IS A CEILING, and the precedence takes 5,008 off it -- 4,242
+    # to the gate and 749 to Mode 1, with the remainder split between the two
+    # lineage steps rather than taken off it
     assert census["lineage_ceiling_offered"] == 172338
     assert census["lineage_refused_by_the_gate"] == 4242
     assert census["lineage_taken_by_mode_1"] == 749
-    assert census["keys_lineage"] == 172338 - 4242 - 749
+    assert (census["keys_lineage"] + census["keys_unreachable"]
+            == 172338 - 4242 - 749)
     assert census["keys_from_lineage"] == census["lineage_ceiling_offered"]
     assert census["keys_from_a_claim"] == 8753 == 130764 - 122011
 
@@ -3982,7 +4216,8 @@ def test_the_census_refuses_a_row_count_that_contradicts_its_own_key_count():
     stranded = dict(steps)
     stranded[(99999, 99999)] = X.PRE_MODE_3
     stranded_keys = dict(keys)
-    stranded_keys[(99999, 99999)] = X.Evidence(False, False, False, False)
+    stranded_keys[(99999, 99999)] = X.Evidence(False, False, False, False,
+                                               False)
     with pytest.raises(AssertionError, match="emitted row"):
         X.findings_census(stranded_keys, stranded, parts["findings"], lanes,
                           agreeing=agreeing)

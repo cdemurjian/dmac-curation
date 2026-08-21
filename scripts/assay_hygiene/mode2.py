@@ -547,8 +547,16 @@ def mode2_findings(
     changing its mind. The claim block is null on the same rule wherever no
     gated claim names the pair.
 
-    `classification` is `CLS_ABSENCE_LINEAGE` on every row and is NOT null,
-    because the lineage test DID run and that is precisely what it establishes.
+    `classification` is NEVER null, because the lineage test DID run and that is
+    precisely what it establishes. It is `CLS_ABSENCE_LINEAGE` except where the
+    pair is UNREACHABLE -- no sample of this type is registered in this assay
+    anywhere, `type_registrations == 0` -- and there it is `CLS_UNREACHABLE`
+    and `gate` reads `GATE_UNREACHABLE`. That is the gate's own rule, which
+    `gate.gate_claims` has always applied to a CLAIM and which nothing applied
+    to this lane until 2026-08-21: measured on the 2026-08-21 artifact tree,
+    99,449 of the 167,454 emitted MODE_2 rows read a zero there. The row is
+    still emitted and `classify.PRE_UNREACHABLE` gives it its own lane, because
+    a proposal a curator never sees is not a proposal that was refused.
 
     Sorted on `(sample_id, proposed_internal_assay_id)`, a total order on this
     output. `mode2_candidates` returns arrival order on purpose so this sort has
@@ -609,6 +617,22 @@ def mode2_findings(
         registrations = (None if sample_type is None
                          else type_reg.get((sample_type, assay_id), 0))
         claim = claim_of.get((sample_id, assay_id))
+        # THE GATE'S OWN RULE, APPLIED TO THIS LANE AT LAST. `registrations == 0`
+        # is what `gate.gate_claims` calls GATE_UNREACHABLE and BLOCKS a claim
+        # on. `None` is a sample with no resolvable type -- nobody measured, so
+        # nothing is asserted and the row passes. `== 0` and never `not
+        # registrations`, which would read the None as a refusal and is the bug
+        # class both audits of 2026-08-21 named.
+        #
+        # THE ROW IS STILL EMITTED. Classifying it is the whole point: 99,449 of
+        # the 167,454 MODE_2 rows in the 2026-08-21 artifact are of this shape,
+        # and a proposal that vanishes reads to a curator exactly like one that
+        # was never generated. `classify.PRE_UNREACHABLE` gives them their own
+        # lane and `findings_census` counts them.
+        unreachable = registrations == 0
+        row_gate = (S.GATE_UNREACHABLE if unreachable
+                    else (claim.gate if claim is not None else None))
+        row_class = (S.CLS_UNREACHABLE if unreachable else S.CLS_ABSENCE_LINEAGE)
         blocked = (sample_id, assay_id) in blocked_pairs
         reg_ids, reg_titles = _registered_columns(sample_id, registered, titles)
         title = titles.get(assay_id)
@@ -627,9 +651,11 @@ def mode2_findings(
             "proposed_internal_assay_id": assay_id,
             "proposed_internal_assay_title": title,
             "mode": S.MODE_2,
-            "classification": S.CLS_ABSENCE_LINEAGE,
-            # the claim block, null wherever no GATED claim names this pair
-            "gate": claim.gate if claim is not None else None,
+            "classification": row_class,
+            # the claim block, null wherever no GATED claim names this pair --
+            # except `gate`, which an unreachable pair fills in from the lane's
+            # own measurement whether or not a claim exists. See `row_gate`.
+            "gate": row_gate,
             "claim_tier": claim.tier if claim is not None else None,
             "contested": bool(claim.contested) if claim is not None else None,
             "source_field": claim.source_field if claim is not None else None,
