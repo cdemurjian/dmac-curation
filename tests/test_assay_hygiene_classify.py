@@ -1265,6 +1265,9 @@ def _world2():
         rows_with_precedent                 27
         rows_without_precedent               1   (360,11)
         rows_proposed_by_both                1   (280,13)
+        rows_proposed_by_claim_no_rule       0   no claim rides a rule-less hop
+                                                 in this world; the test that
+                                                 needs one BUILDS it
         rows_with_a_blocked_claim            1   (290,14)
         rows_creating_an_unseen_pair_add_parent  1   (430,490)
         rows_creating_an_unseen_pair_add_child  10   (100,12) (103,12) (250,14)
@@ -2043,6 +2046,24 @@ def test_the_census_reconciles_the_emitted_rows_against_the_independent_ceiling(
     assert census["rows"] == census["rows_add_parent"] + census["rows_add_child"]
     assert census["rows"] == (census["rows_with_precedent"]
                               + census["rows_without_precedent"])
+
+    # THE ACCEPTED-CLAIM PAIR, which is a pair because the raise is gone. Until
+    # 2026-08-21 `rows_proposed_by_both` was the whole accepted-claim population
+    # and it was complete only because the rule-less half aborted the run.
+    assert census["rows_proposed_by_both"] == 1
+    assert census["rows_proposed_by_claim_no_rule"] == 0
+    # each nests in the precedent split it belongs to, asserted SEPARATELY -- a
+    # sum alone would pass with the two swapped, which is the error that matters
+    # since swapping them is exactly what widening `BY_BOTH` would have done
+    assert census["rows_proposed_by_both"] <= census["rows_with_precedent"]
+    assert (census["rows_proposed_by_claim_no_rule"]
+            <= census["rows_without_precedent"])
+    # ...and the containments are read off the frame, not off the two ints above
+    by_both = findings[findings.proposed_by == X.BY_BOTH]
+    by_claim_no_rule = findings[findings.proposed_by == X.BY_CLAIM_NO_RULE]
+    assert by_both.precedent_rate.notna().all()
+    assert by_claim_no_rule.precedent_rate.isna().all()
+    assert set(by_both.index) & set(by_claim_no_rule.index) == set()
     assert census["rows"] == len(findings)
     assert census["samples"] == findings.sample_id.nunique()
 
@@ -2359,7 +2380,7 @@ def test_a_claim_with_no_precedent_rule_names_its_own_source():
     assert len(hit) == 1 and G.reaches_modes(attached)[hit.index[0]]
 
     # the run COMPLETES -- the point of the change -- and the row is labelled
-    _, _, findings = _pipeline2(w)
+    _, bundle, findings = _pipeline2(w)
     row = _row(findings, 360, 11)
     assert row.proposed_by == X.BY_CLAIM_NO_RULE
     assert row.proposed_by in X.PROPOSAL_SOURCES
@@ -2377,6 +2398,20 @@ def test_a_claim_with_no_precedent_rule_names_its_own_source():
     # the SAME row without the claim is the third combination, so the new member
     # is carrying the claim and nothing else
     assert _row(_pipeline2()[2], 360, 11).proposed_by == X.BY_LINEAGE_ONLY
+
+    # THE CENSUS SEES IT. This is the only world in the suite where the key is
+    # non-zero, so without this the operator-facing surface would be pinned at 0
+    # everywhere and a key that never counted anything would pass every test.
+    census = _census2(w, bundle, findings)
+    assert census["rows_proposed_by_claim_no_rule"] == 1
+    # ...and it did NOT come out of the key that used to be the whole
+    # accepted-claim population: (280,13) is still BY_BOTH and still counted
+    # once, so the new key added a row rather than reclassifying one
+    assert census["rows_proposed_by_both"] == 1
+    assert _row(findings, 280, 13).proposed_by == X.BY_BOTH
+    assert census["rows_without_precedent"] == 1
+    assert census["rows"] == (census["rows_with_precedent"]
+                              + census["rows_without_precedent"])
 
 
 def test_the_survival_table_says_how_much_evidence_its_survivors_rest_on():
@@ -2665,6 +2700,16 @@ def test_the_real_extract_reproduces_the_ceiling_and_both_directions_separately(
     # Every other figure above is a membership-and-lineage fact and is unchanged
     # to the row, which is the cross-check that the retirement stayed in its lane.
     assert census["rows_proposed_by_both"] == 1510
+    # THE ZERO THIS WHOLE CHANGE TURNS ON, measured rather than asserted from the
+    # docstrings that quote it. `_proposal_source` raised on this population
+    # until 2026-08-21 and the raise never fired on this extract -- so the key
+    # reads 0 here, and the reason it now EXISTS is that the reachability rework
+    # moves the two inputs that produce it. When this number goes non-zero the
+    # operator report will say so instead of under-counting silently.
+    assert census["rows_proposed_by_claim_no_rule"] == 0
+    # all 10 rule-less rows (pinned above) are the claim-less kind, which is WHY
+    # the raise held on this extract -- read off the frame, not off the key
+    assert int((findings.proposed_by == X.BY_LINEAGE_ONLY).sum()) == 10
     assert census["rows_with_a_blocked_claim"] == 4242
     assert census["rows_without_a_samples_row"] == 448
     assert census["rows_without_a_sample_type"] == 0
@@ -3595,17 +3640,28 @@ def test_a_reduced_rule_set_relabels_the_row_rather_than_aborting_the_run():
     THIS IS THE TEST THAT ARGUED THE RAISE OUT OF EXISTENCE. `_proposal_source`
     used to refuse the (no precedent rule, gated claim) combination, on the
     grounds that it occurs 0 times on the 2026-08-17 extract -- so every test of
-    the raise had to CONSTRUCT it by adding a claim. But task 7's backtest
-    measured the same combination arising 6, 4 and 23 times at its 20%, seed-7
-    and 50% hold-outs, because a backtest mines its rules from TRAINING edges
-    alone and a reduced rule set is exactly what makes a hop rule-less. The zero
-    was a property of one extract read with one rule set, and both are about to
-    move under the reachability rework.
+    the raise had to CONSTRUCT it by adding a claim.
 
-    So it is exercised from the other direction here: the claim stays put and
+    THE ARGUMENT IS STRUCTURAL AND NEEDS NO ANECDOTE. Whether the combination
+    arises is decided by two inputs that the reachability rework moves at once:
+    which claims reach a mode, and which hops carry a rule. This test moves the
+    second by one row and the combination appears immediately -- so the zero was
+    a property of one extract read with one rule set, never of the logic, and a
+    `raise` on it makes the cost of being wrong the loss of an entire detection
+    pass rather than one mislabelled row.
+
+    (An earlier revision of this docstring cited task 7's backtest measuring the
+    combination 6, 4 and 23 times at its hold-outs. That figure was struck on
+    2026-08-21: it is not reproducible and it cannot be, because `backtest.py`
+    hands `mode2_findings` an EMPTY attached frame and `mode2_findings` builds
+    `claim_of` from that frame alone, so `claim` is always None under `cold_run`
+    and this combination is unreachable there by construction. It is recorded
+    here because the number reached an operator before it was checked.)
+
+    So the guard is exercised from the other direction: the claim stays put and
     the RULE is removed, which is what any caller mining precedent over a subset
     does. What that must produce is a relabelled row and a COMPLETED run, not an
-    exception thrown away several minutes into a detection pass.
+    exception thrown several minutes into a detection pass.
     """
     w = _world3()
     # (720,12) is the one row in this world that is both claim-backed and

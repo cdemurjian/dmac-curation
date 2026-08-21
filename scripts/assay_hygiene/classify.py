@@ -137,8 +137,10 @@ from .audit import audit_contradictions, registered_internal
 # --- what produced a proposal ------------------------------------------------
 #
 # A closed family that enumerates itself, the way `PROVENANCES` and
-# `GATE_OUTCOMES` do: a consumer must be able to ask "is this one of the four"
-# without restating the four, because a restatement is what drifts.
+# `GATE_OUTCOMES` do: a consumer must be able to ask "is this one of the family"
+# without restating the members, because a restatement is what drifts. (This
+# sentence said "one of the four" until 2026-08-21, restating a count in the
+# clause warning against restating it -- see below.)
 #
 # IT SAID "THREE" FOR ONE ROUND AFTER THE FOURTH MEMBER LANDED, one line above
 # the tuple that already held four -- a restatement drifting from the thing it
@@ -147,11 +149,18 @@ from .audit import audit_contradictions, registered_internal
 # closed_family` derives the family from `vars()` and fails on a `BY_*` constant
 # that never joins the tuple.
 #
+# IT THEN HAPPENED AGAIN, and the second time is the argument. `BY_CLAIM_NO_RULE`
+# landed 2026-08-21 and the paragraph below still read "ALL FOUR" -- a prose
+# count going stale twice in the one block that exists to warn about prose
+# counts, because the test above derives the family and cannot see a comment. So
+# the number is GONE rather than corrected to five: a restatement with no figure
+# in it has nothing to drift.
+#
 # `FINDING_COLUMNS.proposed_by` is spelled `proposed_` and not `decided_` under
 # the binding constraint, and these values inherit that: the column header is
 # where a reader forms their belief about what the pipeline already did.
 #
-# ALL FOUR ARE DECLARED HERE THOUGH MODE 1 EMITS ONLY THE FIRST. Tasks 6 and 8
+# EVERY MEMBER IS DECLARED HERE THOUGH MODE 1 EMITS ONLY THE FIRST. Tasks 6 and 8
 # extend this module, and the alternative is each of them inventing its own
 # spelling for one concept in one column -- two names one screen apart, which is
 # this branch's signature defect. Declaring the family before its second producer

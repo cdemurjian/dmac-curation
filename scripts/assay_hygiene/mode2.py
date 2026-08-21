@@ -131,6 +131,22 @@ SURVIVAL_COLUMNS = ["threshold", "action", "rows", "samples", "rule_groups",
 # and never off `proposed_by`. This comment said "proposed BY_PRECEDENT like any
 # other" for one round after `BY_LINEAGE_ONLY` landed, which was false on 2 rows
 # -- the key's own justification describing a value the rows do not carry.
+#
+# THE TWO ACCEPTED-CLAIM KEYS ARE A PAIR AND NEITHER IS EXHAUSTIVE ALONE.
+# `rows_proposed_by_both` was the only key counting "a gated claim contributed to
+# this row's label", and it was exhaustive ONLY because `_proposal_source` raised
+# on the rule-less half of that population -- the census surface inherited its
+# completeness from an exception. That raise is gone as of 2026-08-21, so
+# `rows_proposed_by_claim_no_rule` counts the other half. The population is 0
+# today and goes non-zero under exactly the reachability rework this change
+# enables, which is why the key lands NOW: a key added after the number moves
+# cannot tell an operator whether it was ever zero.
+#
+#     accepted-claim rows = rows_proposed_by_both + rows_proposed_by_claim_no_rule
+#
+# The two are disjoint by construction -- one has a rule and one does not -- so
+# each nests inside the precedent split, and a test asserts both containments
+# rather than the sum alone, which would pass if the pair were swapped.
 MODE2_CENSUS_KEYS = (
     "rows",
     "samples",
@@ -143,6 +159,7 @@ MODE2_CENSUS_KEYS = (
     "rows_with_precedent",
     "rows_without_precedent",
     "rows_proposed_by_both",
+    "rows_proposed_by_claim_no_rule",
     "rows_with_a_blocked_claim",
     "rows_creating_an_unseen_pair_add_parent",
     "rows_creating_an_unseen_pair_add_child",
@@ -434,6 +451,11 @@ def _proposal_source(rule, claim, sample_id: int, assay_id: int) -> str:
     spent the whole detection pass. A named member costs nothing and cannot
     abort anything.
 
+    `sample_id` AND `assay_id` ARE UNUSED AND STAY. They only ever built the
+    exception message, but `mode2_findings` passes all four positionally and the
+    next hand to touch this will want the pair identified when it adds a branch
+    or a log line -- removing them costs a caller edit now to save nothing.
+
     `BY_CLAIM_NO_RULE` IS A FIFTH MEMBER AND NOT A WIDENING of either existing
     value, for the reason the raise itself gave: `BY_BOTH` is defined as
     "precedent proposed, the claim disambiguated" and would assert a precedent
@@ -707,6 +729,10 @@ def mode2_census(
         "rows_with_precedent": int(findings.precedent_rate.notna().sum()),
         "rows_without_precedent": int(findings.precedent_rate.isna().sum()),
         "rows_proposed_by_both": int((findings.proposed_by == BY_BOTH).sum()),
+        # the rule-less half of the accepted-claim population, which used to be
+        # unreachable because `_proposal_source` raised on it
+        "rows_proposed_by_claim_no_rule": int(
+            (findings.proposed_by == BY_CLAIM_NO_RULE).sum()),
         "rows_with_a_blocked_claim": len(emitted & blocked),
         "rows_creating_an_unseen_pair_add_parent": int(
             (add_parent.type_registrations == 0).sum()),
