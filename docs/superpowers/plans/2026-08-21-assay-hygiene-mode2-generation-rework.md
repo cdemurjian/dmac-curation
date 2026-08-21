@@ -22,7 +22,6 @@
 - **Test discipline, from `tests/test_assay_hygiene_classify.py`'s own header:** every guard reads its expected value off the frame AND simulates the wrong rule by hand, asserting the two DIFFER. A test that asserts a count proves only that the code produced that count.
 - **Artifacts live at `assay-hygiene-bak/`,** not `assay-hygiene/`. The working directory was removed; read the extract from `assay-hygiene-bak/extract/` and the products from `assay-hygiene-bak/artifacts/`.
 - Run scripts: `PYTHONPATH=scripts uv run --with pandas --with pyarrow python <script>`
-- Run tests: `uv run --with pytest --with pandas --with pyarrow --with openpyxl --with requests pytest tests/ -q`
 
 ---
 

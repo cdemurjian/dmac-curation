@@ -2,9 +2,14 @@
 
 **2026-08-21. Read-only.** Nothing in this audit changed the pipeline, the
 artifacts or the database. Every figure below was re-derived from
-`assay-hygiene-bak/` and carries the script that produced it, in
-`scratchpad/a0*.py`. Where a published figure and my measurement disagree, both
-are printed.
+`assay-hygiene-bak/`, which is a local working copy and is **not** in git — so
+none of the paths this document cites under `assay-hygiene-bak/` will resolve in
+a clone. The scripts that produced the figures were session scratch and were not
+preserved; each section states the derivation instead, and the figures in §1 and
+§2.1 have since been independently reproduced twice — once by a blind review, and
+once by `scripts/assay_hygiene/baseline.py`, which IS in git and re-derives nine
+of them on demand. Where a published figure and my measurement disagree, both are
+printed.
 
 Population: `assay-hygiene-bak/artifacts/findings.csv`, **170,786 rows, 36
 columns** (the brief says 37; it is 36).
