@@ -101,3 +101,9 @@ working/
 # 260 MB of real sample metadata) — never commit it.
 # ============================================================
 assay-hygiene/
+# ...and every sibling copy of it. `assay-hygiene-bak/` held 195 MB of the same
+# real sample metadata while matching NO pattern here, one `git add -A` away from
+# a PUBLIC repo -- and this repo already needed a history rewrite on 2026-08-21 to
+# strip 1,570 sample identifiers. A prefix glob, so a future `-bak2` or `-old` is
+# covered by construction rather than by someone remembering to add a line.
+assay-hygiene-*/
