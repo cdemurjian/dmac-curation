@@ -144,8 +144,10 @@ and that is the only line whose MEANING moved rather than its value. It read
 167,330 against a step that claimed every lineage key; `PRE_UNREACHABLE` now
 takes the ones proposing a (type, assay) pair the house has never made, so the
 two rows together are the whole lineage population and neither alone is it.
-Nothing was dropped: 67,898 + 99,449 = 167,347 keys and `emitted rows` is
-unchanged by the split.
+Nothing was dropped: 67,898 + 99,449 = 167,347 keys, which is that whole
+population AT THIS MEASUREMENT -- the 17 keys between it and the 2026-08-17
+reading of 167,330 are the vocabulary retirement, not the split -- and `emitted
+rows` is unchanged by the split.
 
 THE LINEAGE CEILING IS 172,338 AND THE EMITTED MODE 2 IS SMALLER, by exactly the
 precedence: the gate refuses 4,242 of those rows because a rejected claim names
@@ -939,11 +941,19 @@ def absence_keys(
     """THE INPUT. Every (sample, proposed assay) absence, with its evidence.
 
     A key is here when the sample is NOT registered in the assay AND either a
-    metadata claim names the pair or a lineage neighbour registers it. The union
-    is the point: 166,427 of the real extract's 180,995 keys carry no claim and
-    8,657 carry no neighbour, so neither source alone is the population and
-    quoting either as the input understates the pass by more than an order of
-    magnitude in one direction or 20x in the other.
+    metadata claim names the pair or a lineage neighbour registers it. THE UNION
+    IS THE POINT, and neither source alone is the population. Re-measured
+    2026-08-21 over the real extract's 175,339 keys: 166,586 carry no claim,
+    3,001 carry no neighbour, and 5,752 carry both. So quoting the claim-sourced
+    8,753 as the input understates the pass 20-fold, and quoting the
+    lineage-sourced 172,338 misses 3,001 keys that only a claim raises.
+
+    The 2026-08-17 reading was 166,427 of 180,995 with 8,657 carrying no
+    neighbour, against a vocabulary with no curator rows; every figure above was
+    re-derived rather than adjusted. NONE OF THESE COUNTS IS AFFECTED BY THE
+    REACHABILITY STEP -- they describe where a key came FROM, and `PRE_UNREACHABLE`
+    only changes which step claims it afterwards. All three were measured
+    identical on either side of that change.
 
     A CLAIM NAMING AN ASSAY THE SAMPLE ALREADY HOLDS RAISES NO KEY. There is no
     absence, so there is nothing to propose -- and it is the largest single
@@ -1050,12 +1060,23 @@ def claims_agreeing_with_a_registration(
 # of this type that hold R routinely hold X too.
 #
 # The three outcomes are `compatibility.BAND_ESTABLISHES` and this module does
-# not re-derive them. Measured over the real extract's 6,932 such keys:
+# not re-derive them. RE-MEASURED 2026-08-21 over the real extract's 2,066 such
+# keys, the previous reading having been taken 2026-08-17 over 6,932:
 #
-#     BAND_ROUTINE     744   CLS_ABSENCE_COMPAT   Mode 2 candidate, unproven
-#     BAND_NEVER     5,181   CLS_ALT_LABEL        alternative labels, no action
+#     BAND_ROUTINE     107   CLS_ABSENCE_COMPAT   Mode 2 candidate, unproven
+#     BAND_NEVER       952   CLS_ALT_LABEL        alternative labels, no action
 #     BAND_SOMETIMES   962   CLS_UNRESOLVED       neither test settles it
 #     BAND_NO_SUPPORT   45   CLS_UNRESOLVED       the population is unreadable
+#
+# THE SHRINKAGE IS THE VOCABULARY RETIREMENT AND NOT THE REACHABILITY REWORK,
+# which is worth stating because the two landed a day apart on one branch. Only
+# the first two bands moved -- 744 -> 107 and 5,181 -> 952 -- while
+# BAND_SOMETIMES and BAND_NO_SUPPORT are unchanged to the row, so the retired
+# terms were carrying claims that banded ROUTINE or NEVER. `PRE_COMPAT` claimed
+# 2,066 keys with this split BEFORE the reachability step existed and 2,066
+# after: the step sits below `PRE_LINEAGE` and above this lane, and no key
+# crosses between them. Neither this count nor this table denotes anything
+# different from what it did; only the extract's vocabulary moved.
 #
 # TWO OF THE THREE CLASSES PROPOSE NOTHING, and their rows carry a null `mode`,
 # `A_NONE` and a null `proposed_by`. They are still EMITTED: the alternative

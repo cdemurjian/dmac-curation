@@ -3935,21 +3935,32 @@ def test_a_reduced_rule_set_relabels_the_row_rather_than_aborting_the_run():
 def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness():
     """Every figure the unified pass states, re-derived from the parquet.
 
-    THE INPUT IS 180,995 KEYS AND NOT 172,338 OR 138,007. It is the union of
+    EVERY NUMBER BELOW IS ONE THIS FUNCTION ASSERTS. It stated 180,995 /
+    138,007 / 123,439 / 4,255 / 753 and 866 / 43 / 326 / 247 while the
+    assertions twenty lines down read 175,339 / 130,764 / 122,011 / 4,242 / 749
+    and 585 / 31 / 269 / 35 -- a docstring contradicting its own function, which
+    is worse than a stale figure elsewhere because a reader has no way to tell
+    which half is current. Corrected 2026-08-21 to the asserted values.
+
+    THE INPUT IS 175,339 KEYS AND NOT 172,338 OR 130,764. It is the union of
     every claim-backed absence with the whole lineage ceiling, and neither
-    number alone is it: 123,439 of the 138,007 attached claims name an assay the
+    number alone is it: 122,011 of the 130,764 attached claims name an assay the
     sample already holds and raise no key at all.
 
     THE MODE 2 COUNT IN `findings.csv` IS SMALLER THAN THE CEILING AND THE GAP
     IS THE PRECEDENCE. The lineage lane offers 172,338 rows; the gate refuses
-    4,255 of them because a rejected claim names the same pair, and Mode 1 takes
-    753 more because the sample is registered in nothing and its own metadata
+    4,242 of them because a rejected claim names the same pair, and Mode 1 takes
+    749 more because the sample is registered in nothing and its own metadata
     proposes the assay. Both are counted here rather than inferred from a
-    difference.
+    difference. The remaining 167,347 split 67,898 `PRE_LINEAGE` and 99,449
+    `PRE_UNREACHABLE`, which is a split of the count and not a subtraction from
+    it.
 
-    MODE 3 EMITS NOTHING and the 866 flags increment 1 raised are re-disposed:
-    43 gate rejects, 326 lineage absences, 247 routinely-coexisting pairs, 205
-    unresolved and 45 alternative labels. Not one is a contradiction.
+    MODE 3 EMITS NOTHING and the 585 flags increment 1's detector raises are
+    re-disposed: 31 gate rejects, 269 lineage absences, 35 routinely-coexisting
+    pairs, 205 unresolved and 45 alternative labels. Not one is a contradiction,
+    and not one lands at `PRE_UNREACHABLE` -- a flag carries a claim, and a
+    claim on an unreachable pair is refused by the gate four steps earlier.
     """
     r = _real2()
     type_reg = G.type_registration_index(r["membership"], r["assays"], r["nodes"])
@@ -4099,6 +4110,11 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
     assert lane[S.CLS_ALT_LABEL] == 45
     assert sum(lane.values()) == 585
     assert lane[X.PRE_MODE_1] == 0, "a flagged sample is registered by definition"
+    # ...and none at the new step, which the sum above IMPLIES and does not say.
+    # A flag carries a claim by construction, and a claim on a pair with no
+    # registrations is GATE_UNREACHABLE, which blocks -- so `PRE_GATE` takes it
+    # four steps earlier. Asserted because the docstring states it.
+    assert lane[X.PRE_UNREACHABLE] == 0
     assert not (set(disposition["mode"].dropna()) & {S.MODE_3})
 
     # THE 24, which increment 1 filed inside its 351 ABSENCE_LINEAGE and which
