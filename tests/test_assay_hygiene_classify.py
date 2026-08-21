@@ -3268,21 +3268,60 @@ def test_a_sample_with_no_resolvable_type_is_not_blocked():
 
 
 def test_every_evidence_tuple_is_still_claimed_by_exactly_one_step():
-    """Exhaustive over all 32 combinations. No key may fall through."""
+    """Exhaustive over all 32 combinations. No key may fall through.
+
+    TWO TUPLES ARE SKIPPED AND BOTH SKIPS ARE STATEMENTS, not conveniences.
+    `claim_reaches` without `claim` is refused by `precedence_step` itself, and
+    a tuple with neither a claim nor a neighbour is not an absence key at all --
+    `absence_keys` raises one only from a claim or from a candidate, so
+    `precedence_step` RAISES on it, which is the contract rather than a gap.
+    """
     import itertools
+    seen = set()
     for bits in itertools.product([False, True], repeat=5):
         e = X.Evidence(*bits)
         if e.claim_reaches and not e.claim:
             continue                      # constructible by hand, refused by design
         if not (e.claim or e.lineage):
-            continue                      # no evidence at all: not an input key
+            # no evidence at all: not an input key. Asserted rather than waved
+            # past, since this is the branch `precedence_step`'s second raise
+            # exists for.
+            with pytest.raises(ValueError, match="no step in"):
+                X.precedence_step(e)
+            continue
         step = X.precedence_step(e)
         assert step in X.PRECEDENCE
-        # exactly one, and not merely at least one: every OTHER step's test is
-        # run by hand and the claiming step is asserted to be the first that
-        # fires, so a second step also matching would not go unnoticed.
-        firing = [s for s in X.PRECEDENCE if X._PRECEDENCE_TESTS[s](e)]
-        assert firing[0] == step, (e, firing)
+        # A SECOND CASCADE, WRITTEN OUT BY HAND. This read
+        # `firing = [s for s in PRECEDENCE if _PRECEDENCE_TESTS[s](e)]` then
+        # `assert firing[0] == step`, which CANNOT FAIL: `precedence_step`
+        # returns the first `PRECEDENCE` member whose test fires and `firing`
+        # was built the same way, so it asserted the code against itself. Its
+        # comment also promised to notice "a second step also matching", which
+        # was never a defect -- two steps matching is the NORMAL cascade, and
+        # `lineage=True, reachable=True` fires both lineage tests by design.
+        #
+        # What is worth checking is that the ORDER and the TESTS together send
+        # each evidence tuple where this file says they do, so the rule is
+        # restated here in a form that shares no code with the one under test.
+        # The `raise` inside `precedence_step` covers fall-through; this covers
+        # mis-ordering.
+        if e.claim and not e.claim_reaches:
+            expect = X.PRE_GATE
+        elif e.claim and e.unregistered:
+            expect = X.PRE_MODE_1
+        elif e.lineage and e.reachable:
+            expect = X.PRE_LINEAGE
+        elif e.lineage:
+            expect = X.PRE_UNREACHABLE
+        else:
+            expect = X.PRE_COMPAT     # e.claim, by the guard above
+        assert step == expect, (e, step, expect)
+        seen.add(step)
+
+    # ...and the hand-written cascade is not vacuous on some branch never taken:
+    # five of the six steps are reached over the 32 tuples. `PRE_MODE_3` is the
+    # sixth and claims nothing under any evidence, which is the finding.
+    assert seen == set(X.PRECEDENCE) - {X.PRE_MODE_3}
 
 
 def test_a_gate_rejected_claim_reaches_no_mode_even_when_a_lineage_neighbour_carries_the_pair():

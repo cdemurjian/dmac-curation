@@ -113,29 +113,43 @@ carried into this task correctly:
 
 The after-gate figures had not been measured by anyone before this task.
 
-And the unified pass, measured 2026-08-17 over the same extract. The INPUT is
-every (sample, proposed assay) ABSENCE key -- one a metadata claim names, or one
-a lineage neighbour makes available, or both -- and the five steps partition it:
+And the unified pass, RE-MEASURED 2026-08-21 over the same extract, every figure
+re-derived rather than adjusted. The INPUT is every (sample, proposed assay)
+ABSENCE key -- one a metadata claim names, or one a lineage neighbour makes
+available, or both -- and the SIX steps partition it:
 
-    attached claims                                  138,007
-      naming an assay the sample already holds       123,439   no absence, no key
+    attached claims                                  130,764
+      naming an assay the sample already holds       122,011   no absence, no key
 
-    input keys                                       180,995
-      PRE_GATE      refused, a rejected claim          4,567   emits nothing
-      PRE_MODE_1    registered in nothing              2,166
-      PRE_LINEAGE   a neighbour carries it           167,330
-      PRE_COMPAT    the co-registration test           6,932
-      PRE_MODE_3    the residue                            0   no detector
+    input keys                                       175,339
+      PRE_GATE        refused, a rejected claim        4,553   emits nothing
+      PRE_MODE_1      registered in nothing            1,373
+      PRE_LINEAGE     a neighbour carries it,
+                      and the pair is reachable       67,898
+      PRE_UNREACHABLE a neighbour carries it, and no
+                      sample of this type is
+                      registered in this assay        99,449
+      PRE_COMPAT      the co-registration test         2,066
+      PRE_MODE_3      the residue                          0   no detector
 
-    emitted rows                                     176,428
-      MODE_1                                           2,166
-      MODE_2     lineage 167,330 + compat 744         168,074
-      no mode    5,181 CLS_ALT_LABEL + 1,007 CLS_UNRESOLVED    6,188
+    emitted rows                                     170,786
+      MODE_1                                           1,373
+      MODE_2     lineage 67,898 + unreachable 99,449
+                 + compat 107                        167,454
+      no mode    952 CLS_ALT_LABEL + 1,007 CLS_UNRESOLVED      1,959
       MODE_3                                               0
 
+THE PRE_LINEAGE ROW OF THAT TABLE DENOTES A SMALLER POPULATION THAN IT USED TO,
+and that is the only line whose MEANING moved rather than its value. It read
+167,330 against a step that claimed every lineage key; `PRE_UNREACHABLE` now
+takes the ones proposing a (type, assay) pair the house has never made, so the
+two rows together are the whole lineage population and neither alone is it.
+Nothing was dropped: 67,898 + 99,449 = 167,347 keys and `emitted rows` is
+unchanged by the split.
+
 THE LINEAGE CEILING IS 172,338 AND THE EMITTED MODE 2 IS SMALLER, by exactly the
-precedence: the gate refuses 4,255 of those rows because a rejected claim names
-the same pair, and Mode 1 takes 753 more because the sample is registered in
+precedence: the gate refuses 4,242 of those rows because a rejected claim names
+the same pair, and Mode 1 takes 749 more because the sample is registered in
 nothing and its own metadata proposes the assay. Both are counted by name; a
 difference nobody names is how two readings of one number get published.
 """
@@ -1461,10 +1475,19 @@ def unify_findings(
 # other is this project's signature defect.
 #
 # `rows_mode_2` IS NOT THE LINEAGE CEILING and the three `lineage_*` keys are
-# why. The lane offers 172,338; the gate refuses 4,255 and Mode 1 takes 753, so
-# 167,330 lineage rows plus 744 compatibility rows make 168,074. Every one of
-# those five numbers is a key here, because a difference nobody names is how two
-# readings of one number get published -- which has happened on this branch.
+# why. Re-measured 2026-08-21: the lane offers 172,338; the gate refuses 4,242
+# and Mode 1 takes 749, leaving 167,347 lineage rows -- 67,898 at `PRE_LINEAGE`
+# and 99,449 at `PRE_UNREACHABLE` -- which with 107 compatibility rows make
+# 167,454. Every one of those numbers is a key here, because a difference nobody
+# names is how two readings of one number get published -- which has happened on
+# this branch.
+#
+# `keys_lineage` NO LONGER DENOTES THE WHOLE LINEAGE POPULATION and the name did
+# not change, which is the trap this comment exists to spring. It is the
+# REACHABLE half; `keys_unreachable` is the other. Any sentence that used to
+# subtract `keys_lineage` from the ceiling must now subtract both, and
+# `test_mode_1_takes_a_key_a_lineage_neighbour_also_offers_and_the_refusal_is_counted`
+# asserts that four-term identity so the omission breaks rather than reads.
 FINDINGS_CENSUS_KEYS = (
     "input_keys",
     "keys_from_a_claim",
@@ -1512,9 +1535,16 @@ def findings_census(
     `keys` AND `steps` are both taken, and neither is derived from the other
     here. `steps` says which step claimed each key and `keys` says what evidence
     it carried, and the second is not recoverable from the first: a
-    `PRE_LINEAGE` key may or may not also carry a claim -- 903 of the real
-    extract's 167,330 do -- so `keys_from_a_claim` cannot be counted off the
-    steps at all.
+    `PRE_LINEAGE` key may or may not also carry a claim -- re-measured
+    2026-08-21, 761 of the real extract's 67,898 do -- so `keys_from_a_claim`
+    cannot be counted off the steps at all.
+
+    THE SIBLING STEP MAKES THAT ARGUMENT SHARPER RATHER THAN WEAKER. 0 of the
+    99,449 `PRE_UNREACHABLE` keys carry a claim, and that is a fact about the
+    GATE and not about this step: a claim on a pair with no registrations is
+    `GATE_UNREACHABLE`, which blocks, so `PRE_GATE` claims such a key four steps
+    earlier. A reader who inferred "unreachable keys never carry claims" from
+    the step alone would have the right number for the wrong reason.
 
     `agreeing` is `claims_agreeing_with_a_registration`'s output, passed in
     rather than recomputed, so the census cannot hold a second opinion about the
