@@ -180,7 +180,16 @@ BY_BOTH = "BY_BOTH"              # precedent proposed, the claim disambiguated
 # has paid for five times, and it was shipped here for one review cycle: 10 rows
 # of the real extract's 172,338 read `BY_PRECEDENT` while denying it.
 BY_LINEAGE_ONLY = "BY_LINEAGE_ONLY"
-PROPOSAL_SOURCES = (BY_CLAIM, BY_PRECEDENT, BY_BOTH, BY_LINEAGE_ONLY)
+# The fourth combination of (precedent rule, gated claim), which `mode2.
+# _proposal_source` raised on until 2026-08-21. Its absence was a property of
+# the 2026-08-17 extract and not of the logic, and the reachability rework moves
+# exactly the populations that determine it. Named for what it IS -- a claim
+# with no measured hop -- rather than widened out of `BY_BOTH`, which means
+# "precedent proposed, the claim disambiguated" and would assert a rate that is
+# not there.
+BY_CLAIM_NO_RULE = "BY_CLAIM_NO_RULE"
+PROPOSAL_SOURCES = (BY_CLAIM, BY_PRECEDENT, BY_BOTH, BY_LINEAGE_ONLY,
+                    BY_CLAIM_NO_RULE)
 
 # --- the joined frame every mode reads ---------------------------------------
 #

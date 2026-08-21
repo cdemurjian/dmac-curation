@@ -41,8 +41,8 @@ import pandas as pd
 from . import _schema as S
 from . import gate as G
 from . import lineage as L
-from .classify import (BY_BOTH, BY_LINEAGE_ONLY, BY_PRECEDENT,
-                       _registered_columns)
+from .classify import (BY_BOTH, BY_CLAIM_NO_RULE, BY_LINEAGE_ONLY,
+                       BY_PRECEDENT, _registered_columns)
 from .precedent import assay_index, membership_index
 
 # --- Mode 2 ------------------------------------------------------------------
@@ -421,35 +421,32 @@ def _proposal_source(rule, claim, sample_id: int, assay_id: int) -> str:
         rule, claim   -> BY_BOTH           precedent proposed, the claim chose
         rule, -       -> BY_PRECEDENT      the rule alone
         -,    -       -> BY_LINEAGE_ONLY   the neighbour's registration alone
-        -,    claim   -> RAISES            see below
+        -,    claim   -> BY_CLAIM_NO_RULE  the claim with no measured hop
 
-    RAISES ON THE FOURTH, and the refusal is the honest answer rather than a
-    fifth value invented for a population of zero. Measured 2026-08-17 over the
-    real extract, that combination occurs 0 times: all 10 rows with no rule also
-    carry no gated claim, and all 1,656 claim-backed rows have a rule. `BY_BOTH`
-    is defined as "precedent proposed, the claim disambiguated", so labelling a
-    rule-less row with it would assert a precedent that is not there -- exactly
-    the defect this function was extracted to fix, one combination over.
+    THE FOURTH IS NAMED AS OF 2026-08-21, and until then it raised. The refusal
+    was the honest answer while the population was zero and the logic was
+    stable, and it was neither once the reachability rework began. Measured
+    2026-08-17 over the real extract, the combination occurs 0 times: all 10
+    rows with no rule also carry no gated claim, and all 1,656 claim-backed rows
+    have a rule. That is a property of THAT EXTRACT, not of this function --
+    which rows reach a hop at all is exactly what the rework moves, so the first
+    run under the new gate could produce one and abort on it, having already
+    spent the whole detection pass. A named member costs nothing and cannot
+    abort anything.
 
-    Checked HERE, in the one place every row passes through, rather than only in
-    a test, following `precedent.assay_index`, which raises on a fallback
-    collision that likewise holds today only by luck of the data. The message
-    names the member to add so the next task does not have to derive it.
+    `BY_CLAIM_NO_RULE` IS A FIFTH MEMBER AND NOT A WIDENING of either existing
+    value, for the reason the raise itself gave: `BY_BOTH` is defined as
+    "precedent proposed, the claim disambiguated" and would assert a precedent
+    that is not there, and `BY_LINEAGE_ONLY` means the neighbour's registration
+    ALONE and would hide the claim. Two meanings under one name is the defect
+    this family exists to stop, and it is the defect that put `BY_LINEAGE_ONLY`
+    here one combination over.
     """
     if rule is not None:
         return BY_BOTH if claim is not None else BY_PRECEDENT
     if claim is None:
         return BY_LINEAGE_ONLY
-    raise ValueError(
-        f"({sample_id}, {assay_id}) has a gated metadata claim and NO precedent "
-        "rule, which is a combination `PROPOSAL_SOURCES` cannot spell. It occurs "
-        "0 times on the 2026-08-17 extract, so no value was invented for it. "
-        "`BY_BOTH` means 'precedent proposed, the claim disambiguated' and is "
-        "false here; `BY_LINEAGE_ONLY` means the neighbour's registration ALONE "
-        "and hides the claim. Add a fifth member naming the claim without the "
-        "rate -- and widen neither of the existing two, which is how this "
-        "package acquires two meanings under one name."
-    )
+    return BY_CLAIM_NO_RULE
 
 
 def mode2_findings(

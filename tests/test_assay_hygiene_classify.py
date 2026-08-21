@@ -2228,13 +2228,15 @@ def test_every_proposal_source_is_in_the_closed_family():
         f"BY_* constants {sorted(family)} disagree with the closed tuple "
         f"{X.PROPOSAL_SOURCES}")
     assert len(set(X.PROPOSAL_SOURCES)) == len(X.PROPOSAL_SOURCES)
-    assert len(X.PROPOSAL_SOURCES) == 4
+    assert len(X.PROPOSAL_SOURCES) == 5
 
     # THE WRONG RULE, run by hand: a literal pin alone. It passes on a family
     # that has gained a member the tuple does not know about, which is what this
-    # test exists to stop.
+    # test exists to stop -- and the family gained `BY_CLAIM_NO_RULE` on
+    # 2026-08-21, when `mode2._proposal_source` stopped raising on the fourth
+    # combination, so the pin below is the one that had to be updated with it.
     assert set(family) == {"BY_CLAIM", "BY_PRECEDENT", "BY_BOTH",
-                           "BY_LINEAGE_ONLY"}
+                           "BY_LINEAGE_ONLY", "BY_CLAIM_NO_RULE"}
 
     # no value collides with another closed family, checked against `_schema`'s
     # own, since a value readable in the wrong column errors nowhere
@@ -2313,8 +2315,8 @@ def test_a_proposal_with_no_measured_rate_says_lineage_only_not_precedent():
 
     # the family stays closed, enumerable and collision-free
     assert X.PROPOSAL_SOURCES == (X.BY_CLAIM, X.BY_PRECEDENT, X.BY_BOTH,
-                                  X.BY_LINEAGE_ONLY)
-    assert len(set(X.PROPOSAL_SOURCES)) == 4
+                                  X.BY_LINEAGE_ONLY, X.BY_CLAIM_NO_RULE)
+    assert len(set(X.PROPOSAL_SOURCES)) == 5
     assert set(findings.proposed_by) <= set(X.PROPOSAL_SOURCES)
     # EVERY row with a null rate carries the new member, and every row with the
     # new member has a null rate -- read off the frame, not off the two ids above
@@ -2323,18 +2325,23 @@ def test_a_proposal_with_no_measured_rate_says_lineage_only_not_precedent():
     assert null_rate == lineage_only == {unmeasured.name}
 
 
-def test_a_claim_with_no_precedent_rule_is_refused_rather_than_mislabelled():
-    """The fourth combination has no value, and inventing one is how buckets lie.
+def test_a_claim_with_no_precedent_rule_names_its_own_source():
+    """The fourth combination, which raised until 2026-08-21 and now has a name.
 
-    (precedent rule, gated claim) has four combinations and three have honest
-    labels. The fourth -- a claim on a hop with NO rule -- occurs 0 times on the
-    real extract, so no member was invented for it: `BY_BOTH` would assert a
-    precedent that is not there and `BY_LINEAGE_ONLY` would hide the claim.
+    (precedent rule, gated claim) has four combinations. Three always had honest
+    labels; the fourth -- a claim on a hop with NO rule -- occurs 0 times on the
+    2026-08-17 extract, so for one increment it was REFUSED rather than given a
+    member invented for a population of zero.
 
-    It is refused in the emitter rather than only in a test, following
-    `precedent.assay_index`, which raises on a collision that also holds today
-    only by luck of the data. This test CONSTRUCTS the combination, which is the
-    only way to know the guard fires rather than merely exists.
+    That refusal was safe only while the populations were fixed. The
+    reachability rework moves exactly which rows reach a hop, so the combination
+    can now arise on a real run, and a raise there aborts the whole detection
+    pass after it has already been paid for. `BY_CLAIM_NO_RULE` is the fifth
+    member: `BY_BOTH` would assert a precedent that is not there and
+    `BY_LINEAGE_ONLY` would hide the claim, so it is neither of those widened.
+
+    This test still CONSTRUCTS the combination, which is the only way to know
+    the branch is reached rather than merely written.
     """
     w = _world2()
     # give 360 -- the sample whose (10, D.IMG, MUS, 11) hop has no rule -- a
@@ -2346,13 +2353,30 @@ def test_a_claim_with_no_precedent_rule_is_refused_rather_than_mislabelled():
         [("Type", "omega", 11, "Assay 11", 700, 45, 0.97, S.P_LEARNED)],
         columns=S.VOCAB_COLUMNS)], ignore_index=True)
 
-    # the claim must REACH a mode, or the guard is not the thing being tested
+    # the claim must REACH a mode, or the branch is not the thing being tested
     attached = _attached2(w)
     hit = attached[(attached.sample_id == 360) & (attached.internal_assay_id == 11)]
     assert len(hit) == 1 and G.reaches_modes(attached)[hit.index[0]]
 
-    with pytest.raises(ValueError, match="fifth member"):
-        _pipeline2(w)
+    # the run COMPLETES -- the point of the change -- and the row is labelled
+    _, _, findings = _pipeline2(w)
+    row = _row(findings, 360, 11)
+    assert row.proposed_by == X.BY_CLAIM_NO_RULE
+    assert row.proposed_by in X.PROPOSAL_SOURCES
+
+    # ...and the two wrong answers, simulated by hand, DIFFER from it. Each is
+    # falsified by a field of this very row rather than by assertion: there is
+    # no rate to have proposed anything, and the claim the other would hide is
+    # spelled out in the summary.
+    assert row.proposed_by != X.BY_BOTH
+    assert pd.isna(row.precedent_rate)
+    assert "NO measured basis" in row.evidence_summary
+    assert row.proposed_by != X.BY_LINEAGE_ONLY
+    assert "the sample's own metadata agrees" in row.evidence_summary
+
+    # the SAME row without the claim is the third combination, so the new member
+    # is carrying the claim and nothing else
+    assert _row(_pipeline2()[2], 360, 11).proposed_by == X.BY_LINEAGE_ONLY
 
 
 def test_the_survival_table_says_how_much_evidence_its_survivors_rest_on():
@@ -3565,20 +3589,23 @@ def test_the_disposition_carries_every_prior_flag_with_the_step_that_now_claims_
         assert r.evidence_summary == row.evidence_summary
 
 
-def test_the_proposal_source_refusal_fires_under_a_reduced_rule_set():
-    """The guard has held on the real extract by luck of the data. Not here.
+def test_a_reduced_rule_set_relabels_the_row_rather_than_aborting_the_run():
+    """The combination is 0 on the real extract by luck of the data. Not here.
 
-    `_proposal_source` refuses the (no precedent rule, gated claim) combination
-    because no honest value exists for it, and that combination occurs 0 times
-    on the 2026-08-17 extract -- so every test of the raise until now had to
-    CONSTRUCT it by adding a claim. Task 7's backtest measured the same
-    combination arising 6, 4 and 23 times at its 20%, seed-7 and 50% hold-outs,
-    because a backtest mines its rules from TRAINING edges alone and a reduced
-    rule set is exactly what makes a hop rule-less.
+    THIS IS THE TEST THAT ARGUED THE RAISE OUT OF EXISTENCE. `_proposal_source`
+    used to refuse the (no precedent rule, gated claim) combination, on the
+    grounds that it occurs 0 times on the 2026-08-17 extract -- so every test of
+    the raise had to CONSTRUCT it by adding a claim. But task 7's backtest
+    measured the same combination arising 6, 4 and 23 times at its 20%, seed-7
+    and 50% hold-outs, because a backtest mines its rules from TRAINING edges
+    alone and a reduced rule set is exactly what makes a hop rule-less. The zero
+    was a property of one extract read with one rule set, and both are about to
+    move under the reachability rework.
 
-    So the guard is exercised from the other direction here: the claim stays put
-    and the RULE is removed, which is what any caller mining precedent over a
-    subset does.
+    So it is exercised from the other direction here: the claim stays put and
+    the RULE is removed, which is what any caller mining precedent over a subset
+    does. What that must produce is a relabelled row and a COMPLETED run, not an
+    exception thrown away several minutes into a detection pass.
     """
     w = _world3()
     # (720,12) is the one row in this world that is both claim-backed and
@@ -3594,8 +3621,23 @@ def test_the_proposal_source_refusal_fires_under_a_reduced_rule_set():
           & (w["precedent"].internal_assay_id == 12))]
     assert len(reduced) == len(w["precedent"]) - 1
     w2 = dict(w, precedent=reduced)
-    with pytest.raises(ValueError, match="fifth member"):
-        _pipeline3(w2)
+    _, parts2 = _pipeline3(w2)
+
+    row = _found(parts2["findings"], 720, 12)
+    assert row.proposed_by == X.BY_CLAIM_NO_RULE
+    # losing the rule costs the ROW its rate and nothing else -- the pass emits
+    # the same population, which is what "does not abort" has to mean
+    assert pd.isna(row.precedent_rate)
+    assert len(parts2["findings"]) == len(parts["findings"])
+
+    # THE WRONG RULES, by hand. Keeping `BY_BOTH` is what a widening would have
+    # done, and it is the label this same row carried one rule ago -- so it is
+    # not merely a different string, it is the assertion the removed rule used
+    # to license.
+    assert row.proposed_by != M2.BY_BOTH
+    assert _found(parts["findings"], 720, 12).proposed_by == M2.BY_BOTH
+    assert row.proposed_by != X.BY_LINEAGE_ONLY
+    assert "the sample's own metadata agrees" in row.evidence_summary
 
 
 def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness():
