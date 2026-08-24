@@ -866,6 +866,32 @@ _PRECEDENCE_TESTS = {
     #    as write candidates, because lineage fired first and nothing tested the
     #    term. All 24 are lineage candidates, so the gate is the only step that
     #    can stop them.
+    #
+    #    IT IS ONE STEP AND NOT TWO, AND THAT WAS MEASURED RATHER THAN ASSUMED.
+    #    A split was proposed: `GATE_UNREACHABLE` blocks coherently -- no sample
+    #    of the type is registered in the assay anywhere, so the lineage test
+    #    fails for the same reason -- while `GATE_INCOHERENT` is a defect in the
+    #    VOCABULARY and says nothing about what a neighbour holds, so an
+    #    incoherent-only key arguably belongs at `PRE_LINEAGE`. Measured over
+    #    this extract, the population that split would recover is EMPTY:
+    #
+    #      keys claimed by PRE_GATE                              4,553
+    #        GATE_UNREACHABLE;GATE_LOW_SUPPORT                   3,495
+    #        GATE_UNREACHABLE                                    1,058
+    #        blocked by GATE_INCOHERENT alone                        0
+    #      of the 4,553, those a lineage neighbour ALSO offers   4,242
+    #        of THOSE, blocked by GATE_INCOHERENT alone              0
+    #
+    #    The cause is one layer up: `gate.incoherent_families` is empty over the
+    #    736 shipped vocabulary rows, so 0 of 130,764 gated claims carry the
+    #    outcome at all. This module's own docstring recorded 55 such claims on
+    #    2026-08-17; the operator retired four vocabulary terms on 2026-08-21
+    #    and the family is now coherent. So the split is not made -- it would
+    #    add a step, a lane and a precedence swap to move zero rows -- and the
+    #    measurement is pinned by
+    #    `test_no_key_the_gate_refuses_is_refused_for_an_INCOHERENT_TERM_alone`,
+    #    which FAILS if an incoherent family a lineage key also names ever
+    #    returns. That failure is the signal to re-open this decision.
     PRE_GATE: lambda e: e.claim and not e.claim_reaches,
     # 2. Mode 1. Registered in nothing, so there is no registration to reason
     #    from and metadata is the only evidence there is.

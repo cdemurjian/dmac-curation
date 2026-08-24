@@ -4337,6 +4337,99 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
     assert not (k24 & emitted), "not one of the 24 reaches a row"
 
 
+def test_no_key_the_gate_refuses_is_refused_for_an_INCOHERENT_TERM_alone():
+    """THE MEASUREMENT THAT CLOSED THE `PRE_GATE` SPLIT AS WON'T-FIX.
+
+    THE PROPOSED DEFECT. `PRE_GATE` is first in the precedence and is the only
+    non-emitting step, so a key whose claim the gate rejected emits no row even
+    where a lineage neighbour INDEPENDENTLY registers that assay. For
+    `GATE_UNREACHABLE` that is coherent -- no sample of the type is registered
+    in the assay anywhere, so the lineage test fails for the same reason. For
+    `GATE_INCOHERENT` it is not: an incoherent term family is a defect in the
+    VOCABULARY and says nothing about what the neighbour holds, so good
+    evidence would be discarded because unrelated bad evidence exists. The
+    proposed fix was to split `PRE_GATE` and let incoherent-only keys fall
+    through to `PRE_LINEAGE`.
+
+    THE MEASUREMENT, over this extract and this vocabulary, and it is the
+    reason nothing was split:
+
+        keys claimed by PRE_GATE                                4,553
+          by gate_failures  GATE_UNREACHABLE;GATE_LOW_SUPPORT   3,495
+                            GATE_UNREACHABLE                    1,058
+          blocked by GATE_INCOHERENT alone                          0
+        of the 4,553, those ALSO carrying a lineage neighbour   4,242
+          of THOSE, blocked by GATE_INCOHERENT alone                0
+
+    THE ROOT CAUSE IS UPSTREAM AND IS ASSERTED HERE TOO: `incoherent_families`
+    is EMPTY over the 736 shipped vocabulary rows (725 families), so no claim
+    can carry the outcome at all -- 0 of 130,764 gated claims do. It is not the
+    curator exemption suppressing the test either; the families themselves are
+    coherent. `gate.py`'s module docstring records 55 `GATE_INCOHERENT` over
+    138,007 claims on 2026-08-17, before the operator retired four vocabulary
+    terms on 2026-08-21, so the population this split would have recovered was
+    small then and is empty now.
+
+    THIS TEST IS THE TRIGGER TO REOPEN THE TASK. It fails the moment a
+    curator's edit reintroduces an incoherent family that a lineage-backed key
+    also names -- which is the only state in which splitting `PRE_GATE` moves a
+    row. Read that failure as "re-measure Task 7", not as a regression in this
+    module.
+
+    WHAT MAKES IT FAIL TODAY: nothing, and that is the finding. It is
+    falsifiable rather than vacuous because the fixture world DOES produce the
+    outcome -- `make_fixture`'s sample 202 carries `Software: cometchip` for
+    exactly this case -- so the code path is exercised elsewhere in this file,
+    and the zero here is a fact about the data and not about a dead branch.
+    """
+    r = _real2()
+    type_reg = G.type_registration_index(r["membership"], r["assays"], r["nodes"])
+    types = G.sample_type_index(r["nodes"])
+    gated = G.gate_claims(r["claims"], r["vocabulary"], type_reg, types)
+    attached = X.attach_gate(r["claims"], gated)
+    registered = A.registered_internal(r["membership"], r["assays"])
+    population = X.unregistered_samples(r["samples"], r["membership"],
+                                        r["assays"])
+    children_of, parents_of, uuid_of, _ = L.lineage_index(
+        r["edges"], r["samples"], r["membership"])
+    candidates = M2.mode2_candidates(children_of, parents_of, registered)
+    keys = X.absence_keys(attached, population=population,
+                          registered=registered, candidates=candidates,
+                          type_reg=type_reg, types=types, uuid_of=uuid_of)
+    steps = X.precedence_steps(keys)
+
+    # Read off `gate_failures`, the COMPLETE set, and never off `gate`, which
+    # holds only the most severe outcome: a claim failing coherence AND
+    # reachability reads `GATE_UNREACHABLE` in the second column and would hide
+    # the very population this task was about.
+    blockers = {}
+    for row in attached.itertuples(index=False):
+        blockers[(int(row.sample_id), int(row.internal_assay_id))] = {
+            o for o in str(row.gate_failures).split(";")
+            if o and G.blocks_mode(o)}
+
+    refused = [k for k, step in steps.items() if step == X.PRE_GATE]
+    assert len(refused) == 4553
+    assert Counter(
+        ";".join(sorted(blockers[k])) for k in refused) == {
+        S.GATE_UNREACHABLE: 4553}
+    assert not [k for k in refused if blockers[k] == {S.GATE_INCOHERENT}]
+
+    # ...and specifically over the population the split would have recovered:
+    # a refused key that a lineage neighbour ALSO offers.
+    with_neighbour = [k for k in refused if keys[k].lineage]
+    assert len(with_neighbour) == 4242
+    assert not [k for k in with_neighbour
+                if blockers[k] == {S.GATE_INCOHERENT}]
+
+    # the root cause, one layer up: no family maps to two assays, so no claim
+    # can carry the outcome. Asserted through `gate.incoherent_families`, the
+    # one definition, rather than by re-grouping the vocabulary here.
+    assert G.incoherent_families(r["vocabulary"]) == {}
+    assert not [g for g in gated.gate_failures.astype(str)
+                if S.GATE_INCOHERENT in g]
+
+
 def test_a_lane_omitted_from_the_unified_pass_fails_rather_than_dropping_a_whole_mode():
     """The OMISSION case, which the typo guard could not see and review found live.
 
