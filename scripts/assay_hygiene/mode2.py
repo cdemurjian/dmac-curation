@@ -892,6 +892,14 @@ def mode2_findings(
                                        if rule is not None else None),
             "precedent_n_parent_only": (rule.n_parent_only
                                         if rule is not None else None),
+            # THE CHECK ON `proposed_by`, ON THE SAME ROW. `n_both > 0` is the
+            # house having made this co-registration at least once; 115,087 of
+            # the real extract's 166,578 BY_PRECEDENT rows read zero there, so
+            # the provenance label is at its most common exactly where the
+            # precedent behind it argues against the proposal. Null where there
+            # is no rule -- nobody measured -- which is the same three-state
+            # rule the whole block above follows.
+            "precedent_supports": None if rule is None else rule.n_both > 0,
             "proposed_by": _proposal_source(rule, claim, sample_id, assay_id),
             "evidence_summary": _mode2_summary(
                 action, relation, neighbour_uuid, len(kids) + len(rents),

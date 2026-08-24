@@ -33,6 +33,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 from assay_hygiene import _schema as S  # noqa: E402
 from assay_hygiene import classify as X  # noqa: E402
 from assay_hygiene import mode2 as M2  # noqa: E402
+from assay_hygiene import precedent as B  # noqa: E402
 
 # `_pipeline2` and its two helpers are the Mode 2 world, and they are IMPORTED
 # rather than rebuilt: a second assembly of the same stages is a second
@@ -496,3 +497,84 @@ def test_bootstrap_evidence_speaks_on_both_sides_of_the_floor():
     # ...and the sample type is named on both sides, since the sentence is what
     # a curator reads instead of the two indexes it was measured from
     assert "TIS" in note
+
+
+# --- the two columns a consumer filters and joins on --------------------------
+
+
+def _pairs(frame):
+    """The (sample, proposed assay) keys of a frame, as a set."""
+    return {(int(s), int(a))
+            for s, a in zip(frame.sample_id, frame.proposed_internal_assay_id)}
+
+
+def test_a_rule_that_has_never_once_co_registered_is_marked_unsupported():
+    """`precedent_supports` says what `proposed_by` cannot, on the same row.
+
+    `proposed_by` IS A PROVENANCE LABEL AND IT IS NOT LYING. `BY_PRECEDENT`
+    means a rule on the hop produced the proposal and no gated claim did; it
+    says nothing whatever about what that rule CONTAINS. Measured 2026-08-24
+    over the real extract's 170,786 findings rows, 115,087 of the 166,578
+    `BY_PRECEDENT` rows -- 69.1% -- rest on a rule reading `n_both == 0`, which
+    is the house stating it has never once made that co-registration. So a
+    curator filtering `proposed_by` for well-supported rows gets, in the
+    majority, the rows precedent argues against. This column is what makes that
+    filterable, and `proposed_by` is left alone.
+
+    `(350, 11)` IS THAT SHAPE HERE. `_precedent2` carries `(10, MUS, PAV, 11)`
+    at 0 / 1 / 1 deliberately -- a MEASURED zero, as against `(360, 11)`'s
+    missing rule -- and the ADD_PARENT row off edge E5 keys onto it. The three
+    states are three values and not two: `None` where nobody measured.
+
+    THE TWO FILTERS RETURN THE SAME COUNT IN THIS WORLD, 26, AND NOT THE SAME
+    ROWS -- so a count comparison would pass here on a column that did nothing,
+    and the assertion below is on the SETS. They disagree in both directions,
+    which is the point: `(350, 11)` is proposed by precedent that argues
+    against it, and `(280, 13)` is supported by precedent that a metadata claim
+    disambiguated, so it reads `BY_BOTH` and no `proposed_by` filter finds it.
+    On the real extract the counts do also differ, hugely -- 52,235 supported
+    rows against 166,578 `BY_PRECEDENT` -- and that is a fact about that
+    extract rather than about this rule.
+    """
+    _, _, findings = _pipeline2()
+
+    unsupported = _row(findings, 350, 11)
+    assert unsupported.proposed_by == X.BY_PRECEDENT
+    assert unsupported.precedent_n_both == 0
+    assert unsupported.precedent_rate == 0.0
+    assert unsupported.precedent_supports is False
+
+    supported = _row(findings, 200, 11)
+    assert supported.proposed_by == X.BY_PRECEDENT
+    assert supported.precedent_n_both == 9
+    assert supported.precedent_supports is True
+
+    # a hop with NO rule is neither, and never False: nobody measured, which is
+    # the distinction the whole precedent block already turns on
+    unmeasured = _row(findings, 360, 11)
+    assert pd.isna(unmeasured.precedent_n_both)
+    assert unmeasured.precedent_supports is None
+
+    by_precedent = _pairs(findings[findings.proposed_by == X.BY_PRECEDENT])
+    supports = _pairs(findings[findings.precedent_supports == True])  # noqa: E712
+    assert len(by_precedent) == len(supports) == 26, (
+        "the two counts are equal in this world; if that ever stops being "
+        "true the docstring above is what needs correcting, not the sets below")
+    assert by_precedent != supports
+    assert by_precedent - supports == {(350, 11)}
+    assert supports - by_precedent == {(280, 13)}
+
+    # THE READER'S OWN FILTER, RUN. Narrowing the `BY_PRECEDENT` population by
+    # this column is strictly smaller, which is the whole use for it.
+    bp = findings[findings.proposed_by == X.BY_PRECEDENT]
+    assert len(bp[bp.precedent_supports == True]) < len(bp)  # noqa: E712
+
+    # the column agrees with the grain it is derived from, computed the other
+    # way round: a lane that emitted a constant would break this
+    assert _pairs(findings[findings.precedent_supports == True]) == \
+        _pairs(findings[findings.precedent_n_both > 0])       # noqa: E712
+    assert _pairs(findings[findings.precedent_supports == False]) == \
+        _pairs(findings[findings.precedent_n_both == 0])      # noqa: E712
+    assert _pairs(findings[findings.precedent_supports.isna()]) == \
+        _pairs(findings[findings.precedent_n_both.isna()])
+

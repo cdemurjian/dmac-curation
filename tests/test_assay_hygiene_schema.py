@@ -76,13 +76,23 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
     itself as `registered_internal_assay_ids`, so there is nothing for a
     tiebreak to recover later and nothing at the end to protect. The successor
     below is strictly stronger than the assertion it replaces: the old test
-    pinned two facts about one column, this one pins all 36 columns, their
+    pinned two facts about one column, this one pins all 37 columns, their
     order, and their uniqueness.
 
     THIS LINE SAID 34 while the paragraph two below it explains why the count
     is 36, in the same docstring, added the same day. The number is not derived
     here -- the assertion reads `FINDING_COLUMNS` -- so the prose drifted and
     nothing went red. Corrected 2026-08-18.
+
+    37 and not 36 since 2026-08-24. `precedent_supports` is `n_both > 0` on the
+    row that already carries `n_both`, and it is redundant on purpose: 115,087
+    of the real extract's 166,578 `BY_PRECEDENT` rows (69.1%) rest on a rule
+    reading zero there, so the one column a curator would filter on to find
+    well-supported proposals returns, in the majority, the rows precedent
+    argues against. `proposed_by` is unchanged -- it is a provenance label and
+    it is accurate as one. Nullable, because "no rule on this hop" and "a rule
+    that reads never" are the two states the rest of the precedent block
+    already keeps apart.
 
     34 and not 31 since 2026-08-17. `co_reg_registered_internal_assay_id` names
     which pair the winning rate measured, and
@@ -126,6 +136,7 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
         "compat_band",
         "precedent_rate", "precedent_direction",
         "precedent_n_both", "precedent_n_child_only", "precedent_n_parent_only",
+        "precedent_supports",
         "proposed_by", "evidence_summary", "action",
     ]
     assert len(set(S.FINDING_COLUMNS)) == len(S.FINDING_COLUMNS)

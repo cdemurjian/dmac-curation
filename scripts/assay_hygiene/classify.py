@@ -642,6 +642,9 @@ def mode1_findings(
             "precedent_n_both": None,
             "precedent_n_child_only": None,
             "precedent_n_parent_only": None,
+            # no hop, so no rule, so nobody measured. NEVER False, which would
+            # say a rule exists and reads never
+            "precedent_supports": None,
             "proposed_by": BY_CLAIM,
             "evidence_summary": _evidence_summary(c, stype),
             "action": S.A_ADD_TO_ASSAY,
@@ -1257,6 +1260,9 @@ def compat_findings(
             "precedent_n_both": None,
             "precedent_n_child_only": None,
             "precedent_n_parent_only": None,
+            # NULL for the same reason the three counts above are, and not
+            # False: there is no rule on this key to have read a zero out of
+            "precedent_supports": None,
             # null where nothing is proposed: a proposal source on a row that
             # proposes nothing names the author of a change no one suggested
             "proposed_by": BY_CLAIM if mode is not None else None,

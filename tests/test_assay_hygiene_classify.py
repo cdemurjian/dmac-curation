@@ -658,7 +658,7 @@ def test_the_project_column_carries_every_project_a_sample_holds_deduped_and_sor
 
 
 def test_the_finding_frame_is_exactly_the_shared_contract_and_is_totally_sorted():
-    """`FINDING_COLUMNS`, all 36, in order, sorted on BOTH keys of the grain.
+    """`FINDING_COLUMNS`, all 37, in order, sorted on BOTH keys of the grain.
 
     A curator diffs this artifact between runs and the claims frame arrives in
     whatever order the extractor wrote `samples.parquet`, an order
@@ -677,7 +677,7 @@ def test_the_finding_frame_is_exactly_the_shared_contract_and_is_totally_sorted(
     """
     _, _, _, attached, population, findings = _pipeline()
     assert list(findings.columns) == S.FINDING_COLUMNS
-    assert len(S.FINDING_COLUMNS) == 36
+    assert len(S.FINDING_COLUMNS) == 37
     # one row per (sample, proposed assay), which is the grain the writer takes
     assert not findings.duplicated(
         ["sample_id", "proposed_internal_assay_id"]).any()
@@ -2050,11 +2050,11 @@ def test_mode_2_asserts_nothing_about_the_co_registration_test_it_never_ran():
 
 
 def test_the_mode_2_frame_is_the_shared_contract_and_is_totally_sorted():
-    """`FINDING_COLUMNS`, all 36, in order, sorted on both keys of the grain."""
+    """`FINDING_COLUMNS`, all 37, in order, sorted on both keys of the grain."""
     w, bundle, findings = _pipeline2()
 
     assert list(findings.columns) == S.FINDING_COLUMNS
-    assert len(S.FINDING_COLUMNS) == 36
+    assert len(S.FINDING_COLUMNS) == 37
     assert not findings.duplicated(
         ["sample_id", "proposed_internal_assay_id"]).any()
 
@@ -3797,7 +3797,7 @@ def test_the_unified_frame_is_the_shared_contract_totally_sorted_and_one_row_per
     findings = parts["findings"]
 
     assert list(findings.columns) == S.FINDING_COLUMNS
-    assert len(S.FINDING_COLUMNS) == 36
+    assert len(S.FINDING_COLUMNS) == 37
     keys = list(zip(findings.sample_id, findings.proposed_internal_assay_id))
     assert len(keys) == len(set(keys))
     assert keys == sorted(keys)
@@ -3809,6 +3809,39 @@ def test_the_unified_frame_is_the_shared_contract_totally_sorted_and_one_row_per
         ignore_index=True)
     raw = list(zip(unsorted.sample_id, unsorted.proposed_internal_assay_id))
     assert raw != sorted(raw), "the lanes must arrive unsorted or this is vacuous"
+
+
+def test_precedent_supports_is_null_on_every_lane_that_reads_no_rule():
+    """The three states of the column, across all four lanes at once.
+
+    A LANE WITH NO HOP HAS NO RULE TO MISS. Mode 1's population is registered
+    in nothing and the compatibility lane's keys have no lineage neighbour, so
+    neither reaches a precedent rule -- and `None` there is the same statement
+    the rest of that block already makes with its nulls: nobody measured, as
+    against `False`, which would say the house was asked and said never.
+
+    ASSERTED AGAINST THE GRAIN COLUMN AND NOT AGAINST A LANE LIST, so a fifth
+    lane added later is covered by construction rather than by remembering.
+    """
+    _, parts = _pipeline3()
+    findings = parts["findings"]
+
+    null = findings.precedent_supports.isna()
+    assert list(null) == list(findings.precedent_n_both.isna())
+    # the two populations are both non-empty, or the identity above is vacuous
+    assert 0 < int(null.sum()) < len(findings)
+
+    # every Mode 1 row and every mode-less row is on the null side of it
+    assert findings[findings["mode"] == S.MODE_1].precedent_supports.isna().all()
+    assert findings[findings["mode"].isna()].precedent_supports.isna().all()
+    assert int((findings["mode"] == S.MODE_1).sum()) > 0
+    assert int(findings["mode"].isna().sum()) > 0
+
+    # ...and where a rule WAS read, the value is a bool and tracks `n_both`
+    rules = findings[findings.precedent_n_both.notna()]
+    assert len(rules) > 0
+    assert list(rules.precedent_supports) == [bool(n > 0)
+                                              for n in rules.precedent_n_both]
 
 
 def test_a_lane_that_drops_or_duplicates_a_key_the_precedence_granted_it_fails_loudly():

@@ -336,6 +336,42 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 #   the row back to `precedent.csv` and check the number without consulting any
 #   code. `mode2.ACTION_PRECEDENT_DIRECTION` is the one place the mapping
 #   from action to column lives.
+# `precedent_supports` is `n_both > 0` -- whether the house has EVER made this
+#   co-registration -- and it rides immediately in front of `proposed_by`
+#   because it is the check on it. Measured 2026-08-24 over the 170,786 rows of
+#   `findings.csv`, 115,087 of the 166,578 `BY_PRECEDENT` rows (69.1%) carry
+#   `precedent_n_both == 0` and `precedent_rate == 0.000`: the column naming
+#   precedent as the proposer is at its most common on the rows where
+#   precedent's own content argues against the proposal. A curator filtering
+#   `proposed_by` to find well-supported rows gets, in the majority, the
+#   opposite set, and nothing on the row made that filterable in one predicate.
+#
+#   THE COLUMN'S OWN TOTAL IS 115,104 AND NOT 115,087, and the difference is
+#   scoping rather than disagreement. 115,087 counts rows that are BOTH
+#   `BY_PRECEDENT` and unsupported, which is the population the paragraph above
+#   is about; this column is scoped to the ROW and marks every rule reading
+#   zero, including the 17 whose gated claim also names the pair and which
+#   therefore read `BY_BOTH`. The mirror is larger and runs the other way: 744
+#   of the 52,235 supported rows are `BY_BOTH` and no `proposed_by` filter
+#   finds them either. Same measurement, 2026-08-24.
+#
+#   `proposed_by` IS NOT CHANGED AND IS NOT LYING. It is a PROVENANCE label:
+#   `BY_PRECEDENT` means a rule on the hop produced this proposal and no gated
+#   claim did, which is true on all 166,578. What it never claimed to say is
+#   what the rule CONTAINS, and this column is that, beside it.
+#
+#   NULLABLE, AND THE NULL IS THE THIRD STATE THE BLOCK ALREADY KEEPS. `None`
+#   is "there is no rule on this hop, so nobody measured"; `False` is "there is
+#   a rule and it reads never". Collapsing them would repeat the mistake
+#   `precedent_rate`'s null exists to prevent -- 0.000 is a rate and absent
+#   evidence is not. Mode 1 and the compatibility lane have no hop and so no
+#   rule, and both emit `None`.
+#
+#   DERIVED FROM `precedent_n_both` AND NOT FROM THE RATE. A rate of 0.000 also
+#   occurs where `n_both == 0`, but the rate is one of two directions and the
+#   count is not, so reading the rate would make the answer depend on
+#   `precedent_direction`. Redundant with the count on purpose: the count is
+#   the evidence and this is the one predicate a filter can hold.
 FINDING_COLUMNS = [
     "sample_id", "uuid", "sample_type", "project_ids",
     "registered_internal_assay_ids", "registered_internal_assay_titles",
@@ -349,6 +385,7 @@ FINDING_COLUMNS = [
     "compat_band",
     "precedent_rate", "precedent_direction",
     "precedent_n_both", "precedent_n_child_only", "precedent_n_parent_only",
+    "precedent_supports",
     "proposed_by", "evidence_summary", "action",
 ]
 
