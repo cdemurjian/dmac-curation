@@ -114,14 +114,16 @@ ACTION_PRECEDENT_DIRECTION = {
 #     <  500  17,625   17.7%                  183       68
 #     < 1000  33,954   34.1%                  226       77
 #
-# 100 IS CHOSEN BECAUSE IT SITS IN A GAP AND NOT BECAUSE IT IS ROUND. The 106
-# assays those rows propose carry populations 96 and then 115 either side of it
-# -- the widest multiplicative step anywhere between 46 and 184 -- so no assay
-# lands within four samples of the line and a small move in either direction
-# takes the same 50 assays. The alternatives are not better breaks: <25 cuts
-# between 24 and 26 and drops Western Blot (46) and Cell Culture (71), which are
-# barely used by any reading, and <500 cuts between 487 and 528 and admits nine
-# assays over a thousand rows each.
+# 100 SITS IN A GAP RATHER THAN BEING ROUND, AND THE GAP IS NARROW. The 106
+# assays those rows propose carry populations 96 and then 115 either side of it,
+# so no assay lands within four samples of the line and a small move in either
+# direction takes the same 50 assays. It is the widest multiplicative step in
+# the region only just: 96 -> 115 is 1.198 against 46 -> 55 at 1.196, which is
+# not a margin to rest a decision on. What the floor really rests on is that the
+# alternatives are worse: <25 cuts between 24 and 26 and drops Western Blot (46)
+# and Cell Culture (71), barely used by any reading, and <500 cuts between 487
+# and 528 and admits nine assays of over a thousand rows each. A curator who
+# wants a different line should move it; nothing here is gated on the number.
 #
 # THE ROW-LEVEL DECILE MOVED UNDER THE NAMESPACE CORRECTION AND THE BREAK DID
 # NOT. Read naively the 10th percentile of the proposed assay's population is
@@ -129,10 +131,14 @@ ACTION_PRECEDENT_DIRECTION = {
 # now takes 9.0% of the rows rather than 10.1%. The gap argument above is
 # measured on the corrected populations and is what the number rests on.
 #
-# ASSAY 143 IS NOT IN THIS LANE, at 265 samples, and the finding it produced is
-# still the reason the lane exists. The generalisation is "an assay the house
-# has barely used", not "the assay that turned out to be misnamed"; 143's own
-# 161 rows stay `CLS_UNREACHABLE`, where they were before.
+# ASSAY 143 IS NOT IN THIS LANE AND NEVER NEEDED TO BE. Its 226 rows split DNA
+# 29 and TIS 36 -- at `type_registrations` 40 and 80, both REACHABLE and so in
+# neither reachability class -- against D.IMG 81, MUS 76 and PAV 4 at zero. The
+# gpt-delta cohorts that produced the name-collision finding were never among
+# the 99,449, so this lane was never the mechanism that had to catch them. What
+# generalises from that finding is "an assay the house has barely used", not
+# "the assay that turned out to be misnamed"; 143 holds 265 samples and its
+# zero-cell rows stay `CLS_UNREACHABLE`, where they were before.
 BOOTSTRAP_POPULATION_FLOOR = 100
 
 # Where `precedent_survival` reports, and nothing else. NOT a set of gates: under

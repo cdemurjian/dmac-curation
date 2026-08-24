@@ -51,7 +51,7 @@ from assay_hygiene import mode2 as M2  # noqa: E402
 from assay_hygiene import run_detect as RD  # noqa: E402
 from assay_hygiene import vocabulary as V  # noqa: E402
 
-from test_assay_hygiene_classify import _world  # noqa: E402
+from test_assay_hygiene_classify import SEEK_OFFSET, _world  # noqa: E402
 
 EXTRACT = REPO / "assay-hygiene" / "extract"
 ARTIFACTS = REPO / "assay-hygiene"
@@ -108,7 +108,88 @@ def unreachable_edge(w):
     return (104, 6, uuid[104], uuid[6], stype[104], stype[6], None, None, None)
 
 
-def _run(tmp_path, extra_edges=None):
+def bootstrap_edge(w):
+    """One edge over the imported world that emits a `CLS_BOOTSTRAP` row.
+
+    THE SIBLING OF `unreachable_edge`, AND THE ONLY DIFFERENCE IS THE ASSAY'S
+    OWN SIZE. 104 is DNA and registered nowhere; 9 is TIS and registered in
+    assay 13, which holds TWO samples in the whole world -- 9 and 10 -- so the
+    pair the lineage lane offers is one no DNA sample has ever held UNDER AN
+    ASSAY THE HOUSE HAS BARELY USED. That is `mode2._bootstrap_evidence`'s
+    second question, and 2 is under `mode2.BOOTSTRAP_POPULATION_FLOOR`.
+
+    IT MUST BE AN ASSAY 104 DOES NOT CLAIM, for the reason `unreachable_edge`
+    gives: 104's own claim names 11, that claim is `GATE_UNREACHABLE`, and
+    `PRE_GATE` would take the key four steps before `PRE_UNREACHABLE`. Assay 13
+    is named by `Type: zeta`, which 104 does not carry.
+    """
+    uuid = dict(zip(w["samples"].sample_id.astype(int), w["samples"].uuid))
+    stype = dict(zip(w["nodes"].sample_id.astype(int), w["nodes"].type))
+    return (104, 9, uuid[104], uuid[9], stype[104], stype[9], None, None, None)
+
+
+def both_reachability_classes(w):
+    """Both edges, so one world carries `CLS_UNREACHABLE` AND `CLS_BOOTSTRAP`.
+
+    USE IT WITH `over_the_floor`, WHICH IS WHAT MAKES THE FIRST ONE THE FIRST
+    ONE. Without the bulk registrations assay 12 holds four samples, so
+    `unreachable_edge`'s row is `CLS_BOOTSTRAP` too and the pair collapses into
+    one class.
+    """
+    return [unreachable_edge(w), bootstrap_edge(w)]
+
+
+# The bulk registration that lifts ONE assay over the floor, and the world it
+# is added to has none of its own: every assay in a 30-sample world holds a
+# handful, so a report-layer world without this can emit `CLS_BOOTSTRAP` and
+# NEVER `CLS_UNREACHABLE`.
+#
+# THAT GAP WAS NOT ACADEMIC AND IT IS WHY THIS EXISTS. Review round 1 mutated
+# `build_report` to drop `CLS_UNREACHABLE` from the term it sums for
+# `lineage_derived` and the WHOLE SUITE STAYED GREEN at 1253/12, while the
+# real-extract report printed "Mode 2 emitted 76,869 rows a lineage neighbour
+# raised ... so 95,469 of the ceiling reached no finding. That difference is
+# exactly the rows the vocabulary gate refused plus the rows Mode 1 claimed
+# first" -- against a run printing 4,242 and 749. That is the identical false
+# arithmetic identity Task 3b existed to remove, shipped past the test written
+# to catch it, because the test's counterfactual was a constant zero.
+#
+# A NEW TYPE AND A NEW ID RANGE, so nothing the base world counts moves. `BLD`
+# appears in no cell, no claim and no vocabulary row, and 2001-2100 collide
+# with no sample id in `_world`. The uuids follow the world's own
+# `<TYPE>-<YYMMDD><LAB>-<serial>` shape, because `assay_hygiene.review` parses
+# the lab and the date out of a uuid and REFUSES one it cannot parse.
+BULK_TYPE = "BLD"
+BULK_ASSAY = 12
+BULK_IDS = range(2001, 2101)
+
+
+def over_the_floor(w):
+    """`BULK_IDS` samples registered in `BULK_ASSAY`. -> (nodes, samples, membership).
+
+    Lifts assay 12 from 4 registered samples to 104, over
+    `mode2.BOOTSTRAP_POPULATION_FLOOR`, so `unreachable_edge`'s pair reads
+    `CLS_UNREACHABLE` -- the house HAS used this assay and has never put a DNA
+    in it -- while `bootstrap_edge`'s assay 13 stays at 2 and reads
+    `CLS_BOOTSTRAP`.
+
+    THEY ARE REGISTERED, EDGELESS AND CLAIMLESS ON PURPOSE. Registered keeps
+    them out of Mode 1's population, edgeless keeps them out of Mode 2's
+    ceiling, and `{}` metadata keeps them out of the claims frame -- so they
+    move the assay's POPULATION and nothing else that any assertion here reads.
+    They carry a `samples` row as well as a `nodes` row, or
+    `registered_samples_absent_from_samples` would count all 100 of them.
+    """
+    nodes, samples, membership = [], [], []
+    for sid in BULK_IDS:
+        uuid = f"{BULK_TYPE}-2401{sid % 28 + 1:02d}ENG-{sid}"
+        nodes.append((uuid, sid, BULK_TYPE))
+        samples.append((sid, uuid, "{}", None, "3"))
+        membership.append((sid, BULK_ASSAY + SEEK_OFFSET))
+    return nodes, samples, membership
+
+
+def _run(tmp_path, extra_edges=None, extra_registrations=None):
     """A full `main` over the imported world -> (out_dir, report text).
 
     The two edges are the ones `test_main_writes_exactly_two_artifacts_...`
@@ -118,15 +199,34 @@ def _run(tmp_path, extra_edges=None):
 
     `extra_edges` is a callable over the world, so a caller can add a
     population the base world has none of -- see `unreachable_edge` -- without
-    forking the world and without spelling a uuid the world derives. The
-    default adds nothing, so every existing caller runs the same two edges it
-    always did.
+    forking the world and without spelling a uuid the world derives. It may
+    return one edge or a list of them. The default adds nothing, so every
+    existing caller runs the same two edges it always did.
+
+    `extra_registrations` is the same idea one frame over, and it runs FIRST so
+    an edge builder reads a world the registrations are already in. It returns
+    `(nodes, samples, membership)` row lists -- see `over_the_floor`, which is
+    what puts an assay over `mode2.BOOTSTRAP_POPULATION_FLOOR` in a world whose
+    assays otherwise hold a handful each.
     """
     w = _world()
+    if extra_registrations is not None:
+        nodes, samples, membership = extra_registrations(w)
+        for name, rows, cols in (("nodes", nodes, S.NODES_COLUMNS),
+                                 ("samples", samples, S.SAMPLE_COLUMNS),
+                                 ("membership", membership,
+                                  S.MEMBERSHIP_COLUMNS)):
+            w[name] = pd.concat(
+                [w[name], pd.DataFrame(rows, columns=cols)], ignore_index=True)
+    extra = [] if extra_edges is None else extra_edges(w)
+    # one edge or a list of them: the first element of a bare edge tuple is a
+    # sample id, and of a list of edges is an edge
+    if extra and not isinstance(extra[0], (list, tuple)):
+        extra = [extra]
     w["edges"] = pd.DataFrame(
         [(100, 102, "TIS-100", "TIS-102", "TIS", "TIS", None, None, None),
          (100, 101, "TIS-100", "TIS-101", "TIS", "TIS", None, None, None)]
-        + ([] if extra_edges is None else [extra_edges(w)]),
+        + list(extra),
         columns=S.EDGE_COLUMNS,
     )
     extract, out = tmp_path / "extract", tmp_path / "out"
@@ -527,14 +627,33 @@ def _old_rule_coverage(present: pd.Series) -> int:
 def _unaccounted(present: pd.Series) -> int:
     """The rows the four-class rule omits: both reachability classes.
 
-    `CLS_BOOTSTRAP` is a cut through `CLS_UNREACHABLE`, so which of the two a
-    world produces depends on how heavily its assays are used -- every assay in
-    the imported world holds a handful of samples, so its unreachable rows are
-    all `CLS_BOOTSTRAP`. Either way they are the population the pre-2026-08-21
-    report had no term for, and that is what the tests below measure.
+    `CLS_BOOTSTRAP` is a cut through `CLS_UNREACHABLE` and which of the two a
+    row gets turns on how heavily the proposed assay is used, so a world whose
+    assays all hold a handful emits only the second. That is what the base
+    world does and it is why `over_the_floor` exists: a counterfactual naming
+    one of the two is a CONSTANT ZERO in such a world, which is how review
+    round 1 slipped a report mutation past this file. Both classes are the
+    population the pre-2026-08-21 report had no term for.
     """
     return sum(int(present.get(c, 0))
                for c in (S.CLS_UNREACHABLE, S.CLS_BOOTSTRAP))
+
+
+def _both_classes_live(present: pd.Series) -> None:
+    """Refuse a world where either reachability class is absent.
+
+    THE GUARD THE ROUND-1 REVIEW SHOWED WAS MISSING. Every counterfactual below
+    that names ONE of the two classes is vacuous when that class has no rows,
+    and it fails open: `present.get(...)` returns 0 and the inequality against
+    a nonzero sibling still holds. So the world is checked rather than the
+    arithmetic being trusted, and it is checked in the one place all four
+    report closures share.
+    """
+    for cls in (S.CLS_UNREACHABLE, S.CLS_BOOTSTRAP):
+        assert int(present.get(cls, 0)), (
+            f"this world emitted no {cls} row. Every one-sided counterfactual "
+            "below is then a constant zero that still satisfies its own "
+            "inequality; run with `extra_registrations=over_the_floor`")
 
 
 def test_the_reports_class_census_accounts_for_every_finding(tmp_path):
@@ -559,14 +678,12 @@ def test_the_reports_class_census_accounts_for_every_finding(tmp_path):
     same relationship the real extract shows -- so the test discriminates the
     two rules rather than merely recomputing the right one.
     """
-    out, md = _run(tmp_path, extra_edges=unreachable_edge)
+    out, md = _run(tmp_path, extra_edges=both_reachability_classes,
+                   extra_registrations=over_the_floor)
     findings = pd.read_csv(out / "findings.csv", low_memory=False)
     present = findings.classification.value_counts(dropna=False)
+    _both_classes_live(present)
     n_unreachable = _unaccounted(present)
-    assert n_unreachable, (
-        "this world emitted no CLS_UNREACHABLE or CLS_BOOTSTRAP row, so "
-        "nothing below can discriminate a report that names the classes from "
-        "one that does not")
 
     # the wrong rule, by hand: short, and short by exactly the new classes
     wrong = _old_rule_coverage(present)
@@ -611,12 +728,13 @@ def test_the_mode_2_breakdown_sums_to_the_proposal_total_it_states(tmp_path):
     Both are asserted here: the breakdown is measured on MODE_2's rows, and its
     terms sum to the total the same line states.
     """
-    out, md = _run(tmp_path, extra_edges=unreachable_edge)
+    out, md = _run(tmp_path, extra_edges=both_reachability_classes,
+                   extra_registrations=over_the_floor)
     findings = pd.read_csv(out / "findings.csv", low_memory=False)
     m2 = findings[findings["mode"] == S.MODE_2]
     present = m2.classification.value_counts(dropna=False)
+    _both_classes_live(present)
     n_unreachable = _unaccounted(present)
-    assert n_unreachable, "MODE_2 emitted no unreachable row in this world"
     # the wrong rule, by hand, at this site
     assert len(m2) - _old_rule_coverage(present) == n_unreachable
 
@@ -671,13 +789,12 @@ def test_the_ceiling_gap_paragraph_counts_every_row_the_lineage_lane_raised(tmp_
     shape the sentence had between Tasks 3 and 4. It is short here, and by
     exactly the bootstrap population.
     """
-    out, md = _run(tmp_path, extra_edges=unreachable_edge)
+    out, md = _run(tmp_path, extra_edges=both_reachability_classes,
+                   extra_registrations=over_the_floor)
     findings = pd.read_csv(out / "findings.csv", low_memory=False)
     directioned = findings[findings.action.isin((S.A_ADD_PARENT, S.A_ADD_CHILD))]
     present = directioned.classification.value_counts(dropna=False)
-    assert _unaccounted(present), (
-        "no unreachable row carries a direction in this world, so the two "
-        "rules below cannot be told apart")
+    _both_classes_live(present)
 
     m = re.search(
         r"The union above is ([\d,]+) rows; Mode 2 emitted "
@@ -698,12 +815,22 @@ def test_the_ceiling_gap_paragraph_counts_every_row_the_lineage_lane_raised(tmp_
     assert reachable + unreachable == raised
     assert reachable == int(present.get(S.CLS_ABSENCE_LINEAGE, 0))
     assert unreachable == _unaccounted(present)
-    # THE WRONG RULE, BY HAND: one reachability class instead of both
-    wrong = int(present.get(S.CLS_UNREACHABLE, 0))
-    assert wrong != unreachable, (
-        "this world's unreachable rows all carry the same class, so the two "
-        "rules agree and nothing here discriminates them")
-    assert unreachable - wrong == int(present.get(S.CLS_BOOTSTRAP, 0))
+
+    # THE WRONG RULE, BY HAND, IN BOTH DIRECTIONS. Naming ONE reachability
+    # class is short, and it is short whichever one is named -- which is the
+    # half review round 1 found missing here. The earlier version asserted only
+    # `unreachable != present[CLS_UNREACHABLE]`, and in a world with no
+    # `CLS_UNREACHABLE` row that term is 0 and the inequality holds for free:
+    # the suite stayed green at 1253/12 under a mutation dropping
+    # `CLS_UNREACHABLE` from `build_report`, while the real extract printed
+    # "76,869 rows a lineage neighbour raised ... so 95,469 of the ceiling
+    # reached no finding" against a run printing 4,242 and 749.
+    for dropped in (S.CLS_UNREACHABLE, S.CLS_BOOTSTRAP):
+        wrong = _unaccounted(present) - int(present.get(dropped, 0))
+        assert wrong != unreachable, (
+            f"dropping {dropped} from the sum leaves the stated total "
+            "unchanged, so this world cannot tell the two rules apart")
+        assert raised - (reachable + wrong) == int(present.get(dropped, 0))
     # ...and the gap is the ceiling minus that total and not minus a subset.
     # The union is read out of the same sentence, so the arithmetic checked is
     # the one a reader performs on the page.
@@ -758,12 +885,11 @@ def test_the_survival_table_covers_every_directioned_row_and_says_so(tmp_path):
     in the curve's denominator, and the section names the class rather than
     leaving its inclusion to be inferred from a total.
     """
-    out, md = _run(tmp_path, extra_edges=unreachable_edge)
+    out, md = _run(tmp_path, extra_edges=both_reachability_classes,
+                   extra_registrations=over_the_floor)
     findings = pd.read_csv(out / "findings.csv", low_memory=False)
     directioned = findings[findings.action.isin((S.A_ADD_PARENT, S.A_ADD_CHILD))]
-    assert int(directioned.classification.isin(
-        (S.CLS_UNREACHABLE, S.CLS_BOOTSTRAP)).sum()), (
-        "no unreachable row carries a direction in this world")
+    _both_classes_live(directioned.classification.value_counts(dropna=False))
 
     section = _section(md, "Survival by direction")
     # the denominator column is the whole directioned population, per direction
@@ -1029,7 +1155,8 @@ def test_every_bolded_integer_in_the_prose_is_a_number_the_artifacts_hold(
     than beside it. Against the base world those sections render every class at
     zero and the scan cannot tell a derived count from a hard-coded one.
     """
-    out, md = _run(tmp_path, extra_edges=unreachable_edge)
+    out, md = _run(tmp_path, extra_edges=both_reachability_classes,
+                   extra_registrations=over_the_floor)
     findings = pd.read_csv(out / "findings.csv", low_memory=False)
     disposition = pd.read_csv(out / "mode3-disposition.csv")
     defects = pd.read_csv(out / "vocabulary-defects.csv")
