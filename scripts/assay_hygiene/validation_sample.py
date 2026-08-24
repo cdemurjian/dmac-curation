@@ -59,6 +59,23 @@ avoid. Every cohort therefore carries `n_rows`, so Step 6 can report the rate
 both ways -- and they will differ, because the largest stratum-A cohort holds
 10,745 of its 90,470 rows and the median holds 9.
 
+AND THAT SKEW IS WHY STRATA A AND B ALSO HAVE A CERTAINTY SLICE. The operator's
+decision is about ROWS -- 99,449 of them -- and a purely random cohort draw
+bounds the cohort error at 2.6% while leaving the row error bounded at 89.8%,
+which is close to uninformative for the decision being made. So the largest
+cohorts by row count are taken with PROBABILITY 1, and the random draw runs
+over what is left. `CERTAINTY_ROW_SHARE` and `_certainty_cut` carry the cut and
+the measurement behind it.
+
+THE TWO PARTS ARE REPORTED SEPARATELY AND ARE NEVER POOLED. A row inside the
+certainty slice needs no inference at all -- it was looked at. A row outside
+gets a bound from its own sample, over its own population. A single blended
+"row error <= X%" spanning both would be exactly the kind of pooled figure this
+project keeps finding in its own artifacts, and `power_report` prints two
+tables rather than one. What IS legitimate to add across the parts is
+COVERAGE -- how many rows the sitting puts in front of the operator -- because
+that is a count and not an inference, and it is labelled as such.
+
 THE RATER MUST BE ABLE TO PUNT. `UNSURE` is a first-class verdict on the sheet
 and in the html select. Forcing a binary is how a false-approve floor gets
 manufactured, and this project has measured one: the 2026-08-21 calibration put
@@ -147,6 +164,47 @@ STRATA = (STRATUM_A, STRATUM_B, STRATUM_C)
 
 TARGET = {STRATUM_A: 100, STRATUM_B: 50, STRATUM_C: 50}
 
+# --- the certainty slice ------------------------------------------------------
+#
+# WHICH STRATA GET ONE. A and B, whose rows are what the rework moved and whose
+# cohort sizes are wildly skewed. NOT C: 50 of its 106 cohorts are already
+# drawn, its random draw already covers 69.1% of its rows, and a certainty
+# slice there would buy almost nothing for cohorts the operator would still
+# have to rule.
+CERTAINTY_STRATA = (STRATUM_A, STRATUM_B)
+
+# HOW MUCH OF A STRATUM'S ROWS THE CERTAINTY SLICE AIMS TO COVER. Measured
+# 2026-08-24 over the reworked run, cohorts taken largest-first:
+#
+#     stratum A (655 cohorts, 90,470 rows)   stratum B (137 cohorts, 8,971)
+#       k=10   34,910   38.6%                  k=3    3,392   37.8%
+#       k=15   41,282   45.6%                  k=4    4,054   45.2%
+#       k=19   45,410   50.2%                  k=5    4,478   49.9%
+#       k=25   50,857   56.2%                  k=6    4,901   54.6%
+#
+# 0.45 RATHER THAN 0.50, AND THE REASON IS THE OPERATOR'S TIME. A 0.50 target
+# needs 19 + 6 = 25 extra cohorts; 0.45 needs 15 + 4 = 19, which is the ~20 the
+# sitting was budgeted for, and both strata still land at roughly half.
+#
+# THERE IS NO GAP TO CUT ON IN A AND THERE IS ONE IN B. Stratum A's size curve
+# is smooth from rank 13 down -- 1,173 / 1,098 / 1,071 / 1,071 / 1,071 / 998 /
+# 988, no step wider than x1.07 -- so nothing in the data picks a rank and the
+# share target is what decides it. Stratum B's widest step in the region is
+# 662 -> 424 at x1.56, immediately after rank 4, and 0.45 cuts exactly there;
+# the next comparable step is x1.20 at rank 10, which is 67.5% and well past
+# half. So the one number lands on B's break and on A's target at once.
+#
+# IT GRANTS NO PERMISSION AND DECIDES NOTHING, like every other number in this
+# package. It chooses which cohorts are certain to be looked at.
+CERTAINTY_ROW_SHARE = 0.45
+
+# A CAP ON THE OPERATOR'S ADDED WORKLOAD, per stratum, in cohorts. The share
+# target could in principle demand a hundred cohorts on a flatter population;
+# this stops that silently happening. Today it does NOT bind -- A takes 15 and
+# B takes 4 -- and `_certainty_cut` reports whether it did, so a run where it
+# binds says so rather than quietly under-covering.
+CERTAINTY_MAX_COHORTS = 20
+
 QUESTION = {
     STRATUM_A: "Is the reachability gate right? The house has never put this "
                "sample type in this assay. Is that its settled answer, or a "
@@ -228,6 +286,39 @@ def _digest(seed: int, salt: str, key: str) -> str:
         f"{seed}|{salt}|{key}".encode("utf-8")).hexdigest()
 
 
+def certainty_slice(blocks: list[dict], share: float = CERTAINTY_ROW_SHARE,
+                    cap: int = CERTAINTY_MAX_COHORTS) -> tuple[list[str], bool]:
+    """-> (the largest cohorts, taken with probability 1; did the cap bind?).
+
+    NO SEED AND NO HASH. These cohorts are not sampled, they are CHOSEN, and
+    that is the whole point of the slice: a row inside it is observed rather
+    than inferred. Feeding them through `draw` would be the same selection
+    dressed as a random one, and the power statement would then have to pretend
+    they carry sampling error.
+
+    THE ORDER IS `(-n_rows, cohort key)` AND THE TIEBREAK IS LOAD-BEARING HERE,
+    unlike the one in `draw`. Stratum A holds three cohorts of exactly 1,071
+    rows at ranks 15, 16 and 17, straddling the cut this share target lands on,
+    so a size-only sort would decide which of them is inside the slice by the
+    order `build_blocks` happened to return. Measured, not hypothetical.
+
+    IT STOPS AT THE FIRST COHORT THAT REACHES THE SHARE, so the covered share is
+    always at or just above the target rather than just below it.
+    """
+    ranked = sorted(blocks, key=lambda b: (-int(b["n_rows"]), R.cohort_key(b)))
+    total = sum(int(b["n_rows"]) for b in ranked)
+    if not total:
+        return [], False
+    taken: list[str] = []
+    covered = 0
+    for block in ranked:
+        if covered / total >= share or len(taken) >= cap:
+            break
+        covered += int(block["n_rows"])
+        taken.append(R.cohort_key(block))
+    return taken, len(taken) >= cap and covered / total < share
+
+
 def draw(keys, n: int, seed: int = SEED, salt: str = "draw") -> list[str]:
     """-> the `n` keys whose digest sorts first. A pure function of its inputs.
 
@@ -305,43 +396,99 @@ def kish_effective_n(weights) -> float:
 
 
 def power(stratum: str, population_cohorts: int, population_rows: int,
-          sampled_rows, alpha: float = 0.05) -> dict:
-    """Every figure Step 4 owes the operator, for one stratum.
+          sampled_rows, certainty_rows=(), capped: bool = False,
+          alpha: float = 0.05) -> dict:
+    """Every figure Step 4 owes the operator, for one stratum, IN TWO PARTS.
 
-    IT REPORTS TWO BOUNDS BECAUSE THE SAMPLE SUPPORTS TWO CLAIMS OF VERY
-    DIFFERENT STRENGTH, and printing only the flattering one is how a sample
-    comes to imply a precision it does not have.
+    THE PARTS ARE NOT POOLED AND NO FIELD HERE SPANS THEM EXCEPT COVERAGE.
+    `certainty_*` describes rows that were LOOKED AT: they carry no sampling
+    error and no bound is computed for them, because a bound on an observation
+    is a category error. `random_*` describes a uniform draw from what is left,
+    and every bound below is scoped to THAT population -- `cohort_bound_rate`
+    is a rate over `random_population_cohorts`, not over the stratum.
 
-    PER COHORT the draw is uniform and the bound is exact and useful.
+    `rows_seen` and `rows_seen_share` DO span both parts, and that is
+    legitimate: they count rows the operator is put in front of. A count is not
+    an inference. The report labels them as coverage and prints no combined
+    error bound anywhere.
 
-    PER ROW it is neither. A cohort-level draw says nothing about the rows in
-    cohorts it did not draw, so with zero events the row rate is bounded only
-    by the rows NOT covered: `row_bound_worst_case = 1 - covered/population`.
-    On a population whose largest cohort is 12% of its rows and whose median
-    cohort is 9, that bound is close to 1 and the honest report says so.
-    `kish_n_eff` is the second half of the same statement -- what the sample is
-    worth for a row-weighted estimate if one is attempted anyway.
+    PER COHORT, within the random part, the bound is exact and useful. PER ROW
+    it is not: a cohort-level draw says nothing about rows in cohorts it did
+    not draw, so with zero events the row rate over the random population is
+    bounded only by the rows it missed. `kish_n_eff` says the same thing again
+    -- what the random draw is worth for a row-weighted estimate if one is
+    attempted anyway.
     """
     sampled_rows = [int(x) for x in sampled_rows]
+    certainty_rows = [int(x) for x in certainty_rows]
     n = len(sampled_rows)
     covered = sum(sampled_rows)
-    bound_k = zero_event_bound(population_cohorts, n, alpha)
+    certain = sum(certainty_rows)
+
+    random_pop_cohorts = int(population_cohorts) - len(certainty_rows)
+    random_pop_rows = int(population_rows) - certain
+    bound_k = zero_event_bound(random_pop_cohorts, n, alpha)
     return {
         "stratum": stratum,
         "question": QUESTION[stratum],
         "population_cohorts": int(population_cohorts),
         "population_rows": int(population_rows),
-        "sampled_cohorts": n,
-        "sampled_rows": covered,
-        "row_coverage": (covered / population_rows) if population_rows else 0.0,
+
+        # part 1 -- observed, no inference
+        "certainty_cohorts": len(certainty_rows),
+        "certainty_rows": certain,
+        "certainty_row_share": (certain / population_rows
+                                if population_rows else 0.0),
+        "certainty_capped": bool(capped),
+
+        # part 2 -- sampled, and every bound below belongs to it alone
+        "random_population_cohorts": random_pop_cohorts,
+        "random_population_rows": random_pop_rows,
+        "random_cohorts": n,
+        "random_rows": covered,
+        "random_row_coverage": (covered / random_pop_rows
+                                if random_pop_rows else 0.0),
         "cohort_bound_k": bound_k,
-        "cohort_bound_rate": (bound_k / population_cohorts
-                              if population_cohorts else 0.0),
+        "cohort_bound_rate": (bound_k / random_pop_cohorts
+                              if random_pop_cohorts else 0.0),
         "largest_sampled_cohort": max(sampled_rows) if sampled_rows else 0,
         "kish_n_eff": kish_effective_n(sampled_rows),
-        "row_bound_worst_case": (1.0 - covered / population_rows
-                                 if population_rows else 1.0),
-        "census": n >= population_cohorts,
+        "row_bound_worst_case": (1.0 - covered / random_pop_rows
+                                 if random_pop_rows else 1.0),
+        "census": n >= random_pop_cohorts,
+
+        # spans both parts, and is a COUNT rather than a bound
+        "sampled_cohorts": n + len(certainty_rows),
+        "rows_seen": certain + covered,
+        "rows_seen_share": ((certain + covered) / population_rows
+                            if population_rows else 0.0),
+    }
+
+
+def agent_convergence(findings: pd.DataFrame, verdicts: pd.DataFrame,
+                      context: dict) -> dict:
+    """What the agents and the gate independently agree should not be proposed.
+
+    IT IS NOT HUMAN VALIDATION AND THE REPORT MUST NOT DRESS IT AS ANY. Fifteen
+    agents reading biology in 2026-08 and a reachability gate built in 2026-08
+    from membership counts are two different instruments, neither of them a
+    curator; that they agree on the large majority of what to drop is evidence
+    about the gate, and it is the FIRST evidence of any kind bearing on the
+    99,449 rows. It sits beside the power table because the operator should
+    weigh it while ruling, and it is labelled for what it is.
+    """
+    primary = findings[(findings["mode"] == S.MODE_2)
+                       & (~findings.classification.isin(OFF_PRIMARY))]
+    on_surface = {R.cohort_key(b)
+                  for b in M.build_blocks(primary, context, floor=0.0)}
+    judged = set(verdicts.cohort_key)
+    rejected = set(verdicts.loc[verdicts.verdict == "REJECT", "cohort_key"])
+    return {
+        "judged": len(judged),
+        "judged_left": len(judged - on_surface),
+        "rejected": len(rejected),
+        "rejected_left": len(rejected - on_surface),
+        "rejected_still": len(rejected & on_surface),
     }
 
 
@@ -615,7 +762,9 @@ def _metadata_cell(block: dict) -> str:
 def build_sample(findings: pd.DataFrame, verdicts: pd.DataFrame,
                  context: dict, *, type_reg: dict, assay_pop: dict,
                  fallback: set[int], seed: int = SEED,
-                 target: dict | None = None) -> tuple[list[dict], list[dict]]:
+                 target: dict | None = None,
+                 certainty_share: float | None = None,
+                 ) -> tuple[list[dict], list[dict]]:
     """-> (the drawn cohorts, in sheet order; the power statement per stratum).
 
     Each drawn cohort carries its own `block` and `facts` so the csv, the html
@@ -640,19 +789,41 @@ def build_sample(findings: pd.DataFrame, verdicts: pd.DataFrame,
     stats: list[dict] = []
     for name in STRATA:
         blocks = {R.cohort_key(b): b for b in parts[name]["blocks"]}
-        picked = draw(list(blocks), target[name], seed)
-        for key in picked:
-            block = blocks[key]
-            drawn.append({
-                "stratum": name,
-                "cohort_key": key,
-                "block": block,
-                "facts": cohort_facts(block, source[name], type_reg=type_reg,
-                                      assay_pop=assay_pop, fallback=fallback),
-                "draw_digest": _digest(seed, "draw", key),
-            })
+
+        # THE CERTAINTY SLICE IS REMOVED FROM THE POPULATION BEFORE THE DRAW,
+        # not overlaid on it. Overlaying would let a cohort be both certain and
+        # sampled, which double-counts it in the coverage and puts an observed
+        # row inside a bound that assumes it was not observed.
+        # `certainty_share=0.0` yields an EMPTY slice, which is the honest way
+        # to ask "what would the pure random draw have been" -- a test that
+        # needs that must not get it by rebinding a module constant.
+        share = (CERTAINTY_ROW_SHARE if certainty_share is None
+                 else float(certainty_share))
+        certain, capped = ((certainty_slice(list(blocks.values()), share)
+                            if name in CERTAINTY_STRATA else ([], False)))
+        remaining = [k for k in blocks if k not in set(certain)]
+        picked = draw(remaining, target[name], seed)
+
+        for part, keys in (("certainty", certain), ("random", picked)):
+            for key in keys:
+                block = blocks[key]
+                drawn.append({
+                    "stratum": name,
+                    "part": part,
+                    "cohort_key": key,
+                    "block": block,
+                    "facts": cohort_facts(block, source[name],
+                                          type_reg=type_reg,
+                                          assay_pop=assay_pop,
+                                          fallback=fallback),
+                    "draw_digest": (_digest(seed, "draw", key)
+                                    if part == "random" else ""),
+                })
         stats.append(power(name, len(blocks), parts[name]["population_rows"],
-                           [blocks[k]["n_rows"] for k in picked]))
+                           [blocks[k]["n_rows"] for k in picked],
+                           certainty_rows=[blocks[k]["n_rows"]
+                                           for k in certain],
+                           capped=capped))
 
     drawn.sort(key=lambda d: (_digest(seed, "order", d["cohort_key"]),
                               d["cohort_key"]))
@@ -726,6 +897,10 @@ def to_key(drawn: list[dict], verdicts: pd.DataFrame,
     return pd.DataFrame([{
         "cohort_id": entry["cohort_id"],
         "stratum": entry["stratum"],
+        # WHICH PART, and it lives here rather than on the sheet. Step 6 cannot
+        # keep the two apart without it, and a rater does not need to know that
+        # a cohort was taken with certainty -- `n_rows` already says it is big.
+        "part": entry["part"],
         "cohort_key": entry["cohort_key"],
         "n_rows": entry["block"]["n_rows"],
         "n_samples": entry["block"]["n_samples"],
@@ -738,69 +913,114 @@ def to_key(drawn: list[dict], verdicts: pd.DataFrame,
     } for entry in drawn])
 
 
-def power_report(stats: list[dict], seed: int = SEED,
-                 alpha: float = 0.05) -> str:
+def power_report(stats: list[dict], seed: int = SEED, alpha: float = 0.05,
+                 convergence: dict | None = None) -> str:
     """Step 4, in the operator's hands BEFORE he rules. Markdown.
 
-    IT LEADS WITH WHAT THE SAMPLE CANNOT DO. The per-cohort bound is the strong
-    result and the row-weighted one is close to worthless at these coverages;
-    printing them in that order, with the weak one explained rather than
-    omitted, is the difference between a power statement and an advertisement.
+    IT LEADS WITH THE SHAPE OF THE SITTING AND THEN SEPARATES THE TWO PARTS.
+    The certainty slice is printed as OBSERVATION with no bound beside it, and
+    the random draw is printed with bounds scoped to its own population. There
+    is no third table combining them, and the one figure that does span both is
+    named coverage and is a count.
     """
     conf = f"{(1 - alpha) * 100:.0f}%"
+    total_cohorts = sum(s["sampled_cohorts"] for s in stats)
     lines = [
         "# Validation sample -- what it can and cannot bound",
         "",
-        f"Seed **{seed}**. A cohort is drawn iff "
-        "`sha256(\"<seed>|draw|<cohort key>\")` sorts in the first n of its "
-        "stratum; the sheet's order is the same hash with the salt `order`. "
-        "No RNG is involved, so the draw can be re-derived in any language "
-        "and checked against this file.",
+        f"**{total_cohorts} cohorts to rule.** Seed **{seed}**. Each stratum "
+        "is in two parts. The largest cohorts are taken with **probability 1** "
+        "-- they are observed, not sampled. The rest are drawn randomly: a "
+        "cohort is drawn iff `sha256(\"<seed>|draw|<cohort key>\")` sorts in "
+        "the first n of what remains, and the sheet's order is the same hash "
+        "with the salt `order`. No RNG is involved, so the draw can be "
+        "re-derived in any language and checked against this file.",
+        "",
+        "**The two parts are never pooled.** A row inside the certainty slice "
+        "carries no sampling error, so no bound is printed for it. A row "
+        "outside gets a bound from its own sample over its own population. "
+        "There is no combined error figure anywhere in this document, and if "
+        "you find yourself wanting one, the honest answer is the two rows of "
+        "the two tables read side by side.",
         "",
         "**Nothing here is decided and nothing here writes.** Every cohort is "
         "a proposal awaiting a ruling, and `" + PUNT + "` is a first-class "
         "answer.",
         "",
-        "## Per cohort -- the claim this sample supports",
+        "## Part 1 -- taken with certainty. Observed, not inferred.",
         "",
-        "| stratum | cohorts | drawn | if NOTHING is found, the true rate is "
+        "| stratum | cohorts | rows | share of the stratum's rows |",
+        "|---|---|---|---|",
+    ]
+    for s in stats:
+        if not s["certainty_cohorts"]:
+            lines.append(f'| {s["stratum"]} | -- | -- | no certainty slice; '
+                         "see the note below |")
+            continue
+        lines.append(f'| {s["stratum"]} | {s["certainty_cohorts"]} | '
+                     f'{s["certainty_rows"]:,} | '
+                     f'{s["certainty_row_share"]:.1%} |')
+    lines += [
+        "",
+        "These are the biggest cohorts by row count, chosen and not sampled, "
+        f"until the slice covers {CERTAINTY_ROW_SHARE:.0%} of the stratum's "
+        f"rows or {CERTAINTY_MAX_COHORTS} cohorts are taken. **A ruling here "
+        "settles those rows outright** -- there is nothing to extrapolate, "
+        "which is the entire reason the slice exists. `" + STRATUM_C + "` has "
+        "none: half its cohorts and 69% of its rows are already in the random "
+        "draw, so a slice would buy cohorts of the operator's time for almost "
+        "no extra coverage.",
+    ]
+    if any(s["certainty_capped"] for s in stats):
+        lines += ["", "**THE CAP BOUND.** At least one stratum stopped at "
+                  f"{CERTAINTY_MAX_COHORTS} cohorts before reaching "
+                  f"{CERTAINTY_ROW_SHARE:.0%}; its covered share above is what "
+                  "it actually reached."]
+    lines += [
+        "",
+        "## Part 2 -- the random draw. Per cohort, this is the claim it supports.",
+        "",
+        "| stratum | cohorts left after part 1 | drawn | if NOTHING is found, "
         f"at most ({conf}) |",
         "|---|---|---|---|",
     ]
     for s in stats:
-        claim = ("**0 of {n}** -- this is a CENSUS, every cohort was looked at"
-                 .format(n=s["population_cohorts"]) if s["census"] else
-                 f'{s["cohort_bound_k"]} of {s["population_cohorts"]} cohorts '
-                 f'({s["cohort_bound_rate"]:.1%})')
-        lines.append(f'| {s["stratum"]} | {s["population_cohorts"]:,} | '
-                     f'{s["sampled_cohorts"]:,} | {claim} |')
+        claim = (f'**0 of {s["random_population_cohorts"]}** -- a CENSUS of '
+                 "what is left" if s["census"] else
+                 f'{s["cohort_bound_k"]} of {s["random_population_cohorts"]} '
+                 f'cohorts ({s["cohort_bound_rate"]:.1%})')
+        lines.append(f'| {s["stratum"]} | {s["random_population_cohorts"]:,} | '
+                     f'{s["random_cohorts"]:,} | {claim} |')
     lines += [
         "",
         "Exact hypergeometric, one-sided: the largest K for which "
-        "`C(N-K,n)/C(N,n) > " f"{alpha}" "`. It is not the rule of three -- "
-        "sampling is without replacement from a small population, and the "
-        "finite-population correction is worth having when n is a third of N.",
+        "`C(N-K,n)/C(N,n) > " f"{alpha}" "`. Not the rule of three -- sampling "
+        "is without replacement from a small population, and the "
+        "finite-population correction is worth having when n is a third of N. "
+        "**The rate is over the cohorts left after part 1**, not over the "
+        "stratum.",
         "",
-        "## Per row -- the claim it does NOT support",
+        "## Part 2, per row -- the claim it does NOT support",
         "",
-        "| stratum | rows | rows drawn | coverage | biggest drawn cohort | "
-        "Kish n_eff | 0-event row bound |",
+        "| stratum | rows left after part 1 | rows drawn | coverage | biggest "
+        "drawn | Kish n_eff | 0-event row bound |",
         "|---|---|---|---|---|---|---|",
     ]
     for s in stats:
         lines.append(
-            f'| {s["stratum"]} | {s["population_rows"]:,} | '
-            f'{s["sampled_rows"]:,} | {s["row_coverage"]:.1%} | '
+            f'| {s["stratum"]} | {s["random_population_rows"]:,} | '
+            f'{s["random_rows"]:,} | {s["random_row_coverage"]:.1%} | '
             f'{s["largest_sampled_cohort"]:,} | {s["kish_n_eff"]:.1f} | '
             f'<= {s["row_bound_worst_case"]:.1%} |')
     lines += [
         "",
         "**Read the last column as a refusal, not a result.** A cohort-level "
         "draw says nothing whatever about the rows in cohorts it did not "
-        "draw, so with zero events the row-weighted rate is bounded only by "
-        "the share of rows the sample never covered. At these coverages that "
-        "bound is close to 1 and no row-weighted conclusion should be drawn "
-        "from a clean sitting.",
+        "draw, so with zero events the row-weighted rate over THIS population "
+        "is bounded only by the share of its rows the sample never covered. "
+        "It is still close to 1, and that is precisely why part 1 exists: the "
+        "rows that most needed an answer were removed from this question and "
+        "put where no inference is required.",
         "",
         "**Kish n_eff is what a row-weighted estimate is actually worth.** "
         "`(sum w)^2 / sum(w^2)` over the drawn cohorts' row counts. Where it "
@@ -808,9 +1028,58 @@ def power_report(stats: list[dict], seed: int = SEED,
         "estimate and its confidence interval will be far wider than the "
         "cohort count suggests.",
         "",
-        "## The questions",
+        "## Coverage -- a count, not a bound",
+        "",
+        "| stratum | rows in the stratum | rows the sitting looks at | share |",
+        "|---|---|---|---|",
+    ]
+    for s in stats:
+        lines.append(f'| {s["stratum"]} | {s["population_rows"]:,} | '
+                     f'{s["rows_seen"]:,} | {s["rows_seen_share"]:.1%} |')
+    lines += [
+        "",
+        "This table adds the two parts and nothing else does. It says how many "
+        "proposals are put in front of a human, which is an arithmetic fact "
+        "about the sitting. **It is not an error bound and must never be "
+        "quoted as one.**",
+        "",
+        "## What the sample is NOT",
+        "",
+        "**It is not blind, and it is only partly unanchored.** "
+        "`classification` is on the sheet because a rater needs it as "
+        "evidence, and it recovers the stratum: a `" + S.CLS_UNREACHABLE +
+        "` cohort is stratum A, a `" + S.CLS_BOOTSTRAP + "` cohort is B, and "
+        "because stratum C is drawn entirely from agent-REJECT cohorts, a `" +
+        S.CLS_ABSENCE_LINEAGE + "` cohort on this sheet was rejected by an "
+        "agent. What is withheld is the agent's VERDICT and its ARGUMENT, "
+        "which is the thing that would anchor a rater's reasoning; the bare "
+        "fact of membership is not withheld and cannot be. Nobody should read "
+        "this exercise as fully blind.",
         "",
     ]
+    if convergence:
+        lines += [
+            "## One piece of evidence that already exists, and what it is worth",
+            "",
+            f'Of the {convergence["judged"]:,} cohorts 15 agents judged '
+            f'before this rework, **{convergence["judged_left"]:,} are no '
+            "longer proposed on a primary surface at all**. Of the "
+            f'{convergence["rejected"]:,} they ruled REJECT, '
+            f'**{convergence["rejected_left"]:,} have left** and '
+            f'{convergence["rejected_still"]:,} remain -- and those '
+            f'{convergence["rejected_still"]:,} are stratum C.',
+            "",
+            "**That is convergent evidence and it is not human validation.** "
+            "Fifteen agents reading biology, and a reachability gate built "
+            "from membership counts, are two different instruments and "
+            "neither one is a curator. They were built from entirely "
+            "different evidence and they agree on the large majority of what "
+            "should not be proposed. It is the first evidence of any kind "
+            "bearing on the 99,449 rows this rework moved -- worth weighing "
+            "while you rule, and not a substitute for ruling.",
+            "",
+        ]
+    lines += ["## The questions", ""]
     for s in stats:
         lines.append(f'- **{s["stratum"]}** -- {s["question"]}')
     lines.append("")
@@ -990,27 +1259,42 @@ def main(artifacts="assay-hygiene", extract=None, verdicts=None, out_dir=None,
         assay_pop=M2.assay_population(membership, assays),
         fallback=P.fallback_assay_ids(assays), seed=seed)
 
+    convergence = agent_convergence(findings, verdict_frame, context)
+
     to_csv(drawn, seed).to_csv(out / CSV_NAME, index=False)
     to_key(drawn, verdict_frame, seed).to_csv(out / KEY_NAME, index=False)
     (out / HTML_NAME).write_text(render(drawn, stats, seed))
-    (out / POWER_NAME).write_text(power_report(stats, seed))
+    (out / POWER_NAME).write_text(
+        power_report(stats, seed, convergence=convergence))
 
     print(f"wrote {out / CSV_NAME} -- the sheet, {len(drawn)} cohort(s)")
     print(f"wrote {out / HTML_NAME} -- the same cohorts, expanded")
     print(f"wrote {out / KEY_NAME} -- stratum and agent verdict. NOT for the "
           "rater: it is the anchor the sheet withholds")
     print(f"wrote {out / POWER_NAME} -- what this sample can and cannot bound")
-    print(f"  seed {seed}; a cohort is drawn iff sha256('{seed}|draw|<key>') "
-          "sorts in the first n of its stratum")
+    print(f"  seed {seed}; the largest cohorts are taken with certainty and "
+          f"the rest drawn iff sha256('{seed}|draw|<key>') sorts first")
+    print(f"  {sum(s['sampled_cohorts'] for s in stats)} cohort(s) to rule "
+          f"in total")
     for s in stats:
-        print(f"  {s['stratum']:16s} {s['sampled_cohorts']:>4} of "
-              f"{s['population_cohorts']:>5,} cohort(s), "
-              f"{s['sampled_rows']:>7,} of {s['population_rows']:>7,} row(s) "
-              f"({s['row_coverage']:.1%}); 0 found bounds the COHORT rate at "
-              f"{s['cohort_bound_rate']:.1%}, the ROW rate at only "
-              f"{s['row_bound_worst_case']:.1%}")
-    print("  the row-weighted bound is a refusal, not a result: a "
-          "cohort-level draw cannot speak for rows it never covered")
+        print(f"  {s['stratum']:16s} CERTAIN {s['certainty_cohorts']:>3} "
+              f"cohort(s) = {s['certainty_rows']:>6,} row(s) "
+              f"({s['certainty_row_share']:5.1%} of the stratum), OBSERVED"
+              + ("  [CAP BOUND]" if s["certainty_capped"] else ""))
+        print(f"  {'':16s} RANDOM  {s['random_cohorts']:>3} of "
+              f"{s['random_population_cohorts']:>4,} left; 0 found bounds "
+              f"THAT population's cohort rate at {s['cohort_bound_rate']:.1%} "
+              f"and its row rate at only {s['row_bound_worst_case']:.1%}")
+        print(f"  {'':16s} the sitting looks at {s['rows_seen']:,} of "
+              f"{s['population_rows']:,} row(s) ({s['rows_seen_share']:.1%}) "
+              "-- a count, not a bound")
+    print("  the two parts are NEVER pooled: a certainty row is observed and "
+          "a random row is bounded, and no figure spans both but coverage")
+    print(f"  agent convergence: {convergence['judged_left']:,} of "
+          f"{convergence['judged']:,} agent-judged cohorts have left the "
+          f"primary surface, {convergence['rejected_left']:,} of "
+          f"{convergence['rejected']:,} REJECTs among them. Convergent "
+          "evidence about the gate, NOT human validation.")
     return 0
 
 

@@ -162,14 +162,31 @@ def _c_keys(findings, context):
                                                     floor=0.0)]
 
 
-def _built(target=None, n_c=5, verdict="REJECT"):
+TARGET = {V.STRATUM_A: 2, V.STRATUM_B: 2, V.STRATUM_C: 2}
+
+
+def _built(target=None, n_c=5, verdict="REJECT", certainty_share=None):
     findings, context = _world(n_c=n_c)
     verdicts = _verdicts(_c_keys(findings, context), verdict)
     drawn, stats = V.build_sample(
         findings, verdicts, context, type_reg=TYPE_REG, assay_pop=ASSAY_POP,
-        fallback=FALLBACK,
-        target=target or {V.STRATUM_A: 4, V.STRATUM_B: 3, V.STRATUM_C: 2})
+        fallback=FALLBACK, target=target or TARGET,
+        certainty_share=certainty_share)
     return findings, context, verdicts, drawn, stats
+
+
+def _fake_blocks(sizes):
+    """Cohort-shaped dicts carrying only what `certainty_slice` reads.
+
+    The slice needs a row count and a key and nothing else, so a fixture that
+    built real blocks would be testing `build_blocks` again. The labs are
+    ordered so that the KEY order and the SIZE order disagree, which is what
+    makes the tie-break assertions able to say anything.
+    """
+    return [{"lab": f"L{i:02d}", "sample_type": "D.IMG", "parent_types": "TIS",
+             "assay": A_TITLE, "field": M.LINEAGE_FIELD,
+             "value": "ADD_PARENT_TO_ASSAY", "n_rows": size}
+            for i, size in enumerate(sizes)]
 
 
 # --- 1. the draw is reproducible, and provably not by accident ---------------
@@ -264,8 +281,13 @@ def test_the_sample_is_drawn_at_cohort_level_and_never_weighted_by_rows():
     """
     findings, context = _world()
     verdicts = _verdicts(_c_keys(findings, context))
+    # THE CERTAINTY SLICE IS SWITCHED OFF HERE, through the argument and never
+    # by rebinding the constant. It is deliberately size-aware, so leaving it
+    # on would make this test red against correct code -- and the property
+    # under test belongs to the RANDOM half.
     kw = dict(type_reg=TYPE_REG, assay_pop=ASSAY_POP, fallback=FALLBACK,
-              target={V.STRATUM_A: 4, V.STRATUM_B: 3, V.STRATUM_C: 2})
+              target={V.STRATUM_A: 4, V.STRATUM_B: 3, V.STRATUM_C: 2},
+              certainty_share=0.0)
     lean, _ = V.build_sample(findings, verdicts, context, **kw)
 
     a_rows = findings[findings.classification == S.CLS_UNREACHABLE]
@@ -310,6 +332,116 @@ def test_the_seed_rides_on_every_row_of_the_sheet():
     _f, _c, _v, drawn, _s = _built()
     assert set(V.to_csv(drawn).seed) == {V.SEED}
     assert set(V.to_key(drawn, _v).seed) == {V.SEED}
+
+
+# --- the certainty slice: observed rows, not sampled ones --------------------
+
+
+def test_the_certainty_slice_takes_the_largest_cohorts_and_not_a_hash_draw():
+    """Probability 1, largest first. Not a draw wearing a different name.
+
+    The whole value of the slice is that a row inside it is OBSERVED, so it
+    must be chosen by size and nothing else. A slice that ran through `draw`
+    would be the same count of cohorts carrying the same sampling error, and
+    the power document would then be printing an observation table over
+    inferred rows.
+    """
+    blocks = _fake_blocks([5, 100, 20, 60, 1])
+    taken, capped = V.certainty_slice(blocks, share=0.45, cap=20)
+    assert not capped
+    assert taken == [R.cohort_key(blocks[1])]        # 100 of 186 = 53.8%
+    assert taken != V.draw([R.cohort_key(b) for b in blocks], 1)
+
+
+def test_the_certainty_slice_stops_at_the_stated_share():
+    """At or just above the target, never below it, and never one cohort more.
+
+    Ten equal cohorts and a 0.45 target: five reach exactly 50%, four reach
+    40%. Taking four would leave the slice under its own stated coverage and
+    the document would print a share that does not match the claim above it.
+    """
+    blocks = _fake_blocks([10] * 10)
+    taken, _capped = V.certainty_slice(blocks, share=0.45, cap=20)
+    assert len(taken) == 5
+    assert V.certainty_slice(blocks, share=0.0)[0] == []
+    assert len(V.certainty_slice(blocks, share=0.71)[0]) == 8
+
+
+def test_the_certainty_slice_is_capped_so_the_sitting_cannot_grow_silently():
+    """A flat population would demand half the cohorts. The cap refuses.
+
+    And it must SAY it refused: a slice that quietly stopped short would
+    print a covered share below its stated target with nothing explaining
+    why, which reads as a bug in the arithmetic rather than as a budget.
+    """
+    blocks = _fake_blocks([10] * 100)
+    taken, capped = V.certainty_slice(blocks, share=0.45, cap=3)
+    assert len(taken) == 3 and capped is True
+    assert V.certainty_slice(blocks, share=0.45, cap=90)[1] is False
+
+
+def test_the_certainty_slice_breaks_ties_on_the_cohort_key():
+    """Equal-sized cohorts straddling the cut must not be picked by luck.
+
+    Measured on the real extract: stratum A holds three cohorts of exactly
+    1,071 rows at ranks 15, 16 and 17, and the 0.45 cut lands among them. A
+    size-only sort is stable, so which of the three is inside the slice would
+    be decided by the order `build_blocks` happened to return.
+    """
+    blocks = _fake_blocks([10] * 10)
+    forward, _ = V.certainty_slice(blocks, share=0.45)
+    backward, _ = V.certainty_slice(list(reversed(blocks)), share=0.45)
+    assert forward == backward
+    assert forward == sorted(forward)
+
+
+def test_stratum_c_gets_no_certainty_slice():
+    """Half its cohorts are already drawn; a slice there buys almost nothing.
+
+    Asserted rather than left to the constant, because `CERTAINTY_STRATA`
+    silently gaining a member would add cohorts to the operator's sitting for
+    a stratum whose row coverage is already 69%.
+    """
+    _f, _c, _v, drawn, stats = _built()
+    by_name = {s["stratum"]: s for s in stats}
+    assert V.STRATUM_C not in V.CERTAINTY_STRATA
+    assert by_name[V.STRATUM_C]["certainty_cohorts"] == 0
+    assert not [d for d in drawn
+                if d["stratum"] == V.STRATUM_C and d["part"] == "certainty"]
+    for name in V.CERTAINTY_STRATA:
+        assert by_name[name]["certainty_cohorts"] > 0
+
+
+def test_the_certainty_slice_leaves_the_population_it_is_drawn_from():
+    """Removed before the draw, not overlaid on it.
+
+    Overlaying would let one cohort be both certain and sampled: counted twice
+    in the coverage, and an OBSERVED row sitting inside a bound whose whole
+    derivation assumes it was not observed.
+    """
+    _f, _c, _v, drawn, stats = _built()
+    keys = [d["cohort_key"] for d in drawn]
+    assert len(keys) == len(set(keys))
+    for stat in stats:
+        assert (stat["random_population_cohorts"]
+                == stat["population_cohorts"] - stat["certainty_cohorts"])
+        assert (stat["random_population_rows"]
+                == stat["population_rows"] - stat["certainty_rows"])
+
+
+def test_the_certainty_slice_displaces_no_random_pick():
+    """Everything the pure random draw chose is still in the sitting.
+
+    Shrinking the population the draw runs over only PROMOTES the cohorts left
+    in it, so nothing chosen before can fall out -- but that is an argument,
+    and this is the measurement. Without it a later change to the slice could
+    quietly drop cohorts the operator was already going to be asked about.
+    """
+    _f, _c, _v, before, _s = _built(certainty_share=0.0)
+    _f2, _c2, _v2, after, _s2 = _built()
+    kept = {d["cohort_key"] for d in after}
+    assert {d["cohort_key"] for d in before} <= kept
+    assert len(kept) > len(before)
 
 
 # --- 2. the power, stated before anyone rules --------------------------------
@@ -381,7 +513,7 @@ def test_the_power_statement_refuses_to_bound_the_row_rate():
     """
     stat = V.power(V.STRATUM_A, population_cohorts=655, population_rows=90478,
                    sampled_rows=[100] * 100)
-    assert stat["row_coverage"] == pytest.approx(10000 / 90478)
+    assert stat["random_row_coverage"] == pytest.approx(10000 / 90478)
     assert stat["row_bound_worst_case"] == pytest.approx(1 - 10000 / 90478)
     report = V.power_report([stat])
     assert "refusal, not a result" in report
@@ -396,11 +528,128 @@ def test_the_power_report_states_both_bounds_for_every_stratum():
     """
     _f, _c, _v, _d, stats = _built()
     report = V.power_report(stats)
-    assert "Per cohort" in report and "Per row" in report
+    assert "taken with certainty" in report and "the random draw" in report
+    assert "per row" in report
     for stat in stats:
         assert stat["stratum"] in report
         assert stat["question"] in report
     assert str(V.SEED) in report
+
+
+def test_the_two_parts_are_never_pooled_in_the_power_document():
+    """No error bound in the document spans an observed row and a sampled one.
+
+    THIS IS THE FAILURE MODE THE SLICE INTRODUCES. Once part of a stratum is
+    observed, the tempting thing to print is one flattering "row error <= X%"
+    over the union -- and it would be wrong in the direction that matters,
+    because the certainty rows carry no error and would drag the figure down
+    over rows nobody looked at. The bounds in the document belong to the
+    RANDOM population; the only figure spanning both parts is a count, and it
+    is labelled one.
+    """
+    _f, _c, _v, _d, stats = _built()
+    report = V.power_report(stats)
+
+    # THE BOUND IS RECOMPUTED FROM THE POPULATION FIGURES, NOT READ OFF THE
+    # FIELD THE REPORT PRINTS. An earlier version of this test asserted
+    # `row_bound_worst_case` appeared in the document and that the pooled value
+    # did not -- which is vacuous, because a `power` that POOLS puts the pooled
+    # number in that field and the two comparisons agree with each other.
+    # Verified by mutation: pooling survived it. These two expressions are
+    # independent of the implementation and of each other.
+    checked = 0
+    for stat in stats:
+        random_only = 1.0 - stat["random_rows"] / stat["random_population_rows"]
+        pooled = 1.0 - stat["rows_seen"] / stat["population_rows"]
+        assert stat["row_bound_worst_case"] == pytest.approx(random_only), (
+            f'{stat["stratum"]}: the row bound is not the random part\'s')
+        assert f"<= {random_only:.1%}" in report
+        if abs(pooled - random_only) > 5e-4:
+            checked += 1
+            assert f"<= {pooled:.1%}" not in report, (
+                f'{stat["stratum"]}: the document prints a row bound pooled '
+                "over observed and sampled rows")
+    assert checked, (
+        "no stratum in this fixture has a pooled bound differing from its "
+        "random one, so the assertion above could not have caught pooling")
+
+    assert "a count, not a bound" in report.lower()
+    assert "never be quoted as one" in report
+    assert "Observed, not inferred" in report
+
+
+def test_every_bound_is_scoped_to_the_population_it_was_measured_on():
+    """The cohort bound is over what is LEFT after part 1, not the stratum.
+
+    THE OTHER HALF OF THE POOLING FAILURE, and it flatters in the same
+    direction. Computing the bound against the full stratum quietly widens the
+    denominator with cohorts that were never in the random population -- 655
+    rather than 640 on the real extract -- so a clean sitting reports a rate
+    over a set the sample did not describe. Verified by mutation: scoping the
+    bound to `population_cohorts` survived every other test in this file.
+
+    Both expressions below are recomputed from the reported population
+    figures, so neither can agree with a mutation by construction, and the
+    last assertion refuses to pass on a fixture where the two coincide.
+    """
+    _f, _c, _v, _d, stats = _built()
+    differed = 0
+    for stat in stats:
+        scoped = V.zero_event_bound(stat["random_population_cohorts"],
+                                    stat["random_cohorts"])
+        whole = V.zero_event_bound(stat["population_cohorts"],
+                                   stat["random_cohorts"])
+        assert stat["cohort_bound_k"] == scoped, (
+            f'{stat["stratum"]}: the cohort bound is not the random part\'s')
+        assert stat["cohort_bound_rate"] == pytest.approx(
+            scoped / stat["random_population_cohorts"])
+        differed += int(scoped != whole)
+    assert differed, (
+        "no stratum here has a bound that differs between the two scopings, "
+        "so the assertion above could not have caught the wrong one")
+
+
+def test_the_power_document_records_the_convergence_and_the_blinding_caveat():
+    """Two facts the operator must see beside the table, not in a report to me.
+
+    The convergence is the only evidence of any kind bearing on the 99,449
+    rows, and it is NOT human validation -- a document that printed the
+    agreement without that sentence would be handing him a reason to rule
+    quickly. The blinding caveat is the mirror: nobody may later read this
+    sitting as fully blind, because `classification` recovers the stratum.
+    """
+    _f, _c, _v, _d, stats = _built()
+    convergence = {"judged": 1012, "judged_left": 801, "rejected": 756,
+                   "rejected_left": 650, "rejected_still": 106}
+    report = V.power_report(stats, convergence=convergence)
+    for figure in ("1,012", "801", "756", "650"):
+        assert figure in report
+    assert "not human validation" in report.lower()
+    assert "convergent evidence" in report.lower()
+    assert "not blind" in report.lower() or "NOT" in report
+    assert "fully blind" in report
+    assert S.CLS_ABSENCE_LINEAGE in report
+
+    # and it must not appear when there is nothing measured to report
+    assert "1,012" not in V.power_report(stats)
+
+
+def test_agent_convergence_counts_what_left_the_primary_surface():
+    """The figures in the document are measured here, never written down.
+
+    A hard-coded 801 would be a number that stops being true the first time a
+    lane changes and says nothing when it does.
+    """
+    findings, context = _world()
+    keys = _c_keys(findings, context)
+    # one REJECT still on the surface, one REJECT that never reaches it
+    verdicts = pd.concat([
+        _verdicts(keys[:1], "REJECT"),
+        _verdicts(["GONE|D.IMG|TIS|" + A_TITLE + "|(lineage)|X"], "REJECT"),
+        _verdicts(keys[1:2], "APPROVE")])
+    got = V.agent_convergence(findings, verdicts, context)
+    assert got == {"judged": 3, "judged_left": 1, "rejected": 2,
+                   "rejected_left": 1, "rejected_still": 1}
 
 
 # --- 3. the rater can punt ---------------------------------------------------
@@ -472,9 +721,10 @@ def test_the_key_file_carries_the_stratum_and_the_agent_verdict():
     key = V.to_key(drawn, verdicts)
     assert len(key) == len(drawn)
     assert set(key.stratum) <= set(V.STRATA)
-    assert set(key.columns) >= {"cohort_id", "stratum", "cohort_key", "n_rows",
-                                "agent_verdict", "agent_reason", "seed",
-                                "draw_digest"}
+    assert set(key.columns) >= {"cohort_id", "stratum", "part", "cohort_key",
+                                "n_rows", "agent_verdict", "agent_reason",
+                                "seed", "draw_digest"}
+    assert set(key.part) <= {"certainty", "random"}
     c_rows = key[key.stratum == V.STRATUM_C]
     assert len(c_rows) and set(c_rows.agent_verdict) == {"REJECT"}
 
@@ -703,11 +953,16 @@ def reworked(tmp_path_factory) -> pd.DataFrame:
 def test_the_real_extract_draws_the_stratified_sample_it_documents(reworked):
     """Every figure this task reports, re-derived by the suite.
 
-    Measured 2026-08-24 over `assay-hygiene-bak/extract`: stratum A is 655
-    cohorts over 90,478 rows (8 of which carry no precedent rate and reach no
-    cohort), B is 137 over 8,971, and C is 106 of the 756 agent REJECT cohorts
-    still on a primary surface, over 43,604 rows. The draw takes 100 / 50 / 50
-    and covers 10.2% / 23.3% / 69.1% of their rows.
+    Measured 2026-08-24 over `assay-hygiene-bak/extract`. Populations: stratum
+    A is 655 cohorts over 90,478 rows (8 of which carry no precedent rate and
+    reach no cohort), B is 137 over 8,971, and C is 106 of the 756 agent
+    REJECT cohorts still on a primary surface, over 43,604 rows.
+
+    The sitting is **219 cohorts**. The certainty slice takes A's 15 largest
+    (41,282 rows, 45.6%) and B's 4 largest (4,054 rows, 45.2%) with
+    probability 1; C gets none. The random draw then takes 100 of A's
+    remaining 640, 50 of B's remaining 133 and 50 of C's 106, and the sitting
+    ends up looking at 52.2% / 68.5% / 69.1% of each stratum's rows.
     """
     verdicts_path = ARTIFACTS / "mode2-verdicts-review.csv"
     if not verdicts_path.exists():
@@ -733,10 +988,43 @@ def test_the_real_extract_draws_the_stratified_sample_it_documents(reworked):
     assert by_name[V.STRATUM_B]["population_rows"] == 8971
     assert by_name[V.STRATUM_C]["population_cohorts"] == 106
     assert by_name[V.STRATUM_C]["population_rows"] == 43604
-    assert len(drawn) == 200
-    assert [by_name[n]["sampled_cohorts"] for n in V.STRATA] == [100, 50, 50]
-    assert by_name[V.STRATUM_A]["row_coverage"] == pytest.approx(0.102, abs=5e-4)
+
+    assert len(drawn) == 219
+    assert [by_name[n]["sampled_cohorts"] for n in V.STRATA] == [115, 54, 50]
+    assert [by_name[n]["certainty_cohorts"] for n in V.STRATA] == [15, 4, 0]
+    assert by_name[V.STRATUM_A]["certainty_rows"] == 41282
+    assert by_name[V.STRATUM_B]["certainty_rows"] == 4054
+    for name in (V.STRATUM_A, V.STRATUM_B):
+        assert by_name[name]["certainty_row_share"] == pytest.approx(
+            0.45, abs=0.01)
+        assert not by_name[name]["certainty_capped"]
+    assert [by_name[n]["random_cohorts"] for n in V.STRATA] == [100, 50, 50]
+    assert [by_name[n]["random_population_cohorts"] for n in V.STRATA] == [
+        640, 133, 106]
+    assert by_name[V.STRATUM_A]["rows_seen_share"] == pytest.approx(
+        0.522, abs=5e-4)
+    assert by_name[V.STRATUM_B]["rows_seen_share"] == pytest.approx(
+        0.685, abs=5e-4)
+    assert by_name[V.STRATUM_C]["rows_seen_share"] == pytest.approx(
+        0.691, abs=5e-4)
     assert by_name[V.STRATUM_C]["kish_n_eff"] < 3
+
+    # the certainty slice cost the operator 19 cohorts and lost him nothing:
+    # every cohort the pure random draw would have chosen is still in the
+    # sitting, because removing cohorts from a hash order only promotes others
+    pure, _ = V.build_sample(
+        reworked, verdicts, context,
+        type_reg=G.type_registration_index(membership, assays, nodes),
+        assay_pop=M2.assay_population(membership, assays),
+        fallback=P.fallback_assay_ids(assays), certainty_share=0.0)
+    assert len(pure) == 200
+    assert ({d["cohort_key"] for d in pure}
+            <= {d["cohort_key"] for d in drawn})
+
+    convergence = V.agent_convergence(reworked, verdicts, context)
+    assert convergence == {"judged": 1012, "judged_left": 801,
+                           "rejected": 756, "rejected_left": 650,
+                           "rejected_still": 106}
 
 
 def test_the_real_extract_sample_is_the_same_one_tomorrow(reworked):
