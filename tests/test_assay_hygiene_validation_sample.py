@@ -52,6 +52,21 @@ from assay_hygiene import validation_sample as V    # noqa: E402
 from test_assay_hygiene_review import _findings     # noqa: E402
 from test_assay_hygiene_review_mode2 import _m2     # noqa: E402
 
+def _section(report: str, heading: str) -> str:
+    """One `##` section of the power document, heading included.
+
+    THE RENDERED TEXT IS WHAT THESE TESTS MUST ASSERT ON, not the stat dict
+    that produced it. Four guards in this file have already shipped unable to
+    fail because they compared a document against the very field a mutation
+    would corrupt; slicing the document and reading it back is the only shape
+    that catches a table printing the wrong population.
+    """
+    assert heading in report, f"no section {heading!r} in the document"
+    start = report.index(heading)
+    rest = report.index("\n## ", start + len(heading))
+    return report[start:rest]
+
+
 EXTRACT = REPO / "assay-hygiene" / "extract"
 ARTIFACTS = REPO / "assay-hygiene"
 EVIDENCE_INPUTS = ("claims.parquet", "vocabulary.csv")
@@ -444,6 +459,111 @@ def test_the_certainty_slice_displaces_no_random_pick():
     assert len(kept) > len(before)
 
 
+# --- the declared disagreement slice: selected on outcome, carrying no rate --
+
+
+def _disputed_world():
+    """A world where the gate removed some cohorts an agent ruled APPROVE."""
+    findings, context = _world()
+    a_keys = [R.cohort_key(b) for b in M.build_blocks(
+        findings[findings.classification == S.CLS_UNREACHABLE], context,
+        floor=0.0)]
+    verdicts = pd.concat([_verdicts(_c_keys(findings, context), "REJECT"),
+                          _verdicts(a_keys, "APPROVE")])
+    return findings, context, verdicts, a_keys
+
+
+def test_the_disagreement_slice_is_every_approve_the_gate_removed():
+    """All of them, minus what the draw already has. Not a sample of them.
+
+    Taking a random half would be strictly worse: the slice answers a
+    which-one question, so every cohort in it is a case where an answer exists,
+    and there is nothing about it that a smaller random subset improves.
+    """
+    findings, context, verdicts, a_keys = _disputed_world()
+    on_surface = V.on_primary_surface(findings, context)
+    blocks = M.build_blocks(
+        findings[findings.classification == S.CLS_UNREACHABLE], context,
+        floor=0.0)
+    got = V.disagreement_slice(blocks, verdicts, on_surface, exclude=set())
+    assert sorted(got) == sorted(a_keys)
+    # and nothing an agent did NOT approve gets in
+    only_rejects = _verdicts(a_keys, "REJECT")
+    assert V.disagreement_slice(blocks, only_rejects, on_surface,
+                                exclude=set()) == []
+
+
+def test_the_disagreement_slice_never_repeats_a_cohort_already_drawn():
+    """`exclude` is the draw, and it is honoured. A repeat is a double ruling.
+
+    It is also a silent double count: the same cohort would appear once inside
+    a bounded population and once inside a group that carries no rate.
+    """
+    findings, context, verdicts, a_keys = _disputed_world()
+    on_surface = V.on_primary_surface(findings, context)
+    blocks = M.build_blocks(
+        findings[findings.classification == S.CLS_UNREACHABLE], context,
+        floor=0.0)
+    got = V.disagreement_slice(blocks, verdicts, on_surface,
+                               exclude={a_keys[0], a_keys[1]})
+    assert a_keys[0] not in got and a_keys[1] not in got
+    assert len(got) == len(a_keys) - 2
+
+
+def test_the_disputed_cohorts_are_additive_and_enter_no_bound():
+    """They add to the sitting and to NO population any bound is taken over.
+
+    THIS IS THE FAILURE THE GROUP INVITES. A cohort selected because two
+    instruments disagreed about it is, by construction, enriched for exactly
+    the outcome being measured; letting it into the random draw's denominator
+    or its numerator would bias the one number the sitting exists to produce.
+    """
+    findings, context, verdicts, _a = _disputed_world()
+    drawn, stats = V.build_sample(
+        findings, verdicts, context, type_reg=TYPE_REG, assay_pop=ASSAY_POP,
+        fallback=FALLBACK, target=TARGET)
+    disputed = [d for d in drawn if d["part"] == V.DISAGREEMENT]
+    assert disputed, "this fixture produced no disagreement at all"
+
+    keys = [d["cohort_key"] for d in drawn]
+    assert len(keys) == len(set(keys))
+    for stat in stats:
+        # the bounds are unchanged by the group's existence
+        assert (stat["random_population_cohorts"]
+                == stat["population_cohorts"] - stat["certainty_cohorts"])
+        assert stat["cohort_bound_k"] == V.zero_event_bound(
+            stat["random_population_cohorts"], stat["random_cohorts"])
+        # and the coverage count deliberately excludes them
+        assert (stat["rows_seen"]
+                == stat["certainty_rows"] + stat["random_rows"])
+        assert (stat["cohorts_to_rule"] == stat["sampled_cohorts"]
+                + stat["disagreement_cohorts"])
+
+
+def test_the_document_prints_the_disputed_group_with_no_bound_beside_it():
+    """Its own heading, and not one bound word inside it.
+
+    The group is the sharpest evidence in the population and the easiest thing
+    in this document to misuse: 32 cohorts enriched for false blocks would give
+    a spectacular and completely meaningless "false-block rate".
+    """
+    findings, context, verdicts, _a = _disputed_world()
+    _d, stats = V.build_sample(
+        findings, verdicts, context, type_reg=TYPE_REG, assay_pop=ASSAY_POP,
+        fallback=FALLBACK, target=TARGET)
+    part3 = _section(V.power_report(stats), "## Part 3 -- declared disagreement")
+    for forbidden in ("<=", "at most", "0-event", "hypergeometric",
+                      "kish", "bounds the"):
+        assert forbidden not in part3.lower(), (
+            f"Part 3 carries {forbidden!r}; it is selected on outcome and can "
+            "carry no rate")
+    assert "selected on" in part3.lower() and "outcome" in part3.lower()
+    assert "no rate, bound or extrapolation" in part3.lower()
+    for stat in stats:
+        if stat["disagreement_cohorts"]:
+            assert f'| {stat["disagreement_cohorts"]} ' in part3
+
+
 # --- 2. the power, stated before anyone rules --------------------------------
 
 
@@ -609,6 +729,82 @@ def test_every_bound_is_scoped_to_the_population_it_was_measured_on():
         "so the assertion above could not have caught the wrong one")
 
 
+def test_the_rendered_part_2_table_names_the_population_the_bound_belongs_to():
+    """The DOCUMENT, not the dict. Part 2's table must print 640, never 655.
+
+    THE STAT DICT WAS ALREADY GUARDED AND THE RENDERING WAS NOT. A reviewer
+    mutated `power_report` to print `population_cohorts` in Part 2's table and
+    every test in this file stayed green: the numbers were right in the dict
+    and wrong on the page the operator reads. This slices the section out of
+    the rendered markdown and reads it.
+    """
+    _f, _c, _v, _d, stats = _built()
+    part2 = _section(V.power_report(stats),
+                     "## Part 2 -- the random draw.")
+    differed = 0
+    for stat in stats:
+        assert f'| {stat["random_population_cohorts"]:,} |' in part2, (
+            f'{stat["stratum"]}: Part 2 does not name the population its '
+            "bound belongs to")
+        if stat["population_cohorts"] != stat["random_population_cohorts"]:
+            differed += 1
+            assert f'| {stat["population_cohorts"]:,} |' not in part2, (
+                f'{stat["stratum"]}: Part 2 prints the whole stratum as the '
+                "population its bound is over")
+    assert differed, (
+        "every stratum here has an empty certainty slice, so the assertion "
+        "above could not have caught the wrong population")
+
+
+def test_the_rendered_part_1_carries_no_bound_of_any_kind():
+    """An observation table with a confidence bound on it is a category error.
+
+    A reviewer mutated Part 1 to gain a 0-event bound column and nothing went
+    red. The rows in part 1 were LOOKED AT; attaching a sampling bound to them
+    would invite the operator to read observed rows as estimated ones, which is
+    the precise confusion the two-part split exists to prevent.
+    """
+    _f, _c, _v, _d, stats = _built()
+    part1 = _section(V.power_report(stats), "## Part 1 -- taken with certainty")
+    for forbidden in ("<=", "at most", "0-event", "bounds", "hypergeometric"):
+        assert forbidden not in part1.lower(), (
+            f"Part 1 carries {forbidden!r}; it describes observed rows and "
+            "must carry no bound")
+    assert "Observed, not inferred" in part1
+    # the share it DOES carry is not a bound, and must still be there
+    for stat in stats:
+        if stat["certainty_cohorts"]:
+            assert f'{stat["certainty_row_share"]:.1%}' in part1
+
+
+def test_the_rendered_lede_does_not_pool_the_parts():
+    """The rater-facing artifact, guarded on its own text.
+
+    IT SHIPPED POOLED. The lede read "115 drawn of 655 (0 found bounds the rate
+    at 2.7%)" -- a count spanning parts 1 and 2, a population spanning the
+    stratum, and a rate belonging to neither. Numerically conservative and
+    still wrong, on the one page a reviewer actually reads. Three separate
+    mutations of it -- the bound going to 0.0%, the bound vanishing, the
+    population reverting to the stratum -- all stayed green before this.
+    """
+    _f, _c, _v, drawn, stats = _built()
+    page = V.render(drawn, stats)
+    lede = page[page.index('<p class="lede">'):page.index('<div class="callout"')]
+    differed = 0
+    for stat in stats:
+        assert f'{stat["random_population_cohorts"]:,} left' in lede
+        assert f'{stat["cohort_bound_rate"]:.1%}' in lede
+        assert str(stat["certainty_cohorts"]) + " certain" in lede
+        if stat["population_cohorts"] != stat["random_population_cohorts"]:
+            differed += 1
+            assert f'{stat["population_cohorts"]:,} left' not in lede
+        # the bound must be a real number, not a rendered zero
+        assert stat["cohort_bound_rate"] > 0
+    assert differed, "no stratum here could have shown the pooled population"
+    assert "belong to the drawn part alone" in lede
+    assert "&amp;" not in lede, "the lede is double-escaped"
+
+
 def test_the_power_document_records_the_convergence_and_the_blinding_caveat():
     """Two facts the operator must see beside the table, not in a report to me.
 
@@ -620,15 +816,29 @@ def test_the_power_document_records_the_convergence_and_the_blinding_caveat():
     """
     _f, _c, _v, _d, stats = _built()
     convergence = {"judged": 1012, "judged_left": 801, "rejected": 756,
-                   "rejected_left": 650, "rejected_still": 106}
+                   "rejected_left": 650, "rejected_still": 106,
+                   "approved": 126, "approved_left": 49,
+                   "nonreject": 256, "nonreject_left": 151}
     report = V.power_report(stats, convergence=convergence)
-    for figure in ("1,012", "801", "756", "650"):
-        assert figure in report
-    assert "not human validation" in report.lower()
-    assert "convergent evidence" in report.lower()
-    assert "not blind" in report.lower() or "NOT" in report
-    assert "fully blind" in report
-    assert S.CLS_ABSENCE_LINEAGE in report
+    # BOTH HALVES, and the disagreement half is the one that was missing. The
+    # document once printed only the REJECT figures and told the reader the two
+    # instruments "agree on the large majority" -- while the same gate had
+    # removed 38.9% of what that instrument said should be registered.
+    for figure in ("1,012", "801", "756", "650", "126", "49", "256", "151",
+                   "86.0%", "38.9%"):
+        assert figure in report, figure
+    assert "diverge materially on inclusion" in report
+    assert "none of this is human validation" in report.lower()
+    assert "converge" in report.lower() and "diverge" in report.lower()
+    # WAS `"not blind" in report.lower() or "NOT" in report`, WHICH COULD NOT
+    # FAIL: "NOT" survives in "if NOTHING is found" and "the claim it does NOT
+    # support" with the whole blinding section deleted. The section is
+    # identified by its own heading now, and the sentence inside it that a
+    # later reader would rely on.
+    caveat = _section(report, "## What the sample is NOT")
+    assert "fully blind" in caveat
+    assert "only partly unanchored" in caveat
+    assert S.CLS_ABSENCE_LINEAGE in caveat
 
     # and it must not appear when there is nothing measured to report
     assert "1,012" not in V.power_report(stats)
@@ -642,14 +852,23 @@ def test_agent_convergence_counts_what_left_the_primary_surface():
     """
     findings, context = _world()
     keys = _c_keys(findings, context)
-    # one REJECT still on the surface, one REJECT that never reaches it
+    a_keys = [R.cohort_key(b) for b in M.build_blocks(
+        findings[findings.classification == S.CLS_UNREACHABLE], context,
+        floor=0.0)]
+    # one REJECT still on the surface, one REJECT that never reaches it, one
+    # APPROVE still on it, and two APPROVEs the gate removed -- so BOTH halves
+    # of the return carry a non-zero count and a mutation to either is visible
     verdicts = pd.concat([
         _verdicts(keys[:1], "REJECT"),
         _verdicts(["GONE|D.IMG|TIS|" + A_TITLE + "|(lineage)|X"], "REJECT"),
-        _verdicts(keys[1:2], "APPROVE")])
+        _verdicts(keys[1:2], "APPROVE"),
+        _verdicts(a_keys[:2], "APPROVE"),
+        _verdicts(a_keys[2:3], "UNSURE")])
     got = V.agent_convergence(findings, verdicts, context)
-    assert got == {"judged": 3, "judged_left": 1, "rejected": 2,
-                   "rejected_left": 1, "rejected_still": 1}
+    assert got == {"judged": 6, "judged_left": 4,
+                   "rejected": 2, "rejected_left": 1, "rejected_still": 1,
+                   "approved": 3, "approved_left": 2,
+                   "nonreject": 4, "nonreject_left": 3}
 
 
 # --- 3. the rater can punt ---------------------------------------------------
@@ -958,11 +1177,16 @@ def test_the_real_extract_draws_the_stratified_sample_it_documents(reworked):
     reach no cohort), B is 137 over 8,971, and C is 106 of the 756 agent
     REJECT cohorts still on a primary surface, over 43,604 rows.
 
-    The sitting is **219 cohorts**. The certainty slice takes A's 15 largest
+    The sitting is **251 cohorts**. The certainty slice takes A's 15 largest
     (41,282 rows, 45.6%) and B's 4 largest (4,054 rows, 45.2%) with
     probability 1; C gets none. The random draw then takes 100 of A's
-    remaining 640, 50 of B's remaining 133 and 50 of C's 106, and the sitting
-    ends up looking at 52.2% / 68.5% / 69.1% of each stratum's rows.
+    remaining 640, 50 of B's remaining 133 and 50 of C's 106, and the sampled
+    design ends up looking at 52.2% / 68.5% / 69.1% of each stratum's rows.
+
+    On top of that, the declared disagreement slice adds **32 cohorts / 1,578
+    rows** an agent ruled APPROVE and the gate removed -- 17 in A and 15 in B,
+    being the 45 such cohorts inside those two strata (21 + 24) minus the 13
+    the draw already had. Four more sit outside A and B entirely.
     """
     verdicts_path = ARTIFACTS / "mode2-verdicts-review.csv"
     if not verdicts_path.exists():
@@ -989,8 +1213,12 @@ def test_the_real_extract_draws_the_stratified_sample_it_documents(reworked):
     assert by_name[V.STRATUM_C]["population_cohorts"] == 106
     assert by_name[V.STRATUM_C]["population_rows"] == 43604
 
-    assert len(drawn) == 219
+    assert len(drawn) == 251
+    assert [by_name[n]["cohorts_to_rule"] for n in V.STRATA] == [132, 69, 50]
     assert [by_name[n]["sampled_cohorts"] for n in V.STRATA] == [115, 54, 50]
+    assert [by_name[n]["disagreement_cohorts"] for n in V.STRATA] == [17, 15, 0]
+    assert by_name[V.STRATUM_A]["disagreement_rows"] == 874
+    assert by_name[V.STRATUM_B]["disagreement_rows"] == 704
     assert [by_name[n]["certainty_cohorts"] for n in V.STRATA] == [15, 4, 0]
     assert by_name[V.STRATUM_A]["certainty_rows"] == 41282
     assert by_name[V.STRATUM_B]["certainty_rows"] == 4054
@@ -1017,14 +1245,19 @@ def test_the_real_extract_draws_the_stratified_sample_it_documents(reworked):
         type_reg=G.type_registration_index(membership, assays, nodes),
         assay_pop=M2.assay_population(membership, assays),
         fallback=P.fallback_assay_ids(assays), certainty_share=0.0)
-    assert len(pure) == 200
-    assert ({d["cohort_key"] for d in pure}
-            <= {d["cohort_key"] for d in drawn})
+    # the RANDOM half of that run is the pre-slice draw; its disagreement
+    # group is larger there only because fewer of its members were displaced
+    # into a certainty slice that does not exist in this comparison run
+    pure_random = {d["cohort_key"] for d in pure if d["part"] == "random"}
+    assert len(pure_random) == 200
+    assert pure_random <= {d["cohort_key"] for d in drawn}
 
     convergence = V.agent_convergence(reworked, verdicts, context)
     assert convergence == {"judged": 1012, "judged_left": 801,
                            "rejected": 756, "rejected_left": 650,
-                           "rejected_still": 106}
+                           "rejected_still": 106,
+                           "approved": 126, "approved_left": 49,
+                           "nonreject": 256, "nonreject_left": 151}
 
 
 def test_the_real_extract_sample_is_the_same_one_tomorrow(reworked):

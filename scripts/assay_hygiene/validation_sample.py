@@ -205,6 +205,17 @@ CERTAINTY_ROW_SHARE = 0.45
 # binds says so rather than quietly under-covering.
 CERTAINTY_MAX_COHORTS = 20
 
+# --- the declared disagreement slice ------------------------------------------
+#
+# The third `part` a drawn cohort can carry. It is NOT a fourth stratum: these
+# cohorts belong to A and B and stay labelled that way, because Step 6 has to
+# be able to keep them OUT of those strata's rates. What makes them their own
+# group is that they were selected on outcome -- an agent said APPROVE and the
+# gate removed them -- so they answer a which-one question and can carry no
+# rate at all. `disagreement_slice` holds the argument and the measurement.
+DISAGREEMENT = "disagreement"
+PARTS = ("certainty", "random", DISAGREEMENT)
+
 QUESTION = {
     STRATUM_A: "Is the reachability gate right? The house has never put this "
                "sample type in this assay. Is that its settled answer, or a "
@@ -319,6 +330,39 @@ def certainty_slice(blocks: list[dict], share: float = CERTAINTY_ROW_SHARE,
     return taken, len(taken) >= cap and covered / total < share
 
 
+def disagreement_slice(blocks: list[dict], verdicts: pd.DataFrame,
+                       on_surface: set[str], exclude: set[str]) -> list[str]:
+    """The cohorts an agent ruled APPROVE and the gate then removed. All of them.
+
+    THE SHARPEST EVIDENCE IN THE POPULATION, AND IT CANNOT CARRY A RATE. These
+    are selected on OUTCOME -- chosen precisely because two instruments
+    disagree about them -- so they are not a sample of anything and no unbiased
+    rate can be computed from them. The power document says that under its own
+    heading, in the same voice as the coverage table, and prints no bound
+    beside them.
+
+    WHAT THEY ARE FOR IS A DIFFERENT QUESTION FROM THE REST OF THE SITTING. The
+    random draw asks "how often is the gate wrong", and finds false blocks at
+    whatever the base rate is -- with a 0-event bound of 2.7% over 640 cohorts,
+    it can only ever say "rarely". This asks "when the two instruments
+    disagree, which one is right", which is answerable on 32 cohorts because
+    every one of them is a case where an answer exists to be had.
+
+    MEASURED 2026-08-24: the gate removed 49 of the 126 agent-APPROVE cohorts;
+    45 of the 49 are in strata A (21) and B (24) and 4 are elsewhere; 13 of the
+    45 are already in the sitting, so 32 are added, carrying 1,578 rows.
+
+    TAKEN WHOLE AND NOT SAMPLED, so there is no seed here and no hash: a slice
+    of 32 that answers a which-one question does not gain anything from being
+    a random 16.
+    """
+    approved = set(verdicts.loc[verdicts.verdict == "APPROVE", "cohort_key"])
+    removed = approved - on_surface
+    return sorted(R.cohort_key(b) for b in blocks
+                  if R.cohort_key(b) in removed
+                  and R.cohort_key(b) not in exclude)
+
+
 def draw(keys, n: int, seed: int = SEED, salt: str = "draw") -> list[str]:
     """-> the `n` keys whose digest sorts first. A pure function of its inputs.
 
@@ -397,10 +441,10 @@ def kish_effective_n(weights) -> float:
 
 def power(stratum: str, population_cohorts: int, population_rows: int,
           sampled_rows, certainty_rows=(), capped: bool = False,
-          alpha: float = 0.05) -> dict:
+          disagreement_rows=(), alpha: float = 0.05) -> dict:
     """Every figure Step 4 owes the operator, for one stratum, IN TWO PARTS.
 
-    THE PARTS ARE NOT POOLED AND NO FIELD HERE SPANS THEM EXCEPT COVERAGE.
+    THE PARTS ARE NOT POOLED AND NO FIELD HERE SPANS THEM EXCEPT TWO COUNTS.
     `certainty_*` describes rows that were LOOKED AT: they carry no sampling
     error and no bound is computed for them, because a bound on an observation
     is a category error. `random_*` describes a uniform draw from what is left,
@@ -421,6 +465,7 @@ def power(stratum: str, population_cohorts: int, population_rows: int,
     """
     sampled_rows = [int(x) for x in sampled_rows]
     certainty_rows = [int(x) for x in certainty_rows]
+    disagreement_rows = [int(x) for x in disagreement_rows]
     n = len(sampled_rows)
     covered = sum(sampled_rows)
     certain = sum(certainty_rows)
@@ -457,38 +502,80 @@ def power(stratum: str, population_cohorts: int, population_rows: int,
                                  if random_pop_rows else 1.0),
         "census": n >= random_pop_cohorts,
 
-        # spans both parts, and is a COUNT rather than a bound
+        # part 3 -- selected on OUTCOME. No bound is derived from it anywhere,
+        # and it is deliberately absent from `rows_seen` below: that figure
+        # describes the sampled design, and folding an outcome-selected group
+        # into it would make a coverage number that no longer means what the
+        # coverage table says it means.
+        "disagreement_cohorts": len(disagreement_rows),
+        "disagreement_rows": sum(disagreement_rows),
+
+        # spans parts 1 and 2, and is a COUNT rather than a bound
         "sampled_cohorts": n + len(certainty_rows),
         "rows_seen": certain + covered,
         "rows_seen_share": ((certain + covered) / population_rows
                             if population_rows else 0.0),
+
+        # every cohort the operator is asked for, including part 3
+        "cohorts_to_rule": n + len(certainty_rows) + len(disagreement_rows),
     }
+
+
+def on_primary_surface(findings: pd.DataFrame, context: dict) -> set[str]:
+    """The cohort keys the reworked detector still proposes on a primary sheet.
+
+    Split out because THREE callers need exactly this set and a second spelling
+    of it would let the convergence figures, the disagreement slice and stratum
+    C disagree about what "still proposed" means -- which is the defect this
+    package documents about `registered` and about the cohort key.
+    """
+    primary = findings[(findings["mode"] == S.MODE_2)
+                       & (~findings.classification.isin(OFF_PRIMARY))]
+    return {R.cohort_key(b)
+            for b in M.build_blocks(primary, context, floor=0.0)}
 
 
 def agent_convergence(findings: pd.DataFrame, verdicts: pd.DataFrame,
                       context: dict) -> dict:
-    """What the agents and the gate independently agree should not be proposed.
+    """Where the agents and the gate agree, AND where they do not. Both halves.
 
     IT IS NOT HUMAN VALIDATION AND THE REPORT MUST NOT DRESS IT AS ANY. Fifteen
     agents reading biology in 2026-08 and a reachability gate built in 2026-08
     from membership counts are two different instruments, neither of them a
-    curator; that they agree on the large majority of what to drop is evidence
-    about the gate, and it is the FIRST evidence of any kind bearing on the
-    99,449 rows. It sits beside the power table because the operator should
-    weigh it while ruling, and it is labelled for what it is.
+    curator. It is the FIRST evidence of any kind bearing on the 99,449 rows,
+    which is why it sits beside the power table, and it is labelled for what it
+    is.
+
+    THE DISAGREEMENT HALF IS RETURNED BECAUSE OMITTING IT WAS A REAL DEFECT AND
+    NOT A HYPOTHETICAL ONE. This function first shipped returning the REJECT
+    figures alone, and the document then said the two instruments "agree on the
+    large majority of what should not be proposed" -- true, and only half true.
+    On the same inputs the gate also removed 49 of the 126 cohorts the agents
+    ruled APPROVE, 38.9% of them, and 151 of the 256 non-REJECT verdicts
+    overall. That is the FALSE-BLOCK signal stratum A exists to measure, it was
+    already computed, and a reader of the one-sided version came away with the
+    favourable half only. Both halves are returned here and both are printed.
+
+    `approved_left` IS THE HEADLINE OF THE SECOND HALF and `nonreject_left` is
+    the wider frame around it: WRONG_ASSAY and UNSURE are not endorsements, so
+    pooling all three would blur the one number that means "this instrument
+    said yes and the other said never".
     """
-    primary = findings[(findings["mode"] == S.MODE_2)
-                       & (~findings.classification.isin(OFF_PRIMARY))]
-    on_surface = {R.cohort_key(b)
-                  for b in M.build_blocks(primary, context, floor=0.0)}
+    on_surface = on_primary_surface(findings, context)
     judged = set(verdicts.cohort_key)
     rejected = set(verdicts.loc[verdicts.verdict == "REJECT", "cohort_key"])
+    approved = set(verdicts.loc[verdicts.verdict == "APPROVE", "cohort_key"])
+    nonreject = judged - rejected
     return {
         "judged": len(judged),
         "judged_left": len(judged - on_surface),
         "rejected": len(rejected),
         "rejected_left": len(rejected - on_surface),
         "rejected_still": len(rejected & on_surface),
+        "approved": len(approved),
+        "approved_left": len(approved - on_surface),
+        "nonreject": len(nonreject),
+        "nonreject_left": len(nonreject - on_surface),
     }
 
 
@@ -557,9 +644,9 @@ def strata(findings: pd.DataFrame, verdicts: pd.DataFrame,
         out[name] = {"blocks": blocks, "population_rows": int(len(rows)),
                      "unrated": unrated}
 
+    rejected = set(verdicts.loc[verdicts.verdict == "REJECT", "cohort_key"])
     primary = findings[(findings["mode"] == S.MODE_2)
                        & (~findings.classification.isin(OFF_PRIMARY))]
-    rejected = set(verdicts.loc[verdicts.verdict == "REJECT", "cohort_key"])
     blocks = [b for b in M.build_blocks(primary, context, floor=0.0)
               if R.cohort_key(b) in rejected]
     out[STRATUM_C] = {
@@ -774,6 +861,7 @@ def build_sample(findings: pd.DataFrame, verdicts: pd.DataFrame,
     target = dict(TARGET if target is None else target)
     check_verdict_vocabulary(verdicts)
     parts = strata(findings, verdicts, context)
+    on_surface = on_primary_surface(findings, context)
 
     by_class = {S.CLS_UNREACHABLE: findings[
                     findings.classification == S.CLS_UNREACHABLE],
@@ -804,7 +892,19 @@ def build_sample(findings: pd.DataFrame, verdicts: pd.DataFrame,
         remaining = [k for k in blocks if k not in set(certain)]
         picked = draw(remaining, target[name], seed)
 
-        for part, keys in (("certainty", certain), ("random", picked)):
+        # THE DISAGREEMENT SLICE IS ADDITIVE AND IS NOT A SAMPLE. It is taken
+        # after the draw and excludes everything already in it, so it never
+        # displaces a random pick and never double-counts one. It contributes
+        # to NO bound: `power` is handed its size for reporting and nothing
+        # else, and the cohorts stay labelled with the stratum they came from
+        # so Step 6 can keep them out of that stratum's rate.
+        disputed = (disagreement_slice(list(blocks.values()), verdicts,
+                                       on_surface,
+                                       set(certain) | set(picked))
+                    if name in CERTAINTY_STRATA else [])
+
+        for part, keys in (("certainty", certain), ("random", picked),
+                           (DISAGREEMENT, disputed)):
             for key in keys:
                 block = blocks[key]
                 drawn.append({
@@ -823,7 +923,9 @@ def build_sample(findings: pd.DataFrame, verdicts: pd.DataFrame,
                            [blocks[k]["n_rows"] for k in picked],
                            certainty_rows=[blocks[k]["n_rows"]
                                            for k in certain],
-                           capped=capped))
+                           capped=capped,
+                           disagreement_rows=[blocks[k]["n_rows"]
+                                              for k in disputed]))
 
     drawn.sort(key=lambda d: (_digest(seed, "order", d["cohort_key"]),
                               d["cohort_key"]))
@@ -924,7 +1026,7 @@ def power_report(stats: list[dict], seed: int = SEED, alpha: float = 0.05,
     named coverage and is a count.
     """
     conf = f"{(1 - alpha) * 100:.0f}%"
-    total_cohorts = sum(s["sampled_cohorts"] for s in stats)
+    total_cohorts = sum(s["cohorts_to_rule"] for s in stats)
     lines = [
         "# Validation sample -- what it can and cannot bound",
         "",
@@ -936,12 +1038,13 @@ def power_report(stats: list[dict], seed: int = SEED, alpha: float = 0.05,
         "with the salt `order`. No RNG is involved, so the draw can be "
         "re-derived in any language and checked against this file.",
         "",
-        "**The two parts are never pooled.** A row inside the certainty slice "
+        "**The parts are never pooled.** A row inside the certainty slice "
         "carries no sampling error, so no bound is printed for it. A row "
-        "outside gets a bound from its own sample over its own population. "
-        "There is no combined error figure anywhere in this document, and if "
-        "you find yourself wanting one, the honest answer is the two rows of "
-        "the two tables read side by side.",
+        "outside gets a bound from its own sample over its own population. A "
+        "row in part 3 was selected because two instruments disagreed about "
+        "it, so it carries no rate at all. There is no combined error figure "
+        "anywhere in this document, and if you find yourself wanting one, the "
+        "honest answer is the rows of the separate tables read side by side.",
         "",
         "**Nothing here is decided and nothing here writes.** Every cohort is "
         "a proposal awaiting a ruling, and `" + PUNT + "` is a first-class "
@@ -1028,6 +1131,40 @@ def power_report(stats: list[dict], seed: int = SEED, alpha: float = 0.05,
         "estimate and its confidence interval will be far wider than the "
         "cohort count suggests.",
         "",
+    ]
+    if any(s["disagreement_cohorts"] for s in stats):
+        lines += [
+            "## Part 3 -- declared disagreement. No bound, and none is possible.",
+            "",
+            "| stratum | cohorts | rows |",
+            "|---|---|---|",
+        ]
+        for s in stats:
+            if s["disagreement_cohorts"]:
+                lines.append(f'| {s["stratum"]} | {s["disagreement_cohorts"]} '
+                             f'| {s["disagreement_rows"]:,} |')
+        lines += [
+            "",
+            "**Every cohort here was ruled APPROVE by an agent and then "
+            "removed by the reachability gate.** They are selected on "
+            "OUTCOME -- chosen precisely because two instruments disagree "
+            "about them -- so they are not a sample of anything and **no "
+            "rate, bound or extrapolation may be computed from them.** That "
+            "restriction is exactly the one on the coverage table below, and "
+            "for the same reason.",
+            "",
+            "**They answer a different question from the rest of the "
+            "sitting.** Parts 1 and 2 ask *how often is the gate wrong*, and "
+            "a random draw finds false blocks at whatever the base rate is. "
+            "This asks *when the two instruments disagree, which one is "
+            "right* -- and every cohort in it is a case where there is an "
+            "answer to be had. It is the sharpest evidence available anywhere "
+            "in this population, and it costs about 15% more of your time.",
+            "",
+            "Cohorts already in parts 1 or 2 are **not** repeated here.",
+            "",
+        ]
+    lines += [
         "## Coverage -- a count, not a bound",
         "",
         "| stratum | rows in the stratum | rows the sitting looks at | share |",
@@ -1038,10 +1175,13 @@ def power_report(stats: list[dict], seed: int = SEED, alpha: float = 0.05,
                      f'{s["rows_seen"]:,} | {s["rows_seen_share"]:.1%} |')
     lines += [
         "",
-        "This table adds the two parts and nothing else does. It says how many "
-        "proposals are put in front of a human, which is an arithmetic fact "
-        "about the sitting. **It is not an error bound and must never be "
-        "quoted as one.**",
+        "This table adds parts 1 and 2 and nothing else does. It says how many "
+        "proposals the SAMPLED design puts in front of a human, which is an "
+        "arithmetic fact about the sitting. **It is not an error bound and "
+        "must never be quoted as one.** Part 3's rows are deliberately absent "
+        "from it: folding an outcome-selected group into a coverage figure "
+        "would make the figure stop meaning what this paragraph says it "
+        "means.",
         "",
         "## What the sample is NOT",
         "",
@@ -1058,25 +1198,49 @@ def power_report(stats: list[dict], seed: int = SEED, alpha: float = 0.05,
         "",
     ]
     if convergence:
+        rej = (convergence["rejected_left"] / convergence["rejected"]
+               if convergence["rejected"] else 0.0)
+        app = (convergence["approved_left"] / convergence["approved"]
+               if convergence["approved"] else 0.0)
+        non = (convergence["nonreject_left"] / convergence["nonreject"]
+               if convergence["nonreject"] else 0.0)
         lines += [
             "## One piece of evidence that already exists, and what it is worth",
             "",
             f'Of the {convergence["judged"]:,} cohorts 15 agents judged '
-            f'before this rework, **{convergence["judged_left"]:,} are no '
-            "longer proposed on a primary surface at all**. Of the "
-            f'{convergence["rejected"]:,} they ruled REJECT, '
-            f'**{convergence["rejected_left"]:,} have left** and '
-            f'{convergence["rejected_still"]:,} remain -- and those '
-            f'{convergence["rejected_still"]:,} are stratum C.',
+            f'before this rework, {convergence["judged_left"]:,} are no '
+            "longer proposed on a primary surface at all. **Read that as two "
+            "numbers and never as one**, because the two halves point in "
+            "opposite directions.",
             "",
-            "**That is convergent evidence and it is not human validation.** "
-            "Fifteen agents reading biology, and a reachability gate built "
-            "from membership counts, are two different instruments and "
-            "neither one is a curator. They were built from entirely "
-            "different evidence and they agree on the large majority of what "
-            "should not be proposed. It is the first evidence of any kind "
-            "bearing on the 99,449 rows this rework moved -- worth weighing "
-            "while you rule, and not a substitute for ruling.",
+            "| what the agents said | cohorts | the gate removed | |",
+            "|---|---|---|---|",
+            f'| REJECT | {convergence["rejected"]:,} | '
+            f'**{convergence["rejected_left"]:,}** | {rej:.1%} |',
+            f'| APPROVE | {convergence["approved"]:,} | '
+            f'**{convergence["approved_left"]:,}** | {app:.1%} |',
+            f'| everything that is not REJECT | {convergence["nonreject"]:,} | '
+            f'{convergence["nonreject_left"]:,} | {non:.1%} |',
+            "",
+            "**The two instruments converge strongly on exclusion and diverge "
+            "materially on inclusion.** They agree on "
+            f"{rej:.0%} of what should not be proposed -- and the same gate "
+            f'removed {app:.0%} of what that same instrument said SHOULD be. '
+            "The second number is the false-block signal stratum A exists to "
+            "measure, and it is the reason part 3 of this sitting exists: "
+            "those disagreements are listed rather than summarised.",
+            "",
+            f'The {convergence["rejected_still"]:,} REJECT cohorts the gate '
+            "did NOT remove are stratum C.",
+            "",
+            "**None of this is human validation.** Fifteen agents reading "
+            "biology, and a reachability gate built from membership counts, "
+            "are two different instruments and neither one is a curator. "
+            "That they were built from entirely different evidence is what "
+            "makes their agreement worth anything, and it is also what makes "
+            "their disagreement worth more. It is the first evidence of any "
+            "kind bearing on the 99,449 rows this rework moved -- worth "
+            "weighing while you rule, and not a substitute for ruling.",
             "",
         ]
     lines += ["## The questions", ""]
@@ -1209,10 +1373,31 @@ def render(drawn: list[dict], stats: list[dict], seed: int = SEED) -> str:
         _HDR_MODE1, _HDR_VALIDATION)
 
     total = sum(e["block"]["n_rows"] for e in drawn)
-    bounds = " &middot; ".join(
-        f'{s["sampled_cohorts"]} drawn of {s["population_cohorts"]:,} '
-        f'(0 found bounds the rate at {s["cohort_bound_rate"]:.1%})'
+
+    # THE LEDE SHIPPED POOLING THE PARTS AND THIS IS THE CORRECTION. It read
+    # "115 drawn of 655 (0 found bounds the rate at 2.7%)", in which
+    # `sampled_cohorts` spans parts 1 and 2, `population_cohorts` is the whole
+    # stratum, and 2.7% is a rate over the 640 cohorts of part 2 alone. Every
+    # number was right and the sentence was not, on the rater-facing artifact
+    # of all places, contradicting this module's own docstring. Each part is
+    # now named with the population it belongs to and the bound is attached to
+    # the only one it describes.
+    #
+    # NOTHING HERE GOES THROUGH `R._e`. The strings hold entities this function
+    # writes (`&middot;`), and escaping them again renders a literal
+    # `&amp;middot;` on the page. The interpolated values are formatted
+    # integers, percentages and this module's own stratum constants, none of
+    # which can carry markup; `R._e` is applied where user-shaped data reaches
+    # the page, which is `_cohort_html`, not here.
+    shape = " &middot; ".join(
+        f'<b>{s["stratum"]}</b> {s["certainty_cohorts"]} certain + '
+        f'{s["random_cohorts"]} drawn of the {s["random_population_cohorts"]:,} '
+        f'left (0 found bounds THAT population at '
+        f'{s["cohort_bound_rate"]:.1%})'
+        + (f' + {s["disagreement_cohorts"]} disputed, unrated'
+           if s["disagreement_cohorts"] else "")
         for s in stats)
+
     parts = []
     for entry in drawn:
         parts += _cohort_html(entry)
@@ -1221,10 +1406,16 @@ def render(drawn: list[dict], stats: list[dict], seed: int = SEED) -> str:
             f'<h1>Validation sample &mdash; {len(drawn):,} cohort(s), '
             f"{total:,} proposal(s)</h1>"
             f'<p class="lede">A stratified sample of proposals the detector '
-            "made and <b>no human has ever judged</b>, drawn at seed "
-            f"<b>{seed}</b> by sha256 hash order so it can be re-derived "
-            "exactly. Three strata, interleaved on purpose. "
-            f"{R._e(bounds)}. Up to {R.MAX_EXAMPLES} examples per cohort.</p>"
+            "made and <b>no human has ever judged</b>, at seed "
+            f"<b>{seed}</b>. The largest cohorts are taken with certainty; "
+            "the rest are drawn by sha256 hash order, so the sample can be "
+            "re-derived exactly. Three strata, interleaved on purpose. Up to "
+            f"{R.MAX_EXAMPLES} examples per cohort.</p>"
+            f'<p class="lede">{shape}. <b>The bounds above belong to the '
+            "drawn part alone.</b> A cohort taken with certainty carries no "
+            "sampling error, and a disputed cohort was selected because two "
+            "instruments disagreed about it, so neither one is inside any "
+            "rate on this page.</p>"
             f"{_CALLOUT}{''.join(parts)}{R.BAR}{script}\n")
 
 
@@ -1274,7 +1465,7 @@ def main(artifacts="assay-hygiene", extract=None, verdicts=None, out_dir=None,
     print(f"wrote {out / POWER_NAME} -- what this sample can and cannot bound")
     print(f"  seed {seed}; the largest cohorts are taken with certainty and "
           f"the rest drawn iff sha256('{seed}|draw|<key>') sorts first")
-    print(f"  {sum(s['sampled_cohorts'] for s in stats)} cohort(s) to rule "
+    print(f"  {sum(s['cohorts_to_rule'] for s in stats)} cohort(s) to rule "
           f"in total")
     for s in stats:
         print(f"  {s['stratum']:16s} CERTAIN {s['certainty_cohorts']:>3} "
@@ -1285,16 +1476,25 @@ def main(artifacts="assay-hygiene", extract=None, verdicts=None, out_dir=None,
               f"{s['random_population_cohorts']:>4,} left; 0 found bounds "
               f"THAT population's cohort rate at {s['cohort_bound_rate']:.1%} "
               f"and its row rate at only {s['row_bound_worst_case']:.1%}")
-        print(f"  {'':16s} the sitting looks at {s['rows_seen']:,} of "
+        if s["disagreement_cohorts"]:
+            print(f"  {'':16s} DISPUTED {s['disagreement_cohorts']:>2} "
+                  f"cohort(s) = {s['disagreement_rows']:>6,} row(s) an agent "
+                  "ruled APPROVE and the gate removed. Selected on OUTCOME, "
+                  "so NO rate follows from them")
+        print(f"  {'':16s} the sampled design looks at {s['rows_seen']:,} of "
               f"{s['population_rows']:,} row(s) ({s['rows_seen_share']:.1%}) "
               "-- a count, not a bound")
-    print("  the two parts are NEVER pooled: a certainty row is observed and "
-          "a random row is bounded, and no figure spans both but coverage")
-    print(f"  agent convergence: {convergence['judged_left']:,} of "
-          f"{convergence['judged']:,} agent-judged cohorts have left the "
-          f"primary surface, {convergence['rejected_left']:,} of "
-          f"{convergence['rejected']:,} REJECTs among them. Convergent "
-          "evidence about the gate, NOT human validation.")
+    print("  the parts are NEVER pooled: a certainty row is observed, a "
+          "random row is bounded, a disputed row carries no rate at all")
+    print(f"  agent convergence, BOTH halves: {convergence['rejected_left']:,} "
+          f"of {convergence['rejected']:,} agent-REJECT cohorts have left the "
+          f"primary surface ({convergence['rejected_left'] / convergence['rejected']:.1%}) "
+          f"-- but so have {convergence['approved_left']:,} of "
+          f"{convergence['approved']:,} agent-APPROVE "
+          f"({convergence['approved_left'] / convergence['approved']:.1%}). "
+          "The two instruments converge on exclusion and DIVERGE on "
+          "inclusion. Convergent evidence about the gate, NOT human "
+          "validation.")
     return 0
 
 
