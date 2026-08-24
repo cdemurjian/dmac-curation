@@ -120,8 +120,13 @@ CLASS_GLOSS = {
         "registered in it elsewhere",
     S.CLS_UNREACHABLE:
         "a lineage neighbour carries the assay, but NO sample of this type is "
-        "registered in it anywhere -- the same pair the gate already refuses "
-        "when a CLAIM names one",
+        "registered in it anywhere, and the assay is WELL USED by other types "
+        "-- the same pair the gate already refuses when a CLAIM names one",
+    S.CLS_BOOTSTRAP:
+        "the same absence, under an assay holding fewer than "
+        f"{M2.BOOTSTRAP_POPULATION_FLOOR} samples in total: the house has "
+        "barely used it, so review these as FIRST-OF-A-KIND registrations "
+        "rather than as type errors",
     S.CLS_ABSENCE_COMPAT:
         "no neighbour carries it; the pair co-registers on samples of this "
         "type, so the absence is the anomaly",
@@ -140,10 +145,14 @@ assert set(CLASS_GLOSS) == set(S.CLASSES) | {NO_CLASS}, (
     f"{set(S.CLASSES) - set(CLASS_GLOSS)} unglossed, "
     f"{set(CLASS_GLOSS) - set(S.CLASSES) - {NO_CLASS}} unknown")
 
-# The three classes that name WHERE THE EVIDENCE CAME FROM, as against the two
+# The four classes that name WHERE THE EVIDENCE CAME FROM, as against the two
 # that say no test settled the row. `_term_contrast_note` ranks terms on a
-# share of this, and it held two of the three until 2026-08-21.
-EVIDENCED = (S.CLS_ABSENCE_LINEAGE, S.CLS_UNREACHABLE, S.CLS_ABSENCE_COMPAT)
+# share of this, and it held two of the four until 2026-08-21. `CLS_BOOTSTRAP`
+# is in it for the reason `CLS_UNREACHABLE` is: a lineage neighbour carries the
+# pair, which is evidence, and a denominator that omits a class can be smaller
+# than the population the same table calls `rows`.
+EVIDENCED = (S.CLS_ABSENCE_LINEAGE, S.CLS_UNREACHABLE, S.CLS_BOOTSTRAP,
+             S.CLS_ABSENCE_COMPAT)
 
 
 def classification_census(findings: pd.DataFrame) -> pd.Series:
@@ -363,12 +372,14 @@ def _term_contrast_note(findings: pd.DataFrame) -> list[str]:
     some other pair the sharpest example, the report says so instead of
     repeating this one.
 
-    THE DENOMINATOR IS THREE CLASSES AND WAS TWO. `CLS_UNREACHABLE` is an
+    THE DENOMINATOR IS FOUR CLASSES AND WAS TWO. `CLS_UNREACHABLE` is an
     evidence source like the other two -- a lineage neighbour carries the pair
     and no sample of the type has ever held it -- so `lineage_share` had been a
     share of a denominator that could be smaller than the population the same
     table calls `rows`, and the third column was missing from a table whose
-    whole subject is where a term's evidence comes from.
+    whole subject is where a term's evidence comes from. `CLS_BOOTSTRAP` is the
+    fourth on the same argument: it is a cut through the third, so leaving it
+    out would reopen exactly the shortfall the third column closed.
 
     ON THE 2026-08-21 ARTIFACTS THE CHANGE MOVES NOTHING, AND THAT IS A FACT
     ABOUT THE GATE RATHER THAN A REASON TO SKIP IT. Measured on that run, 0 of
@@ -424,23 +435,26 @@ def _term_contrast_note(findings: pd.DataFrame) -> list[str]:
         "class below and describing none of the populations:",
         "",
         "| term | rows | reachable neighbour | unreachable pair | "
-        "co-registration alone |",
-        "|---|---|---|---|---|",
+        "barely-used assay | co-registration alone |",
+        "|---|---|---|---|---|---|",
         f"| `{_cell(hi_term)}` | {_num(hi['n'])} | "
         f"{_num(hi[S.CLS_ABSENCE_LINEAGE])} | {_num(hi[S.CLS_UNREACHABLE])} | "
-        f"{_num(hi[S.CLS_ABSENCE_COMPAT])} |",
+        f"{_num(hi[S.CLS_BOOTSTRAP])} | {_num(hi[S.CLS_ABSENCE_COMPAT])} |",
         f"| `{_cell(lo_term)}` | {_num(lo['n'])} | "
         f"{_num(lo[S.CLS_ABSENCE_LINEAGE])} | {_num(lo[S.CLS_UNREACHABLE])} | "
-        f"{_num(lo[S.CLS_ABSENCE_COMPAT])} |",
+        f"{_num(lo[S.CLS_BOOTSTRAP])} | {_num(lo[S.CLS_ABSENCE_COMPAT])} |",
         "",
-        "`unreachable pair` is a lineage neighbour carrying an assay NO sample",
-        "of this type is registered in anywhere. It is a third evidence source",
-        "and not a subdivision of the first, and it is in the denominator these",
-        "terms are ranked on. It is printed even where it is zero everywhere,",
-        "which is the usual case and has a cause: a row on an unreachable pair",
-        "is raised by a neighbour and carries no term of its own, so it cannot",
-        "reach a table keyed on the term. A zero here is that fact, not an",
-        "omission.",
+        "`unreachable pair` and `barely-used assay` are both a lineage",
+        "neighbour carrying an assay NO sample of this type is registered in",
+        "anywhere; they differ in whether the house has used that assay at all,",
+        "the split `mode2.BOOTSTRAP_POPULATION_FLOOR` draws at",
+        f"{M2.BOOTSTRAP_POPULATION_FLOOR} samples. They are evidence sources of",
+        "their own and not subdivisions of the first, and both are in the",
+        "denominator these terms are ranked on. Both are printed even where",
+        "they are zero everywhere, which is the usual case and has a cause: a",
+        "row on an unreachable pair is raised by a neighbour and carries no",
+        "term of its own, so it cannot reach a table keyed on the term. A zero",
+        "here is that fact, not an omission.",
         "",
         "The two rest on different evidence and a curator would rule on them",
         "differently. NOTE what this is NOT: their co-registration RATES are",
@@ -766,7 +780,14 @@ def build_report(findings: pd.DataFrame,
     m2 = findings[findings["mode"] == S.MODE_2] if n_findings else findings
     m2_census = classification_census(m2)
     lineage_rows = int(classes.get(S.CLS_ABSENCE_LINEAGE, 0))
-    unreachable_rows = int(classes.get(S.CLS_UNREACHABLE, 0))
+    # THE UNREACHABLE TERM IS BOTH ITS CLASSES. A bootstrap row is an
+    # unreachable row on an assay the house has barely used, so it comes off the
+    # same ceiling; counting only the first would understate `lineage_derived`
+    # and overstate the gap the paragraph below calls "exactly the rows the gate
+    # refused plus the rows Mode 1 claimed first" -- which is the identity that
+    # went false the last time a class was added and a sum was not.
+    unreachable_rows = (int(classes.get(S.CLS_UNREACHABLE, 0))
+                        + int(classes.get(S.CLS_BOOTSTRAP, 0)))
     lineage_derived = lineage_rows + unreachable_rows
     lines += [
         f"## {MODE_HEADINGS[S.MODE_2]}",
@@ -865,7 +886,8 @@ def build_report(findings: pd.DataFrame,
             "",
         ] + _class_bullets(d_census) + [
             "",
-            f"`{S.CLS_UNREACHABLE}` IS IN THIS CURVE AND THAT IS A DECISION.",
+            f"`{S.CLS_UNREACHABLE}` AND `{S.CLS_BOOTSTRAP}` ARE IN THIS CURVE",
+            "AND THAT IS A DECISION.",
             "Those rows are lineage-derived, carry a direction and carry a",
             "precedent rate, so the rate means the same thing for them as for",
             "any other row here and excluding them would publish a curve over a",

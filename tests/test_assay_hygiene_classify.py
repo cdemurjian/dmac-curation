@@ -1489,6 +1489,16 @@ def _pipeline2(w=None):
         reg_projects=M2.registration_projects(w["membership"], w["assays"]),
         types=G.sample_type_index(w["nodes"]),
         type_reg=type_reg,
+        # THE WORLD'S REAL POPULATIONS, and every assay in it is under
+        # `BOOTSTRAP_POPULATION_FLOOR`, so every unreachable row this fixture
+        # emits is `CLS_BOOTSTRAP`. That is the truth about a 33-sample world
+        # rather than a fixture defect, and inflating one assay past 100 to
+        # recover the other label would be 100 filler samples inside the one
+        # fixture whose premise is that every count is hand-derived. The two
+        # classes are discriminated by perturbing `bundle["assay_pop"]`, which
+        # is why the bundle exists -- see
+        # `test_an_unreachable_pair_under_a_heavily_used_assay_is_not`.
+        assay_pop=M2.assay_population(w["membership"], w["assays"]),
         titles=M2.assay_titles(w["assays"]),
         projects=X.project_index(w["samples"]),
     )
@@ -1853,9 +1863,13 @@ def test_a_gate_rejected_claim_corroborates_nothing_and_the_row_records_it():
     assert row.proposed_by == X.BY_PRECEDENT
     assert "rejected" in row.evidence_summary
 
-    # the lane's own reachability outcome, on the lane's own evidence
+    # the lane's own reachability outcome, on the lane's own evidence.
+    # `CLS_BOOTSTRAP` and not `CLS_UNREACHABLE` because assay 14 holds 2 samples
+    # in the whole world -- the class is the unreachable finding under a
+    # barely-used assay, and the GATE is what this test is about and does not
+    # move with it.
     assert row.gate == S.GATE_UNREACHABLE
-    assert row.classification == S.CLS_UNREACHABLE
+    assert row.classification == S.CLS_BOOTSTRAP
     assert row.type_registrations == 0
     # ...and it did NOT come from the claim. A blocked claim never enters
     # `claim_of`, so it contributes nothing to this row: every other claim
@@ -2021,12 +2035,15 @@ def test_mode_2_asserts_nothing_about_the_co_registration_test_it_never_ran():
     assert set(findings.lineage) <= {S.LIN_CHILD, S.LIN_PARENT}
     assert S.LIN_NONE not in set(findings.lineage)
     # ...and the classification is never NULL, which is the statement here. It
-    # is one of exactly two values, and which one is decided by the
-    # reachability cell and by nothing in the co-registration block above.
+    # is one of exactly two values in this world, and which one is decided by
+    # the reachability cell and by nothing in the co-registration block above.
+    # The unreachable half reads `CLS_BOOTSTRAP` because every assay here holds
+    # fewer than `BOOTSTRAP_POPULATION_FLOOR` samples; the CELL is what selects
+    # between reachable and not, which is what this assertion is about.
     assert set(findings.classification) == {S.CLS_ABSENCE_LINEAGE,
-                                            S.CLS_UNREACHABLE}
+                                            S.CLS_BOOTSTRAP}
     assert set(findings.classification) <= set(S.CLASSES)
-    by_cell = {S.CLS_UNREACHABLE if n == 0 else S.CLS_ABSENCE_LINEAGE
+    by_cell = {S.CLS_BOOTSTRAP if n == 0 else S.CLS_ABSENCE_LINEAGE
                for n in findings.type_registrations}
     assert by_cell == set(findings.classification)
     assert set(findings["mode"]) == {S.MODE_2}
@@ -2710,6 +2727,7 @@ def test_the_real_extract_reproduces_the_ceiling_and_both_directions_separately(
         reg_projects=M2.registration_projects(r["membership"], r["assays"]),
         types=G.sample_type_index(r["nodes"]),
         type_reg=type_reg,
+        assay_pop=M2.assay_population(r["membership"], r["assays"]),
         titles=M2.assay_titles(r["assays"]),
         projects=X.project_index(r["samples"]),
     )
@@ -3041,6 +3059,7 @@ def _pipeline3(w=None):
         rules=M2.precedent_rules(w["precedent"]),
         reg_projects=M2.registration_projects(w["membership"], w["assays"]),
         types=types, type_reg=type_reg,
+        assay_pop=M2.assay_population(w["membership"], w["assays"]),
         titles=titles, projects=projects)
     compat = X.compat_findings(attached, steps=steps, registered=registered,
                                table=table, titles=titles, projects=projects)
@@ -3375,10 +3394,15 @@ def test_a_gate_rejected_claim_reaches_no_mode_even_when_a_lineage_neighbour_car
                            & (lineage_lane.proposed_internal_assay_id == 15)]
     assert len(offered) == 1, "the lane must offer it or this proves nothing"
     assert offered.iloc[0]["mode"] == S.MODE_2
-    # the lane files it UNREACHABLE, since no A.SPC sample holds 15 -- the same
-    # cell the gate rejected the claim on. Both readings agree and the row is
-    # still refused by the PRECEDENCE, which is the stronger statement.
-    assert offered.iloc[0].classification == S.CLS_UNREACHABLE
+    # the lane files it unreachable, since no A.SPC sample holds 15 -- the same
+    # cell the gate rejected the claim on. It reads `CLS_BOOTSTRAP` rather than
+    # `CLS_UNREACHABLE` because assay 15 holds fewer than
+    # `mode2.BOOTSTRAP_POPULATION_FLOOR` samples in this world, and the two are
+    # one finding under two review headings, so the assertion is against the
+    # pair. What this test is about -- the CELL the lane read, and the gate
+    # outcome it produced -- is the same either way.
+    assert offered.iloc[0].classification in (S.CLS_UNREACHABLE,
+                                              S.CLS_BOOTSTRAP)
     assert offered.iloc[0].gate == S.GATE_UNREACHABLE
     # BOTH lineage steps before the gate, which is the wrong rule stated for a
     # six-step precedence. Moving `PRE_LINEAGE` alone is no longer the
@@ -3661,9 +3685,14 @@ def test_the_classes_partition_every_claim_backed_absence_and_every_lineage_pair
     assert (census["rows_mode_1"], census["rows_mode_2"],
             census["rows_mode_3"], census["rows_no_mode"]) == (1, 4, 0, 3)
 
-    # ...and the CLASSES partition them too, with the unclassified counted
+    # ...and the CLASSES partition them too, with the unclassified counted.
+    # The unreachable row reads `CLS_BOOTSTRAP`: every assay in this world holds
+    # fewer than `mode2.BOOTSTRAP_POPULATION_FLOOR` samples, so the second cut
+    # takes it. The class is a cut through the unreachable population and NOT a
+    # step of its own, which is exactly what the step-agreement assertion below
+    # says by putting both classes on one side of it.
     by_class = Counter(findings.classification.dropna())
-    assert dict(by_class) == {S.CLS_ABSENCE_LINEAGE: 2, S.CLS_UNREACHABLE: 1,
+    assert dict(by_class) == {S.CLS_ABSENCE_LINEAGE: 2, S.CLS_BOOTSTRAP: 1,
                               S.CLS_ABSENCE_COMPAT: 1,
                               S.CLS_ALT_LABEL: 1, S.CLS_UNRESOLVED: 2}
     assert set(by_class) <= set(S.CLASSES)
@@ -3672,7 +3701,7 @@ def test_the_classes_partition_every_claim_backed_absence_and_every_lineage_pair
     # frame classified itself off the same cell.
     assert {(int(r.sample_id), int(r.proposed_internal_assay_id))
             for r in findings.itertuples(index=False)
-            if r.classification == S.CLS_UNREACHABLE} == {
+            if r.classification in (S.CLS_UNREACHABLE, S.CLS_BOOTSTRAP)} == {
         k for k, s in steps.items() if s == X.PRE_UNREACHABLE}
     assert (sum(by_class.values())
             + census["rows_without_a_classification"]) == census["rows"]
@@ -4046,6 +4075,7 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
             P.mine_precedent(r["edges"], r["membership"], r["assays"])),
         reg_projects=M2.registration_projects(r["membership"], r["assays"]),
         types=types, type_reg=type_reg,
+        assay_pop=M2.assay_population(r["membership"], r["assays"]),
         titles=titles, projects=projects)
     compat = X.compat_findings(attached, steps=steps, registered=registered,
                                table=table, titles=titles, projects=projects)
@@ -4063,20 +4093,65 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
     assert census["rows_mode_3"] == 0
     assert census["rows_no_mode"] == 1959
     assert census["rows_cls_absence_lineage"] == 67898
-    assert census["rows_cls_unreachable"] == 99449
+    assert census["rows_cls_unreachable"] == 90478
+    assert census["rows_cls_bootstrap"] == 8971
     assert census["rows_cls_absence_compat"] == 107
     assert census["rows_cls_alt_label"] == 952
     assert census["rows_cls_unresolved"] == 1007
     assert census["rows_without_a_classification"] == 1373
-    # THE FIVE CLASSES AND THE NULL STILL SUM TO THE ROWS -- the fourth stated
-    # identity, over five `rows_cls_*` keys instead of four. `rows` itself is
-    # unchanged at 170,786 above: 99,449 rows were reclassified, not removed.
+    # THE SIX CLASSES AND THE NULL STILL SUM TO THE ROWS -- the fourth stated
+    # identity, over six `rows_cls_*` keys instead of five. `rows` itself is
+    # unchanged at 170,786 above, twice over: 99,449 rows were reclassified by
+    # Task 3 and 8,971 of those reclassified again here, and neither moved a row
+    # in or out.
     assert (census["rows_cls_absence_lineage"] + census["rows_cls_unreachable"]
+            + census["rows_cls_bootstrap"]
             + census["rows_cls_absence_compat"] + census["rows_cls_alt_label"]
             + census["rows_cls_unresolved"]
             + census["rows_without_a_classification"]) == census["rows"]
-    assert (census["rows_cls_absence_lineage"]
-            + census["rows_cls_unreachable"]) == 167347
+    # THE BOOTSTRAP LANE COMES OUT OF THE UNREACHABLE POPULATION AND OUT OF
+    # NOTHING ELSE, which is the acceptance condition and is a different claim
+    # from the sum above: it would also hold if the lane had taken rows off
+    # `CLS_ABSENCE_LINEAGE`. Both totals are pinned, so a row moving between the
+    # two lineage populations breaks this rather than reading as a re-split.
+    assert (census["rows_cls_unreachable"]
+            + census["rows_cls_bootstrap"]) == 99449
+    assert (census["rows_cls_absence_lineage"] + census["rows_cls_unreachable"]
+            + census["rows_cls_bootstrap"]) == 167347
+    # ...and every bootstrap row still carries the gate and the step of the
+    # population it came out of. Only `classification` moved.
+    boot = findings[findings.classification == S.CLS_BOOTSTRAP]
+    assert set(boot.gate) == {S.GATE_UNREACHABLE}
+    assert set(boot["mode"]) == {S.MODE_2}
+    assert set(boot.type_registrations) == {0}
+    assert {steps[(int(s), int(a))] for s, a in
+            zip(boot.sample_id, boot.proposed_internal_assay_id)} == {
+        X.PRE_UNREACHABLE}
+
+    # THE NAMESPACE, SIMULATED WRONG BY HAND. The obvious population index --
+    # membership keyed on `assays.internal_assay_id`, nulls skipped -- drops the
+    # 17 junction-less records, so the 8 fallback ids any unreachable row
+    # proposes read 0 and every one of their 1,321 rows lands in the bootstrap
+    # lane. `assay_population` resolves through `precedent.assay_index` and puts
+    # 199 of them there, because 472 holds 153 samples and is over the floor.
+    # The two rules differ by exactly those 1,122 rows and by nothing else.
+    naive: dict[int, set[int]] = {}
+    keyed = {int(a): int(i) for a, i in zip(r["assays"].assay_id,
+                                            r["assays"].internal_assay_id)
+             if pd.notna(i)}
+    for sid, aid in zip(r["membership"].sample_id, r["membership"].assay_id):
+        if int(aid) in keyed:
+            naive.setdefault(keyed[int(aid)], set()).add(int(sid))
+    unreach = findings[findings.classification.isin(
+        (S.CLS_UNREACHABLE, S.CLS_BOOTSTRAP))]
+    wrong = sum(len(naive.get(int(a), ())) < M2.BOOTSTRAP_POPULATION_FLOOR
+                for a in unreach.proposed_internal_assay_id)
+    assert wrong == 10093 != census["rows_cls_bootstrap"]
+    assert wrong - census["rows_cls_bootstrap"] == 1122
+    fallback = P.fallback_assay_ids(r["assays"])
+    on_fallback = unreach[unreach.proposed_internal_assay_id.isin(fallback)]
+    assert len(on_fallback) == 1321
+    assert int((on_fallback.classification == S.CLS_BOOTSTRAP).sum()) == 199
 
     # THE CEILING IS A CEILING, and the precedence takes 5,008 off it -- 4,242
     # to the gate and 749 to Mode 1, with the remainder split between the two

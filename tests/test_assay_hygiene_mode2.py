@@ -126,7 +126,12 @@ def test_an_unreachable_lineage_row_is_classified_and_emitted_and_nothing_is_dro
     assert unreachable.type_registrations == 0
     assert reachable.classification == S.CLS_ABSENCE_LINEAGE
     assert reachable.gate != S.GATE_UNREACHABLE or pd.isna(reachable.gate)
-    assert unreachable.classification == S.CLS_UNREACHABLE
+    # `CLS_BOOTSTRAP` and not `CLS_UNREACHABLE`: assay 12 holds 13 samples in
+    # this world, under `BOOTSTRAP_POPULATION_FLOOR`. The two are one finding
+    # under two review headings and this test is about the finding, so the
+    # assertion is against the pair -- and the gate, which does not move with
+    # the split, is pinned exactly.
+    assert unreachable.classification in (S.CLS_UNREACHABLE, S.CLS_BOOTSTRAP)
     assert unreachable.gate == S.GATE_UNREACHABLE
     # both are MODE_2 proposals a curator will see, which is the point of
     # classifying rather than filtering
@@ -173,7 +178,9 @@ def test_an_unreachable_lineage_row_is_classified_and_emitted_and_nothing_is_dro
     assert steps[(290, 14)] == X.PRE_GATE
     assert not unified.duplicated(
         ["sample_id", "proposed_internal_assay_id"]).any()
-    assert (Counter(unified.classification)[S.CLS_UNREACHABLE]
+    unreachable_classes = Counter(unified.classification)
+    assert (unreachable_classes[S.CLS_UNREACHABLE]
+            + unreachable_classes[S.CLS_BOOTSTRAP]
             == by_step[X.PRE_UNREACHABLE])
 
 
@@ -192,7 +199,7 @@ def test_filling_the_reachability_cell_moves_a_row_between_classes_and_moves_no_
     asserting the wrong grain.
     """
     w, bundle, findings = _pipeline2()
-    assert _row(findings, 100, 12).classification == S.CLS_UNREACHABLE
+    assert _row(findings, 100, 12).classification == S.CLS_BOOTSTRAP
 
     filled = dict(bundle)
     filled["type_reg"] = dict(bundle["type_reg"]) | {("D.IMG", 12): 1}
@@ -210,7 +217,7 @@ def test_filling_the_reachability_cell_moves_a_row_between_classes_and_moves_no_
     pair = (findings.sample_type == "D.IMG") & (
         findings.proposed_internal_assay_id == 12)
     assert int(pair.sum()) == 8
-    assert set(findings[pair].classification) == {S.CLS_UNREACHABLE}
+    assert set(findings[pair].classification) == {S.CLS_BOOTSTRAP}
     assert set(after[pair.values].classification) == {S.CLS_ABSENCE_LINEAGE}
     # ...and EVERY ROW OUTSIDE IT is unchanged, column for column, so the cell
     # moved exactly the rows it names and the frame was not rebuilt around it
@@ -220,3 +227,272 @@ def test_filling_the_reachability_cell_moves_a_row_between_classes_and_moves_no_
     # the other three unreachable rows are OUTSIDE the cell and did not move:
     # 250/14 (MUS), 290/14 (TIS) and 430/490 (TIS)
     assert int((after.type_registrations == 0).sum()) == 3
+
+
+# --- the bootstrap lane -------------------------------------------------------
+#
+# Task 4. An unreachable pair is a claim that the HOUSE HAS A GAP, and that
+# claim is not automatically false: 47 unreachable cohorts were approved by
+# agents reading the biology, and the assay-143 name-collision finding turned on
+# one of them being right. What separates a gap from a type error is how heavily
+# the proposed assay is used, and these tests are about that discriminator and
+# about the namespace it is measured in.
+
+
+def _pop_over_the_floor(bundle, assay_id):
+    """`bundle` with one assay lifted to the D.FLOW -> Tissue Collection size.
+
+    A COPY AND NEVER A MUTATION of the bundle `_pipeline2` returned, so the two
+    frames a test compares are built from indexes that differ in exactly one
+    entry and the caller can still read the original.
+
+    89,263 is the real population of internal assay 74, Tissue Collection, on
+    the 2026-08-21 extract -- 24,470 of the 99,449 unreachable rows propose it
+    and not one of the 89,263 is a D.FLOW. That is the shape being reproduced,
+    so the number is the real one rather than `FLOOR + 1`.
+    """
+    lifted = dict(bundle)
+    lifted["assay_pop"] = dict(bundle["assay_pop"]) | {assay_id: 89_263}
+    return lifted
+
+
+def test_an_unreachable_pair_under_a_barely_used_assay_is_a_bootstrap_candidate():
+    """The assay-143 case, generalised.
+
+    47 unreachable cohorts were approved by agents reading the biology, and the
+    gpt delta finding turned on one of them being right. A blanket block would
+    have deleted every one; this lane keeps them reviewable and apart.
+
+    (250, 14) IS THAT SHAPE IN THIS WORLD. Internal assay 14 holds two samples
+    in total -- 350 and 390, both PAV -- and no MUS sample is registered in it
+    anywhere, so the cell is empty AND the assay has never had the chance to
+    refuse anything. It is emitted, it carries `GATE_UNREACHABLE`, and it is
+    filed apart from the pairs a well-used assay has already declined.
+
+    THE PRE-TASK-4 RULE IS RUN BY HAND, over the frame's own cells, and the two
+    are asserted to DIFFER. That rule -- one class for every empty cell, however
+    big the assay -- is what shipped between Tasks 3 and 4, so this is a
+    comparison against the code that ran and not against a description of it.
+    """
+    w, bundle, findings = _pipeline2()
+
+    assert bundle["assay_pop"][14] == 2, (
+        "assay 14 must be barely used or this test discriminates nothing")
+    assert bundle["assay_pop"][14] < M2.BOOTSTRAP_POPULATION_FLOOR
+
+    row = _row(findings, 250, 14)
+    assert row.type_registrations == 0
+    assert row.classification == S.CLS_BOOTSTRAP
+    # the row is UNCHANGED otherwise: the gate, the mode and the direction are
+    # the unreachable population's, which is what "a cut through it" means
+    assert row.gate == S.GATE_UNREACHABLE
+    assert row["mode"] == S.MODE_2
+    assert row.action == S.A_ADD_CHILD
+    # ...and the sentence carries the number the split turned on, so a curator
+    # can disagree with it without reading any code
+    assert "2 sample(s) of ANY type" in row.evidence_summary
+    assert str(M2.BOOTSTRAP_POPULATION_FLOOR) in row.evidence_summary
+    assert "FIRST-OF-A-KIND" in row.evidence_summary
+
+    # THE PRE-TASK-4 RULE, RUN BY HAND: `CLS_UNREACHABLE` for every empty cell,
+    # `CLS_ABSENCE_LINEAGE` otherwise, and nothing consulted about the assay.
+    old = [S.CLS_UNREACHABLE if n == 0 else S.CLS_ABSENCE_LINEAGE
+           for n in findings.type_registrations]
+    assert list(findings.classification) != old, (
+        "the old rule already agrees with this frame, so nothing here "
+        "discriminates the two")
+    differ = [(int(s), int(a)) for s, a, was, now
+              in zip(findings.sample_id, findings.proposed_internal_assay_id,
+                     old, findings.classification) if was != now]
+    # ...and it differs on EXACTLY the unreachable rows, because every assay in
+    # a 33-sample world is under the floor. The row count did not move.
+    assert differ == [(int(s), int(a)) for s, a, n
+                      in zip(findings.sample_id,
+                             findings.proposed_internal_assay_id,
+                             findings.type_registrations) if n == 0]
+    assert len(differ) == 11 == int((findings.type_registrations == 0).sum())
+    assert len(findings) == 28
+
+
+def test_an_unreachable_pair_under_a_heavily_used_assay_is_not():
+    """D.FLOW -> Tissue Collection: 89,263 members, not one a D.FLOW.
+
+    That is a type error, not a gap, and it must not reach the bootstrap sheet.
+
+    ONE INDEX ENTRY IS PERTURBED AND NOTHING ELSE, which is why `_pipeline2`
+    hands the bundle back. The two frames below differ in the population of
+    assay 12 alone -- 13 samples against Tissue Collection's 89,263 -- so the
+    8 `(D.IMG, 12)` rows are the same rows, raised by the same neighbours, on
+    the same empty cell, and the only thing that moved is which question a
+    curator is being asked about them.
+    """
+    w, bundle, findings = _pipeline2()
+    assert bundle["assay_pop"][12] == 13
+    before = _row(findings, 100, 12)
+    assert before.classification == S.CLS_BOOTSTRAP
+
+    heavy = M2.mode2_findings(_attached2(w), **_pop_over_the_floor(bundle, 12))
+    row = _row(heavy, 100, 12)
+    assert row.classification == S.CLS_UNREACHABLE
+    # THE WRONG RULE, BY HAND: no population test at all, so every empty cell is
+    # a bootstrap candidate. It answers CLS_BOOTSTRAP on this row and the two
+    # differ -- without this the assertion above cannot tell a measured floor
+    # from a lane that happens to be empty.
+    wrong = S.CLS_BOOTSTRAP if row.type_registrations == 0 else None
+    assert wrong == S.CLS_BOOTSTRAP != row.classification
+
+    # ...and the finding itself is untouched: same gate, same cell, same
+    # direction, same sentence about the pair
+    assert row.gate == before.gate == S.GATE_UNREACHABLE
+    assert row.type_registrations == before.type_registrations == 0
+    assert row.action == before.action
+    assert "NO D.IMG sample is registered in 12 anywhere" in row.evidence_summary
+    assert "89,263 sample(s) of other types" in row.evidence_summary
+    assert "FIRST-OF-A-KIND" not in row.evidence_summary
+
+    # the whole (D.IMG, 12) cell moves together and NOTHING outside it moves,
+    # column for column -- so the population test is per assay and not per row
+    pair = ((findings.sample_type == "D.IMG")
+            & (findings.proposed_internal_assay_id == 12))
+    assert int(pair.sum()) == 8
+    assert set(heavy[pair.values].classification) == {S.CLS_UNREACHABLE}
+    assert len(heavy) == len(findings) == 28
+    pd.testing.assert_frame_equal(heavy[~pair.values].reset_index(drop=True),
+                                  findings[~pair].reset_index(drop=True))
+
+
+def test_the_bootstrap_floor_is_a_reading_order_and_gates_nothing():
+    """Every row is emitted at either population, and the precedence agrees.
+
+    Under the binding constraint a threshold orders what an operator reads first
+    and grants no permission. So the two frames above must carry the same PAIRS,
+    and `PRE_UNREACHABLE` -- which knows nothing about the floor -- must claim
+    the same keys either way. A step of its own would have had to re-derive
+    reachability a second time, which is the second-definition defect this
+    package has paid for three times.
+    """
+    w, bundle, findings = _pipeline2()
+    heavy = M2.mode2_findings(_attached2(w), **_pop_over_the_floor(bundle, 12))
+
+    pairs = list(zip(findings.sample_id, findings.proposed_internal_assay_id))
+    assert pairs == list(zip(heavy.sample_id, heavy.proposed_internal_assay_id))
+    assert set(findings.classification) == {S.CLS_ABSENCE_LINEAGE,
+                                            S.CLS_BOOTSTRAP}
+    assert set(heavy.classification) == {S.CLS_ABSENCE_LINEAGE,
+                                         S.CLS_BOOTSTRAP, S.CLS_UNREACHABLE}
+
+    steps, unified = _unify(w, bundle, findings)
+    heavy_steps, heavy_unified = _unify(w, bundle, heavy)
+    assert steps == heavy_steps
+    assert len(unified) == len(heavy_unified) == 27
+    claimed = {k for k, s in steps.items() if s == X.PRE_UNREACHABLE}
+    for frame in (unified, heavy_unified):
+        assert {(int(r.sample_id), int(r.proposed_internal_assay_id))
+                for r in frame.itertuples(index=False)
+                if r.classification in (S.CLS_UNREACHABLE,
+                                        S.CLS_BOOTSTRAP)} == claimed
+    # ...and the floor is read in ONE place, so no second copy of it can drift.
+    # Read off the source, since a second literal 100 is exactly what a later
+    # edit adds and no assertion over behaviour would see.
+    src = (Path(M2.__file__)).read_text()
+    body = src.split("def _bootstrap_evidence")[1].split("\ndef ")[0]
+    assert body.count("BOOTSTRAP_POPULATION_FLOOR") == 3
+    assert "100" not in body, (
+        "a literal floor inside the discriminator is a second definition of "
+        "the number the module constant documents, and the two would drift")
+    assert src.count("BOOTSTRAP_POPULATION_FLOOR = ") == 1
+
+
+def test_the_assay_population_resolves_the_junctionless_namespace():
+    """The trap: a fallback id reports 0 members under the obvious lookup.
+
+    `_world2`'s seek record 490 has no junction row, so `assay_index` gives it
+    its OWN id as the internal one and sample 130 is registered there. Keying
+    membership on `assays.internal_assay_id` and skipping the nulls -- the
+    obvious spelling, and the one a scratch script reaches for -- drops that
+    record entirely and reports assay 490 at a population of zero.
+
+    ON THE REAL EXTRACT THAT MISS IS 1,122 ROWS. The 8 fallback ids any
+    unreachable row proposes hold 5, 9, 8, 12, 43, 153, 26 and 13 samples; read
+    naively all 8 read zero, so all 1,321 of their rows land in the bootstrap
+    lane, where the correct reading puts 199 -- 472 holds 153 and is over the
+    floor. `test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness`
+    pins that end of it; this end pins the index.
+
+    THE NAIVE INDEX IS BUILT HERE AND COMPARED, so the assertion is a
+    DIFFERENCE between two rules rather than a restatement of one.
+    """
+    w, _, findings = _pipeline2()
+    pop = M2.assay_population(w["membership"], w["assays"])
+
+    naive: dict[int, set[int]] = {}
+    keyed = {int(a): int(i) for a, i in zip(w["assays"].assay_id,
+                                            w["assays"].internal_assay_id)
+             if pd.notna(i)}
+    for sid, aid in zip(w["membership"].sample_id, w["membership"].assay_id):
+        if int(aid) in keyed:
+            naive.setdefault(keyed[int(aid)], set()).add(int(sid))
+    naive = {k: len(v) for k, v in naive.items()}
+
+    # the junction-less record: one member under the right rule, ABSENT under
+    # the naive one, and the two therefore disagree
+    assert pop[490] == 1
+    assert 490 not in naive
+    assert pop != naive
+    # ...and they agree on every junctioned assay, so the disagreement is the
+    # namespace and not an arithmetic difference
+    assert {k: v for k, v in pop.items() if k != 490} == naive
+    assert pop == {11: 15, 12: 13, 13: 8, 14: 2, 490: 1}
+
+    # the row that rides on it is still classified from a MEASURED population
+    row = _row(findings, 430, 490)
+    assert row.type_registrations == 0
+    assert row.classification == S.CLS_BOOTSTRAP
+    assert "1 sample(s) of ANY type" in row.evidence_summary
+
+    # a membership row naming an unknown assay RAISES rather than shrinking a
+    # population, which is the direction that would fabricate a barely-used
+    # assay out of a bad join
+    broken = pd.concat([w["membership"],
+                        pd.DataFrame([(1, 9999)],
+                                     columns=S.MEMBERSHIP_COLUMNS)])
+    with pytest.raises(ValueError, match="absent from the assays frame"):
+        M2.assay_population(broken, w["assays"])
+
+
+def test_bootstrap_evidence_speaks_on_both_sides_of_the_floor():
+    """The discriminator alone, at the boundary, in both directions.
+
+    THE COMPARISON IS `<` AND NOT `<=`, and the floor itself is the row that
+    says so: an assay holding exactly `BOOTSTRAP_POPULATION_FLOOR` samples is
+    NOT barely used. Both neighbours of the boundary are asserted, because an
+    off-by-one here moves whichever assays sit on it and nothing else would
+    fail.
+
+    A MISSING KEY IS ZERO AND NOT A LOOKUP MISS. `assay_population` counts
+    through `precedent.assay_index`, so every id `mode2_candidates` can propose
+    is a key it holds -- but the default is asserted, since it is what a caller
+    handing in a partial index would silently get.
+    """
+    floor = M2.BOOTSTRAP_POPULATION_FLOOR
+    titles = {9: "Sensor Creation"}
+
+    at, note = M2._bootstrap_evidence(9, "TIS", {9: floor}, titles)
+    assert at is False
+    assert f"holds {floor:,} sample(s) of other types" in note
+    under, note = M2._bootstrap_evidence(9, "TIS", {9: floor - 1}, titles)
+    assert under is True
+    assert f"holds only {floor - 1:,} sample(s) of ANY type" in note
+
+    # the title rides in the sentence, and a bare id where there is none
+    assert "9 Sensor Creation" in note
+    _, untitled = M2._bootstrap_evidence(9, "TIS", {9: 2}, {})
+    assert "9 holds only 2" in untitled
+
+    # an absent key is a population of zero, which is under any floor
+    missing, note = M2._bootstrap_evidence(9, "TIS", {}, titles)
+    assert missing is True
+    assert "holds only 0 sample(s)" in note
+    # ...and the sample type is named on both sides, since the sentence is what
+    # a curator reads instead of the two indexes it was measured from
+    assert "TIS" in note

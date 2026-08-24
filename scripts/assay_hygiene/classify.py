@@ -1465,7 +1465,16 @@ def unify_findings(
 #                   + keys_unreachable + keys_compat + keys_mode_3
 #     rows        = input_keys - the keys claimed by NON_EMITTING_STEPS
 #     rows        = rows_mode_1 + rows_mode_2 + rows_mode_3 + rows_no_mode
-#     rows        = the five rows_cls_* + rows_without_a_classification
+#     rows        = the six rows_cls_* + rows_without_a_classification
+#
+# `rows_cls_bootstrap` IS A CUT THROUGH `rows_cls_unreachable` AND NOT A KEY
+# BESIDE IT, which is why there is no `keys_bootstrap` next to
+# `keys_unreachable`. The split is a CLASSIFICATION and not a precedence step:
+# `PRE_UNREACHABLE` still claims every one of those keys, so `keys_unreachable`
+# does not move and the row half of the census gains a term the key half does
+# not. A step of its own would have had to re-derive reachability a second time
+# to decide which keys it wanted -- the second-definition defect this package
+# has paid for three times.
 #
 # `keys_unreachable` AND `rows_cls_unreachable` ARE NOT A NEW POPULATION. They
 # are a cut through the one `keys_lineage` used to hold whole: the lineage lane
@@ -1530,6 +1539,7 @@ FINDINGS_CENSUS_KEYS = (
     "rows_cls_alt_label",
     "rows_cls_unresolved",
     "rows_cls_unreachable",
+    "rows_cls_bootstrap",
     "rows_without_a_classification",
     "lineage_ceiling_offered",
     "lineage_refused_by_the_gate",
@@ -1614,6 +1624,7 @@ def findings_census(
         "rows_cls_alt_label": int((cls == S.CLS_ALT_LABEL).sum()),
         "rows_cls_unresolved": int((cls == S.CLS_UNRESOLVED).sum()),
         "rows_cls_unreachable": int((cls == S.CLS_UNREACHABLE).sum()),
+        "rows_cls_bootstrap": int((cls == S.CLS_BOOTSTRAP).sum()),
         "rows_without_a_classification": int(cls.isna().sum()),
         "lineage_ceiling_offered": offered,
         "lineage_refused_by_the_gate": refused_gate,
@@ -1891,6 +1902,7 @@ def main(extract_dir: str = "assay-hygiene/extract",
         reg_projects=M2.registration_projects(membership, assays),
         types=types,
         type_reg=type_reg,
+        assay_pop=M2.assay_population(membership, assays),
         titles=M2.assay_titles(assays),
         projects=project_index(samples),
     )

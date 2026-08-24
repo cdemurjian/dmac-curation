@@ -511,15 +511,30 @@ def _old_rule_coverage(present: pd.Series) -> int:
     """The rows the FOUR pre-2026-08-21 classes plus the null bucket cover.
 
     The wrong rule, computed by hand, so the tests below assert a DIFFERENCE
-    and not merely a number. `CLS_UNREACHABLE` is deliberately not in this
-    tuple: it is the class the report stopped accounting for, and a test that
-    read the class list off `_schema.CLASSES` would silently start passing the
-    moment the schema changed, which is the failure mode it is guarding.
+    and not merely a number. `CLS_UNREACHABLE` and `CLS_BOOTSTRAP` are
+    deliberately not in this tuple: they are the classes the report stopped
+    accounting for, and a test that read the class list off `_schema.CLASSES`
+    would silently start passing the moment the schema changed, which is the
+    failure mode it is guarding. The tuple is FROZEN AT FOUR for that reason --
+    it names a historical rule, so it does not grow when the vocabulary does.
     """
     four = (S.CLS_ABSENCE_LINEAGE, S.CLS_ABSENCE_COMPAT, S.CLS_ALT_LABEL,
             S.CLS_UNRESOLVED)
     null = sum(int(n) for cls, n in present.items() if pd.isna(cls))
     return sum(int(present.get(c, 0)) for c in four) + null
+
+
+def _unaccounted(present: pd.Series) -> int:
+    """The rows the four-class rule omits: both reachability classes.
+
+    `CLS_BOOTSTRAP` is a cut through `CLS_UNREACHABLE`, so which of the two a
+    world produces depends on how heavily its assays are used -- every assay in
+    the imported world holds a handful of samples, so its unreachable rows are
+    all `CLS_BOOTSTRAP`. Either way they are the population the pre-2026-08-21
+    report had no term for, and that is what the tests below measure.
+    """
+    return sum(int(present.get(c, 0))
+               for c in (S.CLS_UNREACHABLE, S.CLS_BOOTSTRAP))
 
 
 def test_the_reports_class_census_accounts_for_every_finding(tmp_path):
@@ -547,12 +562,13 @@ def test_the_reports_class_census_accounts_for_every_finding(tmp_path):
     out, md = _run(tmp_path, extra_edges=unreachable_edge)
     findings = pd.read_csv(out / "findings.csv", low_memory=False)
     present = findings.classification.value_counts(dropna=False)
-    n_unreachable = int(present.get(S.CLS_UNREACHABLE, 0))
+    n_unreachable = _unaccounted(present)
     assert n_unreachable, (
-        "this world emitted no CLS_UNREACHABLE row, so nothing below can "
-        "discriminate a report that names the class from one that does not")
+        "this world emitted no CLS_UNREACHABLE or CLS_BOOTSTRAP row, so "
+        "nothing below can discriminate a report that names the classes from "
+        "one that does not")
 
-    # the wrong rule, by hand: short, and short by exactly the new class
+    # the wrong rule, by hand: short, and short by exactly the new classes
     wrong = _old_rule_coverage(present)
     assert wrong != len(findings), (
         "the four pre-2026-08-21 classes already cover every row, so this "
@@ -599,7 +615,7 @@ def test_the_mode_2_breakdown_sums_to_the_proposal_total_it_states(tmp_path):
     findings = pd.read_csv(out / "findings.csv", low_memory=False)
     m2 = findings[findings["mode"] == S.MODE_2]
     present = m2.classification.value_counts(dropna=False)
-    n_unreachable = int(present.get(S.CLS_UNREACHABLE, 0))
+    n_unreachable = _unaccounted(present)
     assert n_unreachable, "MODE_2 emitted no unreachable row in this world"
     # the wrong rule, by hand, at this site
     assert len(m2) - _old_rule_coverage(present) == n_unreachable
@@ -630,6 +646,105 @@ def test_the_mode_2_breakdown_sums_to_the_proposal_total_it_states(tmp_path):
             f"{named.get(label)!r}")
 
 
+def test_the_ceiling_gap_paragraph_counts_every_row_the_lineage_lane_raised(tmp_path):
+    """The other site the shortfall can ship on, and it is arithmetic.
+
+    "The union above is N rows; Mode 2 emitted M rows a lineage neighbour
+    raised ... so N-M of the ceiling reached no finding. That difference is
+    exactly the rows the gate refused plus the rows Mode 1 claimed first." That
+    sentence is only true if M counts EVERY row the lineage lane produced, and
+    the lane produces one class per reachability outcome -- two after Task 3,
+    three after Task 4. A term left out does not read as wrong: it makes the
+    gap larger, and the gap has a plausible explanation attached to it.
+
+    It went false exactly this way once already. Before the class was added to
+    the sum, the paragraph read "104,440 of the ceiling reached no finding"
+    against a run printing 4,242 and 749.
+
+    THE POPULATION IS COUNTED BY A SECOND ROUTE. `M` is built off the
+    classification census; the assertion is against the rows carrying a
+    DIRECTION, which is what "a lineage neighbour raised" means and which only
+    a lineage row can carry. So a class dropped from the sum breaks the
+    identity rather than shrinking both sides of it.
+
+    THE WRONG RULE IS SIMULATED BY HAND: naming `CLS_UNREACHABLE` alone, the
+    shape the sentence had between Tasks 3 and 4. It is short here, and by
+    exactly the bootstrap population.
+    """
+    out, md = _run(tmp_path, extra_edges=unreachable_edge)
+    findings = pd.read_csv(out / "findings.csv", low_memory=False)
+    directioned = findings[findings.action.isin((S.A_ADD_PARENT, S.A_ADD_CHILD))]
+    present = directioned.classification.value_counts(dropna=False)
+    assert _unaccounted(present), (
+        "no unreachable row carries a direction in this world, so the two "
+        "rules below cannot be told apart")
+
+    m = re.search(
+        r"The union above is ([\d,]+) rows; Mode 2 emitted "
+        r"([\d,]+) rows a lineage neighbour raised -- "
+        r"([\d,]+) on a pair samples of the type do hold elsewhere and "
+        r"([\d,]+) on a pair none of them ever has -- so ([\d,]+) of the "
+        r"ceiling reached no finding",
+        re.sub(r"\s+", " ", md))
+    assert m is not None, (
+        "the ceiling-gap sentence changed shape; re-pin it rather than "
+        "deleting this test")
+    union, raised, reachable, unreachable, gap = [
+        int(g.replace(",", "")) for g in m.groups()]
+
+    # the stated total IS the lineage lane's whole output, by the other route
+    assert raised == len(directioned)
+    # ...and its two terms sum to it, so no class is unaccounted for
+    assert reachable + unreachable == raised
+    assert reachable == int(present.get(S.CLS_ABSENCE_LINEAGE, 0))
+    assert unreachable == _unaccounted(present)
+    # THE WRONG RULE, BY HAND: one reachability class instead of both
+    wrong = int(present.get(S.CLS_UNREACHABLE, 0))
+    assert wrong != unreachable, (
+        "this world's unreachable rows all carry the same class, so the two "
+        "rules agree and nothing here discriminates them")
+    assert unreachable - wrong == int(present.get(S.CLS_BOOTSTRAP, 0))
+    # ...and the gap is the ceiling minus that total and not minus a subset.
+    # The union is read out of the same sentence, so the arithmetic checked is
+    # the one a reader performs on the page.
+    assert gap == union - raised
+    assert union >= raised
+
+
+def test_the_evidenced_classes_are_the_complement_of_the_two_that_propose_nothing():
+    """`EVIDENCED` is a hand-written tuple over a CLOSED vocabulary.
+
+    It is the denominator `_term_contrast_note` ranks terms on, so a class
+    missing from it makes `lineage_share` a share of less than the population
+    the same table calls `rows` -- which is what it was until 2026-08-21, and
+    what adding a class without touching it would restore. The tuple is a
+    judgement (which classes NAME an evidence source) and stays hand-written;
+    what is asserted is that the judgement was MADE for every member of
+    `_schema.CLASSES`, by pinning the complement.
+
+    `CLS_ALT_LABEL` and `CLS_UNRESOLVED` are the two out, and both are the
+    classes whose gloss ends "PROPOSES NOTHING": one says the term is another
+    name for something already registered and the other says no test settled
+    the row. Neither names where evidence came from.
+    """
+    assert set(RD.EVIDENCED) | {S.CLS_ALT_LABEL, S.CLS_UNRESOLVED} == set(
+        S.CLASSES), (
+        "a class in `_schema.CLASSES` is neither an evidence source nor one of "
+        "the two that propose nothing; `EVIDENCED` has not been ruled on")
+    assert not set(RD.EVIDENCED) & {S.CLS_ALT_LABEL, S.CLS_UNRESOLVED}
+    assert len(set(RD.EVIDENCED)) == len(RD.EVIDENCED)
+    # ...and the table that reads it prints a column per member, so a class in
+    # the denominator and not in the row would be counted and never shown
+    src = (REPO / "scripts" / "assay_hygiene" / "run_detect.py").read_text()
+    table = src.split("def _term_contrast_note")[1].split("\ndef ")[0]
+    for cls in RD.EVIDENCED:
+        name = next(n for n in dir(S) if n.startswith("CLS_")
+                    and getattr(S, n) == cls)
+        assert table.count(f"S.{name}") >= 2, (
+            f"{cls} is in EVIDENCED and the contrast table does not print a "
+            "column for it in both rows")
+
+
 def test_the_survival_table_covers_every_directioned_row_and_says_so(tmp_path):
     """The curve's population is STATED, not left for a reader to assume.
 
@@ -646,7 +761,8 @@ def test_the_survival_table_covers_every_directioned_row_and_says_so(tmp_path):
     out, md = _run(tmp_path, extra_edges=unreachable_edge)
     findings = pd.read_csv(out / "findings.csv", low_memory=False)
     directioned = findings[findings.action.isin((S.A_ADD_PARENT, S.A_ADD_CHILD))]
-    assert int((directioned.classification == S.CLS_UNREACHABLE).sum()), (
+    assert int(directioned.classification.isin(
+        (S.CLS_UNREACHABLE, S.CLS_BOOTSTRAP)).sum()), (
         "no unreachable row carries a direction in this world")
 
     section = _section(md, "Survival by direction")
@@ -659,10 +775,13 @@ def test_the_survival_table_covers_every_directioned_row_and_says_so(tmp_path):
         assert f"| {n:,} |" in section, (
             f"{action} covers {n:,} rows and no row of the table carries that "
             "denominator; the curve is drawn over a subset of the population")
-    # ...and the population is named, not assumed
-    assert S.CLS_UNREACHABLE in section, (
-        "the survival section never says whether unreachable rows are in its "
-        "curve; a reader who assumes either way has no way to check")
+    # ...and the population is named, not assumed -- BOTH reachability classes,
+    # since `CLS_BOOTSTRAP` is a cut through `CLS_UNREACHABLE` and a section
+    # naming only one of them leaves the other's inclusion to be inferred
+    for cls in (S.CLS_UNREACHABLE, S.CLS_BOOTSTRAP):
+        assert cls in section, (
+            f"the survival section never says whether {cls} rows are in its "
+            "curve; a reader who assumes either way has no way to check")
     assert f"**{len(directioned):,}**" in section, (
         "the survival section states no population size")
 

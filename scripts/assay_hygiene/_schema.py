@@ -626,14 +626,34 @@ GATE_REJECTIONS = (GATE_UNREACHABLE, GATE_INCOHERENT, GATE_LOW_SUPPORT)
 # here rather than dropped: every one is still emitted, carrying
 # GATE_UNREACHABLE, because a proposal that vanishes reads to a curator exactly
 # like one that was never generated.
+#
+# CLS_BOOTSTRAP IS A CUT THROUGH CLS_UNREACHABLE AND NOT A SIXTH POPULATION.
+# An unreachable pair is a claim that the house has a systematic gap, and that
+# claim is not automatically false: 47 unreachable cohorts were approved by
+# agents reading the biology, and the assay-143 name-collision finding turned on
+# one of them being right. What separates the two readings is HOW HEAVILY THE
+# PROPOSED ASSAY IS USED. Proposing a D.FLOW into Tissue Collection (74) is a
+# type error -- 89,263 samples are registered there and not one is a D.FLOW, so
+# the absence is the house's answer, and 24,470 of the 99,449 rows are that one
+# assay. Proposing a type into an assay holding 12 samples in total is a new
+# assay finding its feet. `mode2.BOOTSTRAP_POPULATION_FLOOR` is where the line
+# is drawn and why; measured on the 2026-08-21 artifact tree, 8,971 of the
+# 99,449 fall under it, over 116 (sample type, assay) pairs and 50 assays.
+#
+# THE ROW IS UNCHANGED EXCEPT FOR THIS CELL. A bootstrap row still carries
+# `GATE_UNREACHABLE`, still carries its direction and its precedent rate, and is
+# still emitted -- so every block that reads the gate still holds and the review
+# surface splits on the class alone.
 CLS_ABSENCE_LINEAGE = "CLS_ABSENCE_LINEAGE"   # a neighbour already carries it
 CLS_ABSENCE_COMPAT = "CLS_ABSENCE_COMPAT"     # no neighbour, but the pair coexists
 CLS_ALT_LABEL = "CLS_ALT_LABEL"               # the pair never coexists
 CLS_UNRESOLVED = "CLS_UNRESOLVED"             # neither test settles it
 CLS_UNREACHABLE = "CLS_UNREACHABLE"           # no sample of this type is ever
                                               # registered in this assay
+CLS_BOOTSTRAP = "CLS_BOOTSTRAP"               # ...and the assay is barely used
+                                              # at all, so the gap may be real
 CLASSES = (CLS_ABSENCE_LINEAGE, CLS_ABSENCE_COMPAT, CLS_ALT_LABEL,
-           CLS_UNRESOLVED, CLS_UNREACHABLE)
+           CLS_UNRESOLVED, CLS_UNREACHABLE, CLS_BOOTSTRAP)
 
 # Which lineage neighbour carries the claimed assay, over DERIVED_FROM. Stated
 # once and binding: precedent is mined over DERIVED_FROM, so a lineage test run

@@ -89,6 +89,52 @@ ACTION_PRECEDENT_DIRECTION = {
     S.A_ADD_CHILD: DIR_REVERSE,
 }
 
+# --- the bootstrap lane -------------------------------------------------------
+#
+# HOW MANY SAMPLES AN ASSAY MUST HOLD BEFORE ITS EMPTY (type, assay) CELLS READ
+# AS THE HOUSE'S ANSWER RATHER THAN AS ITS INEXPERIENCE. Below this, an
+# unreachable pair is `S.CLS_BOOTSTRAP`; at or above it, `S.CLS_UNREACHABLE`.
+#
+# IT ORDERS A REVIEW AND GRANTS NO PERMISSION. Every row is emitted either way,
+# carrying `GATE_UNREACHABLE` either way; this splits one 99,449-row sheet into
+# two questions a curator answers differently, which is the whole of what it
+# does.
+#
+# MEASURED, over the 99,449 `CLS_UNREACHABLE` rows of the 2026-08-21 artifact
+# tree, with the population resolved by `assay_population` -- see that function
+# for why the namespace matters and what the naive reading costs:
+#
+#     floor    rows   share   (type, assay) pairs   assays
+#     <    5      39    0.0%                    7        3
+#     <   10      78    0.1%                   14        9
+#     <   25   3,571    3.6%                   39       25
+#     <   50   4,977    5.0%                   62       35
+#     <  100   8,971    9.0%                  116       50
+#     <  200  13,560   13.6%                  153       60
+#     <  500  17,625   17.7%                  183       68
+#     < 1000  33,954   34.1%                  226       77
+#
+# 100 IS CHOSEN BECAUSE IT SITS IN A GAP AND NOT BECAUSE IT IS ROUND. The 106
+# assays those rows propose carry populations 96 and then 115 either side of it
+# -- the widest multiplicative step anywhere between 46 and 184 -- so no assay
+# lands within four samples of the line and a small move in either direction
+# takes the same 50 assays. The alternatives are not better breaks: <25 cuts
+# between 24 and 26 and drops Western Blot (46) and Cell Culture (71), which are
+# barely used by any reading, and <500 cuts between 487 and 528 and admits nine
+# assays over a thousand rows each.
+#
+# THE ROW-LEVEL DECILE MOVED UNDER THE NAMESPACE CORRECTION AND THE BREAK DID
+# NOT. Read naively the 10th percentile of the proposed assay's population is
+# 96, which put the floor exactly on it; resolved correctly it is 134, so <100
+# now takes 9.0% of the rows rather than 10.1%. The gap argument above is
+# measured on the corrected populations and is what the number rests on.
+#
+# ASSAY 143 IS NOT IN THIS LANE, at 265 samples, and the finding it produced is
+# still the reason the lane exists. The generalisation is "an assay the house
+# has barely used", not "the assay that turned out to be misnamed"; 143's own
+# 161 rows stay `CLS_UNREACHABLE`, where they were before.
+BOOTSTRAP_POPULATION_FLOOR = 100
+
 # Where `precedent_survival` reports, and nothing else. NOT a set of gates: under
 # the binding constraint a threshold orders what an operator reads first and
 # grants no permission, so every row is emitted whatever these say, and
@@ -211,6 +257,71 @@ def assay_titles(assays: pd.DataFrame) -> dict[int, str]:
     ids collide numerically with genuine internal ids under 122 different titles.
     """
     return {iaid: title for _, iaid, title in assay_index(assays).values()}
+
+
+def assay_population(
+    membership: pd.DataFrame,
+    assays: pd.DataFrame,
+) -> dict[int, int]:
+    """internal assay id -> distinct samples registered in it, OF ANY TYPE.
+
+    The bootstrap discriminator's denominator, and the reason it is a function
+    rather than a sum over `gate.type_registration_index` is the NAMESPACE.
+
+    THE NAIVE READING PUTS EIGHT ASSAYS AT ZERO AND EVERY ONE OF THEM IS A
+    LOOKUP MISS. Keying membership on `assays.internal_assay_id` and skipping
+    the nulls -- the obvious spelling -- drops the 17 junction-less records
+    entirely, so the 8 of them any unreachable row proposes (466, 467, 468, 470,
+    471, 472, 481, 482) report a population of 0 while their SEEK records hold
+    5, 9, 8, 12, 43, 153, 26 and 13 samples. `precedent.assay_index` is the
+    package's single definition of "which internal assay is this seek assay",
+    including the fallback where the record IS the id (`fallback_assay_ids`), so
+    this counts through it like every other crossing here.
+
+    MEASURED, THE MISS IS 1,122 ROWS AND IT ALL LANDS IN ONE ASSAY. Of the 1,321
+    unreachable rows on the 2026-08-21 tree that propose a fallback id, the
+    naive reading calls all 1,321 barely-used and the corrected one calls 199 --
+    because 472 holds 153 samples, over the floor. Those 1,122 rows are the
+    ENTIRE difference between the two readings at `BOOTSTRAP_POPULATION_FLOOR`:
+    naive 10,093, corrected 8,971, and no row moves the other way.
+
+    DISTINCT SAMPLES AND NOT MEMBERSHIP ROWS, following
+    `gate.type_registration_index`, so a sample registered in one internal assay
+    through two seek records counts once. On the real extract the two readings
+    differ on 4 of 110 assays and move no row across the floor; the definition
+    is chosen to match the sibling index rather than because it changes an
+    answer.
+
+    NOT A SUM OVER `type_registration_index`, though that index is already
+    namespace-correct and summing it happens to split the real extract
+    identically. It counts TYPED samples: a registration whose sample has no
+    node row reaches no cell, and one whose two node rows disagree on type
+    reaches two, so the sum differs from this on 10 of 110 assays -- assay 74
+    holds 89,263 samples of which 61 are untyped and 7 doubly typed, and sums to
+    89,209. This asks how many samples the house has put in the assay, so it
+    counts samples.
+
+    RAISES on a membership row naming an assay absent from the assays frame,
+    following `registration_projects` and `gate.type_registration_index`.
+    Skipping is one-directional harm here: it can only SHRINK a population, and
+    a population shrinking below the floor moves a row into the bootstrap lane
+    -- reported to a curator as "the house has barely used this assay", which
+    would be a fabrication with no error beside it.
+    """
+    ainfo = assay_index(assays)
+    unknown = sorted({int(a) for a in membership.assay_id} - set(ainfo))
+    if unknown:
+        raise ValueError(
+            f"membership registers samples in {len(unknown)} assay(s) absent "
+            f"from the assays frame: {unknown}. Those registrations cannot be "
+            "crossed to the internal namespace, and skipping them would shrink "
+            "an assay's population -- which reads as a barely-used assay, not "
+            "as an error. Re-extract so the two frames agree."
+        )
+    out: dict[int, set[int]] = {}
+    for sid, aid in zip(membership.sample_id, membership.assay_id):
+        out.setdefault(ainfo[int(aid)][1], set()).add(int(sid))
+    return {iaid: len(sids) for iaid, sids in out.items()}
 
 
 def registration_projects(
@@ -373,6 +484,7 @@ def _mode2_summary(
     action: str, relation: str, neighbour_uuid: str, n_supports: int,
     proposed: int, title: str, hop: tuple, project_id, rule: Rule | None,
     direction: str | None, sample_type, type_registrations, claim, blocked: bool,
+    bootstrap_note: str | None,
 ) -> str:
     """The sentence an operator reads, carrying what the columns cannot.
 
@@ -387,6 +499,13 @@ def _mode2_summary(
     It also says which direction was read and in which units, because
     `precedent_rate` alone is the number this task exists to keep from being
     silently the wrong one.
+
+    `bootstrap_note` IS `_bootstrap_evidence`'s SECOND RETURN AND IS TAKEN
+    RATHER THAN RE-DERIVED, so the sentence and the `classification` cell come
+    from one measurement. It is null on every row that is not unreachable, and
+    on an unreachable row it says which side of the floor the assay fell and by
+    how much -- the figure a curator needs to disagree with the split, and the
+    one no column carries.
     """
     parts = [
         f"{relation}: {neighbour_uuid} registers {proposed} {title}, which this "
@@ -414,6 +533,8 @@ def _mode2_summary(
         parts.append(
             f"NO {sample_type} sample is registered in {proposed} anywhere, so "
             "this would create a (sample type, assay) pair that exists nowhere")
+        if bootstrap_note is not None:
+            parts.append(bootstrap_note)
     else:
         parts.append(f"{type_registrations} {sample_type} sample(s) are already "
                      f"registered in {proposed}")
@@ -471,6 +592,58 @@ def _proposal_source(rule, claim, sample_id: int, assay_id: int) -> str:
     return BY_CLAIM_NO_RULE
 
 
+def _bootstrap_evidence(
+    assay_id: int,
+    sample_type,
+    assay_pop: dict[int, int],
+    titles: dict[int, str],
+) -> tuple[bool, str]:
+    """A first-of-a-kind, or a type error? -> (is it one, and why).
+
+    CALLED ONLY WHERE `type_registrations == 0`, and it asks the second question
+    that population cannot answer. The cell being empty says the house has never
+    put this TYPE in this ASSAY; the assay's own size says whether that is the
+    house's settled answer or its inexperience. `D.FLOW -> Tissue Collection`
+    (74) is 89,263 samples deep and not one of them a D.FLOW, which is a type
+    error; an assay holding 12 samples in total has not yet had the chance to
+    refuse anything.
+
+    RETURNS THE SENTENCE ALONGSIDE THE VERDICT, and no `FINDING_COLUMNS` cell
+    holds the population it turned on. A curator asked to trust the split has to
+    be able to see that number, and `evidence_summary` is where a Mode 2 row
+    carries what no column does -- the same rule `_mode2_summary` follows for
+    the rule key. Both branches speak, because "the assay holds 89,263 samples"
+    is exactly as much a finding as "it holds 12", and a note printed on one
+    side only would read as an annotation on the lane rather than as the
+    measurement that assigned it.
+
+    A MISSING KEY IS A POPULATION OF ZERO AND NOT A LOOKUP MISS, which is safe
+    here for one reason only: `assay_population` counts through
+    `precedent.assay_index`, so every id `mode2_candidates` can propose is a key
+    it holds. Those ids come from `registered`, which is
+    `audit.registered_internal`, built through the same index -- a candidate
+    assay is by construction one some sample is registered in. Keyed any other
+    way the default would be wrong on the 17 junction-less records and silently
+    right-looking, which is the defect `assay_population`'s docstring measures.
+
+    NOTHING IS DECIDED. Both outcomes emit the row, carrying `GATE_UNREACHABLE`
+    either way. This chooses which sheet a curator reads it on.
+    """
+    population = assay_pop.get(assay_id, 0)
+    named = (f"{assay_id} {titles[assay_id]}" if assay_id in titles
+             else f"{assay_id}")
+    if population < BOOTSTRAP_POPULATION_FLOOR:
+        return True, (
+            f"and {named} holds only {population:,} sample(s) of ANY type, "
+            f"under the floor of {BOOTSTRAP_POPULATION_FLOOR}, so the house has "
+            f"barely used it and the missing {sample_type} may be a gap rather "
+            "than an error -- review this as a FIRST-OF-A-KIND registration")
+    return False, (
+        f"and {named} holds {population:,} sample(s) of other types, at or over "
+        f"the floor of {BOOTSTRAP_POPULATION_FLOOR}, so the absence of "
+        f"{sample_type} is what a well-used assay has already declined to hold")
+
+
 def mode2_findings(
     attached: pd.DataFrame,
     *,
@@ -482,18 +655,29 @@ def mode2_findings(
     reg_projects: dict[tuple[int, int], frozenset[int]],
     types: dict[str, str],
     type_reg: dict[tuple[str, int], int],
+    assay_pop: dict[int, int],
     titles: dict[int, str],
     projects: dict[int, str],
 ) -> pd.DataFrame:
     """One row per (sample, assay) a lineage neighbour holds. Nothing is decided.
 
-    TEN KEYWORD-ONLY INDEXES, and the keyword is the guard. Four of them are
+    ELEVEN KEYWORD-ONLY INDEXES, and the keyword is the guard. Five of them are
     `dict[int, ...]` and two more are keyed on a 2-tuple, so a positional call
     could transpose `children_of` with `parents_of`, `titles` with `projects` or
     `type_reg` with `reg_projects` and get a populated, wrong frame with no
     error -- this package's named failure class, at an interface Task 8 calls.
     `lineage.py` separates its own two near-identical functions by arity for the
-    same reason; at eleven arguments only the name is left to separate them.
+    same reason; at twelve arguments only the name is left to separate them.
+
+    `assay_pop` IS REQUIRED AND HAS NO DEFAULT, which matters more than it looks.
+    An empty dict is a legal population index in which EVERY assay holds zero
+    samples, so a defaulted one would classify every unreachable row
+    `CLS_BOOTSTRAP` and raise nothing -- 99,449 rows onto a sheet whose whole
+    claim is that it holds the few. It is also the one index a caller must
+    BLIND in step with `registered` and `type_reg`: `backtest.backtest` builds
+    all three off `kept_rows`, and one of them built off the full membership
+    would let the held-out registrations decide which lane a cold proposal lands
+    in.
 
     THE DIRECTION AND THE RATE. `lineage.neighbour_registers` returns the
     relation and names ONE neighbour, `RELATION_ACTION` turns that into the
@@ -557,6 +741,14 @@ def mode2_findings(
     99,449 of the 167,454 emitted MODE_2 rows read a zero there. The row is
     still emitted and `classify.PRE_UNREACHABLE` gives it its own lane, because
     a proposal a curator never sees is not a proposal that was refused.
+
+    AN UNREACHABLE ROW IS THEN SPLIT AGAIN, and `_bootstrap_evidence` is where.
+    An empty cell under an assay the house has barely used is a claim about a
+    GAP and not about a type error, and that is a different review question --
+    8,971 of the 99,449 on the 2026-08-21 tree. Only `classification` moves:
+    `gate` still reads `GATE_UNREACHABLE`, `classify.PRE_UNREACHABLE` still
+    claims the key, and the row still carries its direction and its rate. See
+    `BOOTSTRAP_POPULATION_FLOOR` for the split and the number it turns on.
 
     Sorted on `(sample_id, proposed_internal_assay_id)`, a total order on this
     output. `mode2_candidates` returns arrival order on purpose so this sort has
@@ -632,7 +824,16 @@ def mode2_findings(
         unreachable = registrations == 0
         row_gate = (S.GATE_UNREACHABLE if unreachable
                     else (claim.gate if claim is not None else None))
-        row_class = (S.CLS_UNREACHABLE if unreachable else S.CLS_ABSENCE_LINEAGE)
+        # THE SECOND CUT, AND IT MOVES NOTHING BUT THE CLASS. `bootstrap_note`
+        # is None on a reachable row, where `_mode2_summary` prints the
+        # registration count instead, and is the measurement on an unreachable
+        # one whichever side it fell.
+        bootstrap, bootstrap_note = (
+            _bootstrap_evidence(assay_id, sample_type, assay_pop, titles)
+            if unreachable else (False, None))
+        row_class = (
+            (S.CLS_BOOTSTRAP if bootstrap else S.CLS_UNREACHABLE) if unreachable
+            else S.CLS_ABSENCE_LINEAGE)
         blocked = (sample_id, assay_id) in blocked_pairs
         reg_ids, reg_titles = _registered_columns(sample_id, registered, titles)
         title = titles.get(assay_id)
@@ -689,7 +890,7 @@ def mode2_findings(
             "evidence_summary": _mode2_summary(
                 action, relation, neighbour_uuid, len(kids) + len(rents),
                 assay_id, title, hop, project_id, rule, direction, sample_type,
-                registrations, claim, blocked),
+                registrations, claim, blocked, bootstrap_note),
             "action": action,
         })
 

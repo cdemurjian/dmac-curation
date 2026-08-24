@@ -725,6 +725,11 @@ def backtest(
         reg_projects=M2.registration_projects(kept_rows, assays),
         types=G.sample_type_index(nodes),
         type_reg=type_reg,
+        # BLINDED WITH THE OTHER TWO. `registered`, `type_reg` and `assay_pop`
+        # are all read off `kept_rows`: a population built off the full
+        # membership would let a held-out registration decide whether a cold
+        # proposal reads `CLS_UNREACHABLE` or `CLS_BOOTSTRAP`.
+        assay_pop=M2.assay_population(kept_rows, assays),
         titles=M2.assay_titles(assays),
         projects=X.project_index(samples),
     )

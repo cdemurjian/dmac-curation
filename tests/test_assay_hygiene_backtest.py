@@ -1070,3 +1070,55 @@ def test_the_real_extract_reproduces_both_recovery_curves_separately():
     assert rest_rows == 13649
     assert round(rest_correct / rest_rows, 4) == 0.9958
     assert int(top_parent.rule_groups) == 95
+
+
+def test_every_index_the_cold_run_reasons_from_is_built_off_the_blinded_frame():
+    """The fifth leak, and the general form of the third.
+
+    `type_registrations` was pinned against a warm reading only after a mutation
+    building it warm SURVIVED this file's first mutation run. `assay_pop` is the
+    same shape one column over -- a held-out registration counting itself into
+    the population that decides whether a cold proposal reads `CLS_UNREACHABLE`
+    or `CLS_BOOTSTRAP` -- and a world small enough to test end to end cannot
+    tell the two populations apart, because every assay in it is under
+    `mode2.BOOTSTRAP_POPULATION_FLOOR` warm and cold alike.
+
+    SO THIS IS ASSERTED AT THE SOURCE, AND OVER EVERY INDEX RATHER THAN THE NEW
+    ONE. The region between `blind_membership` and the leak check is where the
+    run's whole evidence is assembled, and the frame it is assembled from must
+    be `kept_rows`. `membership` appearing anywhere in it is the leak, whichever
+    index it reaches: the run's own docstring calls this out for the rate and
+    the reachability cell, and naming a third one individually would leave the
+    fourth for the next hand to remember.
+
+    THE GROUND TRUTH IS DELIBERATELY OUTSIDE THE REGION. `held_out_truth` is
+    built from `registered_internal(membership, assays)` -- WARM, and it must be:
+    it is what the run is scored against. So the region is bounded rather than
+    the whole function, and both bounds are asserted to exist.
+    """
+    src = (REPO / "scripts" / "assay_hygiene" / "backtest.py").read_text()
+    body = src.split("\ndef backtest(")[1].split("\ndef ")[0]
+
+    blinded = "blind_membership(membership, split.held_out)"
+    assert body.count(blinded) == 1
+    assert body.count("    leaked = ") == 1
+    evidence = body.split(blinded)[1].split("    leaked = ")[0]
+    # COMMENTS STRIPPED. A comment cannot leak, and the region carries one
+    # naming the frame precisely to say it must not be used.
+    evidence = "\n".join(ln.split("#")[0] for ln in evidence.splitlines())
+
+    assert "membership" not in evidence, (
+        "the cold run assembles an index from the FULL membership frame; every "
+        "index between `blind_membership` and the leak check must be built "
+        "from `kept_rows` or the run has seen what it is being scored on")
+    # ...and the region really does hold the run's whole evidence, so a refactor
+    # that empties it cannot pass this vacuously
+    for builder in ("G.type_registration_index(kept_rows",
+                    "registered_internal(kept_rows",
+                    "B.mine_precedent(train, kept_rows",
+                    "M2.registration_projects(kept_rows",
+                    "M2.assay_population(kept_rows"):
+        assert builder in evidence, f"{builder} is not in the blinded region"
+    # the ground truth is warm, outside the region, and stays that way
+    assert "registered_internal(membership, assays)" in body
+    assert "registered_internal(membership" not in evidence
