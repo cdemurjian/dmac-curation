@@ -177,6 +177,49 @@ def mine_precedent(
     evidence and is what the mode-1 population is ruled on; only an edge with
     BOTH endpoints unregistered contributes nothing, because there is no assay
     to count into.
+
+    THOSE THREE COUNT EDGES, AND TWO OF THEM ARE ALSO REPORTED IN SAMPLES.
+    `n_child_only_samples` is the distinct PARENTS the child-only edges name
+    and `n_parent_only_samples` is the distinct CHILDREN the parent-only edges
+    name -- in each case the endpoint that is NOT registered, which is the
+    endpoint a Mode 2 proposal would be made about. Measured over the whole
+    extract, the two grains differ by an order of magnitude:
+
+        n_child_only, summed over the 961 rules  (EDGES)     666,939
+        distinct (parent, internal assay) those edges raise    55,007   12.1x
+        largest single rule    303,866 edges over    616 samples         493x
+        largest fan-out ratio    1,575 edges over      3 samples         525x
+
+    55,007 IS EXACTLY `lineage.mode2_ceiling`'s `add_parent_rows`, which is the
+    corroboration and not a coincidence: every child-only edge names a parent
+    the house has NOT registered in that assay, which is the definition of an
+    ADD_PARENT candidate. Summing `n_child_only_samples` instead gives 57,946,
+    because a rule is scoped to one (project, hop) and a parent with children
+    of two types is counted once per rule.
+
+    THE INFLATION IS FAN-OUT AND NOT REFUSAL, which is the reason the sample
+    counts exist at all. The denominator is made of the proposals themselves,
+    so "the house declined this N times" is not a reading of it at any grain.
+    The worked case is `(2, D.ADCD, TIS, 153)` -- the cohort a reviewer sees as
+    `ALT|TIS|ADFP` -- which reads `n_child_only` 1,300 over
+    `n_child_only_samples` 325: 325 parents times 4 children, one sample
+    counted four times, zero refusals. `dossier.build_dossiers` renders both
+    numbers and says which is which; until 2026-08-21 it rendered only the edge
+    count, under a reading that called it repeated refusal.
+
+    NEITHER RATE IS RECOMPUTED OVER THEM AND THE ROW ORDER IS UNCHANGED. The
+    fan-out inflates numerator and denominator together, so regraining the RATE
+    moves it materially on only 8 of the 270 hops carrying >= 50 forward edge
+    observations (median |delta| 0.000, max 0.622; 119 clear a 0.50 floor
+    against 121 regrained). The defect is in the count reviewers were shown,
+    not in the rate that ranked them, and a rate change here would move a
+    ranking 1,012 agent adjudications and 128 operator rulings already rest on.
+
+    A SET PER KEY BESIDE EACH INTEGER, not a post-hoc groupby over the frame.
+    The integers and the sets are filled in ONE pass off the same branch, so
+    the two grains cannot come to describe different edges -- which is the
+    failure a second traversal invites and the reason this function has no
+    groupby anywhere.
     """
     memb = membership_index(membership)
     ainfo = assay_index(assays)
@@ -198,6 +241,13 @@ def mine_precedent(
         )
 
     counts: dict[tuple, list[int]] = defaultdict(lambda: [0, 0, 0])
+    # The sample-grained halves of the two directional counters. Keyed and
+    # branched exactly as `counts` is, one line further down the same `if`, so
+    # a future edit cannot move an edge into one grain and not the other. The
+    # UNREGISTERED endpoint goes in each: the parent on a child-only edge, the
+    # child on a parent-only one.
+    child_only_parents: dict[tuple, set[int]] = defaultdict(set)
+    parent_only_children: dict[tuple, set[int]] = defaultdict(set)
     titles: dict[tuple, str] = {}
 
     for child_id, parent_id, child_type, parent_type in zip(
@@ -213,8 +263,10 @@ def mine_precedent(
                 counts[key][0] += 1
             elif assay_id in ca:
                 counts[key][1] += 1
+                child_only_parents[key].add(int(parent_id))
             else:
                 counts[key][2] += 1
+                parent_only_children[key].add(int(child_id))
 
     rows = []
     for key, (both, child_only, parent_only) in counts.items():
@@ -229,7 +281,13 @@ def mine_precedent(
             "internal_assay_title": titles[key],
             "n_both": both,
             "n_child_only": child_only,
+            "n_child_only_samples": len(child_only_parents.get(key, ())),
             "n_parent_only": parent_only,
+            "n_parent_only_samples": len(parent_only_children.get(key, ())),
+            # Both rates stay over the EDGE counts. See the docstring: the
+            # fan-out inflates numerator and denominator together, and a
+            # regrained rate would move a ranking that 1,012 adjudications and
+            # the operator's 128 rulings already rest on.
             "propagation_rate": (both / fwd_den) if fwd_den else 0.0,
             "reverse_rate": (both / rev_den) if rev_den else 0.0,
         })

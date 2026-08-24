@@ -236,10 +236,20 @@ class Rule(NamedTuple):
     `getattr(rule, ACTION_PRECEDENT_DIRECTION[action])` and emits that same
     string into `precedent_direction`, so the column naming the rate and the rate
     itself come from one lookup and cannot drift apart.
+
+    SEVEN FIELDS SINCE 2026-08-24, and the two new ones are the reason the
+    keyword construction below is not a style choice. `n_child_only_samples`
+    and `n_parent_only_samples` are the SAMPLE-grained halves of the two
+    directional counts -- see `precedent.mine_precedent` -- and each sits
+    immediately behind the edge count it checks, so a positional construction
+    now has two adjacent same-typed pairs that transpose silently.
+    `precedent_rules` builds this by keyword for that reason.
     """
     n_both: int
     n_child_only: int
+    n_child_only_samples: int
     n_parent_only: int
+    n_parent_only_samples: int
     propagation_rate: float
     reverse_rate: float
 
@@ -432,8 +442,20 @@ def precedent_rules(precedent: pd.DataFrame) -> dict[tuple, Rule]:
                 "`mine_precedent` emits one row per key, so this frame was "
                 "concatenated or re-mined; picking either row would settle a "
                 "rate by row order.")
-        out[key] = Rule(int(r.n_both), int(r.n_child_only), int(r.n_parent_only),
-                        float(r.propagation_rate), float(r.reverse_rate))
+        # BY KEYWORD, never positionally. Two of the seven fields are
+        # sample-grained counts sitting immediately behind the edge-grained
+        # count each one checks, so an argument list has two adjacent
+        # same-typed pairs and a transposition would produce a populated,
+        # wrong row rather than an error. See `Rule`.
+        out[key] = Rule(
+            n_both=int(r.n_both),
+            n_child_only=int(r.n_child_only),
+            n_child_only_samples=int(r.n_child_only_samples),
+            n_parent_only=int(r.n_parent_only),
+            n_parent_only_samples=int(r.n_parent_only_samples),
+            propagation_rate=float(r.propagation_rate),
+            reverse_rate=float(r.reverse_rate),
+        )
     return out
 
 
@@ -907,10 +929,21 @@ def mode2_findings(
                                if rule is not None else None),
             "precedent_direction": direction,
             "precedent_n_both": rule.n_both if rule is not None else None,
+            # TWO GRAINS PER DIRECTION, and the sample count rides behind the
+            # edge count it checks. `precedent_n_child_only` counts EDGES whose
+            # parent is by construction an ADD_PARENT candidate, so it is a
+            # count of proposals and not of refusals; the `_samples` column is
+            # how many distinct samples those edges cover. See
+            # `precedent.mine_precedent` and `dossier.build_dossiers`, which is
+            # where the misreading was rendered.
             "precedent_n_child_only": (rule.n_child_only
                                        if rule is not None else None),
+            "precedent_n_child_only_samples": (rule.n_child_only_samples
+                                               if rule is not None else None),
             "precedent_n_parent_only": (rule.n_parent_only
                                         if rule is not None else None),
+            "precedent_n_parent_only_samples": (rule.n_parent_only_samples
+                                                if rule is not None else None),
             # THE CHECK ON `proposed_by`, ON THE SAME ROW. `n_both > 0` is the
             # house having made this co-registration at least once; 115,087 of
             # the real extract's 166,578 BY_PRECEDENT rows read zero there, so

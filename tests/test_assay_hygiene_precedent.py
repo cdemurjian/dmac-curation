@@ -137,6 +137,120 @@ def test_reverse_rate_counts_the_other_direction():
     assert row.reverse_rate == 0.0
 
 
+def _fanout_world(n_children=4):
+    """One parent, `n_children` children, every child registered and it not.
+
+    THE `ALT|TIS|ADFP` SHAPE, minimised. On the real extract the rule behind
+    that cohort -- `(project 2, D.ADCD, TIS, assay 153)` -- reads `n_child_only`
+    1,300 over `n_child_only_samples` 325: 325 parents times 4 children, one
+    sample counted four times, not 1,300 separate observations. Every edge here
+    is the same hop, so the whole rule is one key and the two grains cannot be
+    confused by anything except the fan-out itself.
+
+    THE PARENT IS REGISTERED IN NOTHING, which is what makes every one of these
+    edges an ADD_PARENT candidate rather than a refusal: the sample the
+    denominator counts is the sample the proposal is about.
+    """
+    assays = pd.DataFrame(
+        [(1, "ADFP", 7, 3, 2, 10, "MIT_SRP", 11,
+          "Antibody-Dependent Functional Profiling (ADFP)")],
+        columns=S.ASSAY_COLUMNS,
+    )
+    edges = pd.DataFrame(
+        [(900 + k, 800, f"A.ADFP-{k}", "TIS-1", "A.ADFP", "TIS", None, None,
+          None) for k in range(n_children)],
+        columns=S.EDGE_COLUMNS,
+    )
+    membership = pd.DataFrame([(900 + k, 1) for k in range(n_children)],
+                              columns=S.MEMBERSHIP_COLUMNS)
+    return edges, membership, assays
+
+
+def test_the_forward_denominator_counts_edges_and_the_new_column_counts_samples():
+    """`n_child_only` is EDGES; `n_child_only_samples` is the samples behind them.
+
+    THE DEFECT THIS PINS. `n_child_only` is the denominator of
+    `propagation_rate` and it counts edges whose PARENT is, by construction, an
+    ADD_PARENT candidate for that assay -- so it is a count of the proposals
+    themselves and never a count of the house declining anything. One parent
+    with four registered children raises FOUR observations about ONE sample.
+
+    Both expected values are recomputed FROM THE EDGE FRAME, never from the
+    column under test: 4 is `len(edges)` and 1 is `edges.parent_id.nunique()`.
+    An implementation that set the new column equal to the old one, or that
+    counted the CHILDREN instead of the parents, fails the third assertion.
+
+    THE RATE IS NOT TOUCHED, and that is asserted here rather than left to be
+    inferred. Regraining the rate moves it materially on 8 of the 270 real hops
+    with >= 50 forward edge observations (median |delta| 0.000), so this task
+    adds a count and changes no ranking.
+    """
+    edges, membership, assays = _fanout_world()
+    out = P.mine_precedent(edges, membership, assays)
+    assert len(out) == 1
+    row = out.iloc[0]
+
+    # the edge-grained count IS the edge count -- one observation per edge
+    assert row.n_child_only == len(edges) == 4
+    # the sample-grained count is the distinct PARENTS those edges name, which
+    # is the set of samples an ADD_PARENT proposal would be made about
+    assert row.n_child_only_samples == edges.parent_id.nunique() == 1
+    # ...and the two DIFFER, which is the whole finding
+    assert row.n_child_only != row.n_child_only_samples
+
+    # the rate is untouched: still both / (both + child_only) over EDGES
+    assert row.n_both == 0
+    assert row.propagation_rate == 0.0
+
+
+def test_the_reverse_denominator_gets_the_same_treatment():
+    """`n_parent_only_samples` counts the CHILDREN, by the mirror argument.
+
+    `n_parent_only` is `reverse_rate`'s denominator and counts edges whose
+    CHILD is the ADD_CHILD candidate, so its sample-grained companion counts
+    distinct children. Built by transposing `_fanout_world` rather than by
+    hand, so the two directions cannot drift into different definitions.
+    """
+    edges, membership, assays = _fanout_world(n_children=3)
+    # one child, three registered parents: the mirror of the world above
+    flipped = edges.rename(columns={
+        "child_id": "parent_id", "parent_id": "child_id",
+        "child_uuid": "parent_uuid", "parent_uuid": "child_uuid",
+        "child_type": "parent_type", "parent_type": "child_type",
+    })[S.EDGE_COLUMNS]
+    out = P.mine_precedent(flipped, membership, assays)
+    row = out.iloc[0]
+
+    assert row.n_parent_only == len(flipped) == 3
+    assert row.n_parent_only_samples == flipped.child_id.nunique() == 1
+    assert row.n_parent_only != row.n_parent_only_samples
+    assert row.reverse_rate == 0.0
+    # the forward side of this world is empty, and its sample count with it --
+    # a set-per-key implementation that leaked between the two counters would
+    # report a parent here
+    assert row.n_child_only == 0 and row.n_child_only_samples == 0
+
+
+def test_a_sample_grained_count_never_exceeds_its_edge_grained_one():
+    """The invariant, over the whole seven-edge fixture world.
+
+    A count of distinct samples behind a set of edges cannot exceed the number
+    of edges, and equality means no fan-out. Asserted over every row rather
+    than one, so a counter that accumulated the wrong endpoint's id -- or
+    accumulated into a shared set -- shows up on whichever row has fan-out.
+    """
+    fx = S.make_fixture()
+    out = P.mine_precedent(fx["edges"], fx["membership"], fx["assays"])
+    assert len(out) > 1
+    assert (out.n_child_only_samples <= out.n_child_only).all()
+    assert (out.n_parent_only_samples <= out.n_parent_only).all()
+    # no hop in this world has fan-out: every parent has one child here, so
+    # the two grains agree everywhere and this fixture could not have caught
+    # the defect on its own. `_fanout_world` is why the tests above exist.
+    assert list(out.n_child_only_samples) == list(out.n_child_only)
+    assert list(out.n_parent_only_samples) == list(out.n_parent_only)
+
+
 def test_nothing_is_dropped_by_a_null_key_component():
     """`internal_assay_id` is nullable AND a RULE_KEY component.
 

@@ -25,8 +25,22 @@ WHAT A DOSSIER CARRIES, and why each part is needed:
                         own framing and it is the thing the sheet was missing:
                         an assay's rightness depends on what the sample IS and
                         what sits either side of it in the chain.
-  the precedent counts  not just the rate. `0.000 over 3 pairs` and `0.000 over
-                        71,499 pairs` are different facts and the rate hides it.
+  the precedent counts  not just the rate, and in BOTH GRAINS. `0.000 over 3
+                        edges` and `0.000 over 71,499 edges` are different
+                        facts and the rate hides it -- but so do the edges: the
+                        71,499 are 1,272 samples with 56 relatives each, and
+                        the edge count on its own reads as 71,499 separate
+                        judgements. Until 2026-08-24 this block showed the edge
+                        count alone, labelled "pairs", under the reading "a low
+                        rate over MANY pairs is the house repeatedly declining
+                        it". That reading is never valid: `n_child_only` counts
+                        edges whose PARENT the house has not registered, and
+                        that parent is the ADD_PARENT proposal itself, so the
+                        denominator is made of the proposals. 666,939 such
+                        edges raise 55,007 distinct candidates across the
+                        extract, 12.1x. It was the reading in front of all
+                        1,012 agent adjudications of 2026-08-21. See
+                        `precedent.mine_precedent`.
   the metadata          the sample's own fields, which frequently name the assay
                         outright.
   the direction         ADD_PARENT and ADD_CHILD are different questions.
@@ -279,10 +293,17 @@ def build_dossiers(findings: pd.DataFrame, context: dict,
                  for t, a, n in conv["by_type"].get(sample_type, ())
                  ][:MAX_TYPE_ASSAYS]
 
+        # THE DIRECTION PICKS THE COLUMN PAIR, never one column. Both grains
+        # of the same direction or neither: a packet showing an edge count
+        # without the sample count behind it is the defect this block was
+        # rewritten to remove.
         n_both = first.precedent_n_both
-        n_missing = (first.precedent_n_child_only
-                     if action == "ADD_PARENT_TO_ASSAY"
-                     else first.precedent_n_parent_only)
+        edge_col, sample_col = (
+            ("precedent_n_child_only", "precedent_n_child_only_samples")
+            if action == "ADD_PARENT_TO_ASSAY" else
+            ("precedent_n_parent_only", "precedent_n_parent_only_samples"))
+        n_missing = first[edge_col]
+        n_missing_samples = first[sample_col]
         out.append({
             "cohort_key": R.KEY_DELIMITER.join(str(k) for k in key),
             "lab": str(key[0]),
@@ -346,15 +367,25 @@ def build_dossiers(findings: pd.DataFrame, context: dict,
             "precedent": {
                 "rate": (None if pd.isna(first.precedent_rate)
                          else round(float(first.precedent_rate), 4)),
-                "pairs_where_both_registered": (
+                "edges_where_both_registered": (
                     0 if pd.isna(n_both) else int(n_both)),
-                "pairs_where_only_the_relative_is": (
+                "edges_where_only_the_relative_is": (
                     0 if pd.isna(n_missing) else int(n_missing)),
+                "samples_where_only_the_relative_is": (
+                    0 if pd.isna(n_missing_samples)
+                    else int(n_missing_samples)),
                 "reading": (
                     "how often the house has ALREADY made this registration "
-                    "on comparable pairs. A low rate over MANY pairs is the "
-                    "house repeatedly declining it; a low rate over FEW pairs "
-                    "means nothing either way."),
+                    "on comparable pairs of this hop. BOTH COUNTS ARE EDGES "
+                    "AND NEITHER IS A COUNT OF REFUSALS: every edge in "
+                    "'edges_where_only_the_relative_is' names a sample the "
+                    "house has not registered, which is THIS PROPOSAL and not "
+                    "a decision against it. One sample fans out over every "
+                    "relative it has, so read "
+                    "'samples_where_only_the_relative_is' for how many "
+                    "distinct samples those edges cover -- 1,300 edges on the "
+                    "largest ADFP hop are 325 samples with four relatives "
+                    "each."),
             },
             "examples": examples,
         })

@@ -59,6 +59,39 @@ def test_precedent_columns_carry_both_directions():
         assert col in S.PRECEDENT_COLUMNS
 
 
+def test_the_two_precedent_counts_ride_beside_their_sample_grained_halves():
+    """Each sample count sits immediately behind the edge count it checks.
+
+    THE ORDER IS THE ARGUMENT, as it is for `co_reg_pop` behind `co_reg_rate`.
+    `n_child_only` counts EDGES and `n_child_only_samples` counts the distinct
+    samples behind them, and the second is only legible as the check on the
+    first if it is adjacent to it. On the real extract the pair reads 666,939
+    against 55,007 distinct candidates over the whole frame, so a reader who
+    finds one number without the other reads a fan-out as a population.
+
+    Both frames are asserted, because the finding row BORROWS these columns
+    under a `precedent_` prefix and the two lists are maintained separately.
+    Written as an index relation rather than as a second literal list: a
+    literal here would restate the pin above and go green on any reordering it
+    was updated to match.
+    """
+    for cols, prefix in ((S.PRECEDENT_COLUMNS, ""),
+                         (S.FINDING_COLUMNS, "precedent_")):
+        for base in ("n_child_only", "n_parent_only"):
+            edge = cols.index(f"{prefix}{base}")
+            samples = cols.index(f"{prefix}{base}_samples")
+            assert samples == edge + 1, (
+                f"{prefix}{base}_samples is the check on {prefix}{base} and "
+                "belongs immediately behind it, not adrift from it")
+
+    # ...and neither rate is renamed to advertise a grain it does not have.
+    # Both are still computed over the EDGE counts -- regraining them moves 8
+    # of 270 real hops and would move a ranking 1,012 adjudications rest on --
+    # so a `_samples` rate appearing here is a change nobody measured.
+    assert not [c for c in S.PRECEDENT_COLUMNS
+                if c.endswith("_rate") and "sample" in c]
+
+
 def test_fixture_shapes_match_declared_columns():
     fx = S.make_fixture()
     assert list(fx["edges"].columns) == S.EDGE_COLUMNS
@@ -93,6 +126,17 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
     it is accurate as one. Nullable, because "no rule on this hop" and "a rule
     that reads never" are the two states the rest of the precedent block
     already keeps apart.
+
+    40 and not 38 since 2026-08-24, and the two are one change:
+    `precedent_n_child_only_samples` and `precedent_n_parent_only_samples`
+    ride immediately behind the edge counts they check. The edge counts are
+    not refusals -- `precedent_n_child_only` counts edges whose PARENT the
+    house has not registered, and that parent IS the ADD_PARENT proposal, so
+    666,939 such edges raise 55,007 distinct candidates and the worked case
+    reads 1,300 edges over 325 samples. `dossier.build_dossiers` showed only
+    the edge count, under a reading calling it repeated refusal, through 1,012
+    agent adjudications. See
+    `test_the_two_precedent_counts_ride_beside_their_sample_grained_halves`.
 
     38 and not 37 the same day. `id_namespace` rides immediately behind
     `proposed_internal_assay_id` and says which id space that value speaks:
@@ -147,7 +191,9 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
         "co_reg_alt_label_internal_assay_id", "co_reg_alt_label_pop",
         "compat_band",
         "precedent_rate", "precedent_direction",
-        "precedent_n_both", "precedent_n_child_only", "precedent_n_parent_only",
+        "precedent_n_both",
+        "precedent_n_child_only", "precedent_n_child_only_samples",
+        "precedent_n_parent_only", "precedent_n_parent_only_samples",
         "precedent_supports",
         "proposed_by", "evidence_summary", "action",
     ]

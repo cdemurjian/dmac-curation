@@ -70,7 +70,12 @@ def test_a_gated_claim_with_no_precedent_rule_names_its_own_source():
 
 
 def test_the_other_three_combinations_are_unchanged():
-    rule = M2.Rule(1, 2, 3, 0.5, 0.25)
+    # BY KEYWORD, as `precedent_rules` builds it. Two of the seven fields are
+    # sample-grained counts sitting immediately behind the edge count each one
+    # checks, so a positional list has two adjacent same-typed pairs.
+    rule = M2.Rule(n_both=1, n_child_only=2, n_child_only_samples=2,
+                   n_parent_only=3, n_parent_only_samples=3,
+                   propagation_rate=0.5, reverse_rate=0.25)
     assert M2._proposal_source(rule, _Claim(), 1, 2) == X.BY_BOTH
     assert M2._proposal_source(rule, None, 1, 2) == X.BY_PRECEDENT
     assert M2._proposal_source(None, None, 1, 2) == X.BY_LINEAGE_ONLY

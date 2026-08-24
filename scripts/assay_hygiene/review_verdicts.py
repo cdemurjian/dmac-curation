@@ -121,8 +121,15 @@ def join_dossiers(verdicts: pd.DataFrame, dossiers: list[dict]) -> pd.DataFrame:
             "action": d["action"], "n_rows": d["n_rows"],
             "n_samples": d["n_samples"],
             "precedent": d["precedent"]["rate"],
-            "precedent_both": d["precedent"]["pairs_where_both_registered"],
-            "precedent_missing": d["precedent"]["pairs_where_only_the_relative_is"],
+            # BOTH GRAINS, because both are on the dossier and the edge count
+            # alone is what a reader mistakes for refusals. See
+            # `dossier.build_dossiers`.
+            "precedent_both_edges": d["precedent"][
+                "edges_where_both_registered"],
+            "precedent_missing_edges": d["precedent"][
+                "edges_where_only_the_relative_is"],
+            "precedent_missing_samples": d["precedent"][
+                "samples_where_only_the_relative_is"],
             "writable": det.get("IS_WRITABLE_IN_THIS_PROJECT"),
             "project_calls_it": "; ".join(
                 x["title"] for x in det["what_the_project_actually_calls_it"]),
@@ -171,7 +178,10 @@ def _row_html(r) -> str:
         f'<div><b>house</b> {int(r.already_this_type):,} of this type already in '
         f'it &middot; usually: {_e(r.type_usually)}</div>'
         f'<div><b>precedent</b> {prec} '
-        f'({int(r.precedent_both):,} both / {int(r.precedent_missing):,} only the relative)</div>'
+        f'({int(r.precedent_both_edges):,} edges both / '
+        f'{int(r.precedent_missing_edges):,} edges over '
+        f'{int(r.precedent_missing_samples):,} samples with only the '
+        f'relative &mdash; EDGES, not refusals)</div>'
         f'<div class="key"><code>{_e(r.cohort_key)}</code></div>'
         f'</div>{_notes(r)}</details>')
 

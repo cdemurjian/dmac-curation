@@ -678,7 +678,7 @@ def test_the_finding_frame_is_exactly_the_shared_contract_and_is_totally_sorted(
     """
     _, _, _, attached, population, findings = _pipeline()
     assert list(findings.columns) == S.FINDING_COLUMNS
-    assert len(S.FINDING_COLUMNS) == 38
+    assert len(S.FINDING_COLUMNS) == 40
     # one row per (sample, proposed assay), which is the grain the writer takes
     assert not findings.duplicated(
         ["sample_id", "proposed_internal_assay_id"]).any()
@@ -1392,17 +1392,30 @@ def _world2():
 
 
 def _rule(project, child_type, parent_type, assay, title, both, child_only,
-          parent_only):
+          parent_only, child_only_samples=None, parent_only_samples=None):
     """One precedent row whose two RATES ARE DERIVED FROM ITS OWN COUNTS.
 
     Never hand-written beside them. A fixture stating `propagation_rate = 0.90`
     next to counts that yield 0.75 is a fixture that lies about the one
     arithmetic this module is built on, and every test reading the rate off the
     frame would then agree with it.
+
+    THE TWO SAMPLE-GRAINED COUNTS DEFAULT TO THEIR EDGE COUNTS, which is the
+    no-fan-out world: one relative per sample, so the two grains agree. Nothing
+    in THIS module reads them -- the rates are over the edge counts and stay
+    there -- and a fixture inventing a fan-out here would be asserting a
+    property of `precedent.mine_precedent` from the wrong file.
+    `tests/test_assay_hygiene_precedent.py` owns the case where they differ,
+    and `tests/test_assay_hygiene_dossier.py` owns what a reviewer is shown.
+    Both are overridable so a caller that needs a fan-out can state one.
     """
     fwd, rev = both + child_only, both + parent_only
-    return (project, child_type, parent_type, assay, title, both, child_only,
-            parent_only, (both / fwd) if fwd else 0.0,
+    return (project, child_type, parent_type, assay, title, both,
+            child_only,
+            child_only if child_only_samples is None else child_only_samples,
+            parent_only,
+            parent_only if parent_only_samples is None else parent_only_samples,
+            (both / fwd) if fwd else 0.0,
             (both / rev) if rev else 0.0)
 
 
@@ -2058,7 +2071,7 @@ def test_the_mode_2_frame_is_the_shared_contract_and_is_totally_sorted():
     w, bundle, findings = _pipeline2()
 
     assert list(findings.columns) == S.FINDING_COLUMNS
-    assert len(S.FINDING_COLUMNS) == 38
+    assert len(S.FINDING_COLUMNS) == 40
     assert not findings.duplicated(
         ["sample_id", "proposed_internal_assay_id"]).any()
 
@@ -3811,7 +3824,7 @@ def test_the_unified_frame_is_the_shared_contract_totally_sorted_and_one_row_per
     findings = parts["findings"]
 
     assert list(findings.columns) == S.FINDING_COLUMNS
-    assert len(S.FINDING_COLUMNS) == 38
+    assert len(S.FINDING_COLUMNS) == 40
     keys = list(zip(findings.sample_id, findings.proposed_internal_assay_id))
     assert len(keys) == len(set(keys))
     assert keys == sorted(keys)

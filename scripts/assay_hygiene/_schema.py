@@ -84,9 +84,37 @@ D_ALREADY_EXISTS = "already_has_derived_from"
 
 # --- precedent (stage B) -----------------------------------------------------
 RULE_KEY = ["project_id", "child_type", "parent_type", "internal_assay_id"]
+# TWO GRAINS, AND EACH SAMPLE COUNT RIDES IMMEDIATELY BEHIND THE EDGE COUNT IT
+# CHECKS -- the same placement rule `co_reg_pop` follows behind `co_reg_rate`
+# and `n_samples` behind `support`: the check on a number belongs next to the
+# number.
+#
+# `n_both`, `n_child_only` and `n_parent_only` COUNT EDGES and always have.
+# `n_child_only` is `propagation_rate`'s denominator and it counts edges whose
+# PARENT is, by construction, an ADD_PARENT candidate for that assay -- it is a
+# count of the proposals themselves, never of the house declining them. One
+# parent fans out over every child it has, so the edge count says how connected
+# the graph is where the sample count says how many samples are involved.
+# Measured on this extract: 666,939 `n_child_only` edges raise 55,007 distinct
+# (parent, internal assay) ADD_PARENT candidates -- 12.1x -- and the largest
+# single rule is 303,866 edges over 616 samples, 493x.
+#
+# THE COLUMN DOES NOT SUM TO THAT CEILING AND IS NOT MEANT TO. Summing
+# `n_child_only_samples` over the 961 rules gives 57,946, not 55,007: a rule is
+# scoped to one (project, hop), so a parent with children of two types is
+# counted once per rule. Each cell is the sample count for ITS rule.
+#
+# THE TWO NEW COLUMNS ARE DISPLAY AND NOT RANKING. Neither rate is recomputed
+# over them and the row order is unchanged -- regraining the RATE moves it
+# materially on 8 of the 270 real hops with >= 50 forward edge observations,
+# median |delta| 0.000, so the defect was in what reviewers were shown and not
+# in what ranked them. See `precedent.mine_precedent` and
+# `dossier.build_dossiers`.
 PRECEDENT_COLUMNS = RULE_KEY + [
     "internal_assay_title",
-    "n_both", "n_child_only", "n_parent_only",
+    "n_both",
+    "n_child_only", "n_child_only_samples",
+    "n_parent_only", "n_parent_only_samples",
     "propagation_rate", "reverse_rate",
 ]
 
@@ -336,6 +364,17 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 #   the row back to `precedent.csv` and check the number without consulting any
 #   code. `mode2.ACTION_PRECEDENT_DIRECTION` is the one place the mapping
 #   from action to column lives.
+# `precedent_n_child_only_samples` / `precedent_n_parent_only_samples` are the
+#   SAMPLE-grained halves of the two directional counts, each riding
+#   immediately behind the edge count it checks. The edge counts are not
+#   refusals: `precedent_n_child_only` counts edges whose PARENT the house has
+#   not registered, and that parent is the ADD_PARENT proposal itself, so a
+#   large number there is lineage fan-out. The rework's worked case reads 1,300
+#   edges over 325 samples on `(2, D.ADCD, TIS, 153)`. Both grains reach an
+#   operator through `dossier.build_dossiers`, which rendered only the edge
+#   count -- under a reading calling it repeated refusal -- through the 1,012
+#   agent adjudications of 2026-08-21. Neither rate is computed over them; see
+#   `PRECEDENT_COLUMNS` for why regraining the rate was measured and declined.
 # `precedent_supports` is `n_both > 0` -- whether the house has EVER made this
 #   co-registration -- and it rides immediately in front of `proposed_by`
 #   because it is the check on it. Measured 2026-08-24 over the 170,786 rows of
@@ -415,7 +454,9 @@ FINDING_COLUMNS = [
     "co_reg_alt_label_internal_assay_id", "co_reg_alt_label_pop",
     "compat_band",
     "precedent_rate", "precedent_direction",
-    "precedent_n_both", "precedent_n_child_only", "precedent_n_parent_only",
+    "precedent_n_both",
+    "precedent_n_child_only", "precedent_n_child_only_samples",
+    "precedent_n_parent_only", "precedent_n_parent_only_samples",
     "precedent_supports",
     "proposed_by", "evidence_summary", "action",
 ]

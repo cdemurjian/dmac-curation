@@ -107,16 +107,23 @@ THE SHEET IS ORDERED BY A SECOND, SEPARATELY SALTED DIGEST so the three strata
 interleave. A sheet in stratum blocks would let a rater notice, halfway down,
 that the questions have changed shape.
 
-BOTH PRECEDENT GRAINS, AND WHAT THAT PHRASE COULD NOT MEAN HERE. The plan's
-Task 6 was to add SAMPLE-grained counts beside the edge-grained ones; it is not
-in this tree -- `_schema.PRECEDENT_COLUMNS` still holds only `n_both`,
-`n_child_only`, `n_parent_only` and the two rates over them. So the two grains
-the sheet can honestly carry are the two DIRECTIONS, `propagation_rate` and
-`reverse_rate`, both recomputed here from the row's own three counts rather
-than read from `precedent_rate`, which holds only the one direction
-`precedent_direction` names. `check_rates_reproduce_the_row` asserts the
-recomputation reproduces `precedent_rate` in that direction, so the arithmetic
-cannot drift from `precedent.mine_precedent`'s.
+BOTH PRECEDENT DIRECTIONS, WHICH IS NOT THE SAME AS BOTH PRECEDENT GRAINS.
+The two numbers this sheet carries are `propagation_rate` and `reverse_rate`,
+both recomputed here from the row's own three EDGE counts rather than read from
+`precedent_rate`, which holds only the one direction `precedent_direction`
+names. `check_rates_reproduce_the_row` asserts the recomputation reproduces
+`precedent_rate` in that direction, so the arithmetic cannot drift from
+`precedent.mine_precedent`'s.
+
+The plan's Task 6 -- SAMPLE-grained counts beside the edge-grained ones --
+LANDED 2026-08-24, after this sheet was built. `PRECEDENT_COLUMNS` and
+`FINDING_COLUMNS` now carry `n_child_only_samples` / `n_parent_only_samples`
+and their `precedent_`-prefixed twins, and `dossier.build_dossiers` renders
+both. THIS SHEET STILL SHOWS ONLY THE EDGE COUNTS, deliberately and as a
+stated limit: the rows a rater sees were drawn and frozen against the earlier
+columns, so adding a number to the sheet now would change what was rated
+half-way through a rating exercise. The rates are unaffected either way --
+both are over the edge counts before and after Task 6.
 
 WHAT IS EXACT AND WHAT IS THE EXAMPLES'. `type_registrations`, the proposed
 assay's population and `id_namespace` are functions of `(sample_type, assay

@@ -42,8 +42,11 @@ from assay_hygiene import vocabulary as V  # noqa: E402
 
 def _frames():
     """One coherent little world, every headline a different integer."""
+    # the two `_samples` counts equal their edge counts: one relative each, so
+    # this world has no fan-out and nothing here reads the difference. See
+    # `precedent.mine_precedent` for the grain and the case where they differ.
     precedent = pd.DataFrame(
-        [(10, "D.IMG", "TIS", 11, "Comet Chip", 2, 1, 0, 2 / 3, 1.0)],
+        [(10, "D.IMG", "TIS", 11, "Comet Chip", 2, 1, 1, 0, 0, 2 / 3, 1.0)],
         columns=S.PRECEDENT_COLUMNS,
     )
     # 6 claims over 5 distinct samples; tiers 1 corroborated / 4 strong / 1
