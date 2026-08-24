@@ -107,3 +107,25 @@ assay-hygiene/
 # strip 1,570 sample identifiers. A prefix glob, so a future `-bak2` or `-old` is
 # covered by construction rather than by someone remembering to add a line.
 assay-hygiene-*/
+
+# ============================================================
+# The operator's rulings, copied into tests/fixtures/ so the
+# tests that read them can run. THEY ARE CURATION OUTPUT AND
+# MUST NEVER BE COMMITTED: `mode2-rulings.tsv` carries protocol
+# and specimen strings from the same namespace the 2026-08-21
+# history rewrite had to strip 1,570 identifiers from, and this
+# repository is PUBLIC. The tests skip when the files are
+# absent, so a fresh clone is green without them -- which is
+# exactly why nothing here may rely on someone remembering.
+#
+# UNANCHORED, MATCHING AT ANY DEPTH, and that is not tidiness.
+# `mode2-rulings-backup-2026-08-20.tsv` -- a byte-identical copy
+# of the whole ruling file -- was sitting UNTRACKED AND
+# UNIGNORED in the repository root on 2026-08-24, one `git add
+# -A` from being public. A rule scoped to `tests/fixtures/`
+# would have left it there. The globs are on the NAME, so the
+# next copy is covered wherever someone drops it and whatever
+# suffix they add.
+# ============================================================
+*rulings*.tsv
+*verdicts*.csv
