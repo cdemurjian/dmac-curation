@@ -78,18 +78,55 @@ def _bolded_ints(md: str) -> list[int]:
             for m in re.findall(r"\*\*([\d,]+)\*\*", md)]
 
 
-def _run(tmp_path):
+def unreachable_edge(w):
+    """One edge over the imported world that emits a `CLS_UNREACHABLE` row.
+
+    THE WORLD'S OWN REACHABILITY CELLS ARE WHAT MAKE IT ONE. 104 is DNA and
+    registered nowhere; 6 is TIS and registered in assay 12; NO DNA SAMPLE IN
+    THIS WORLD IS REGISTERED ANYWHERE, so `gate.type_registration_index` holds
+    0 for (DNA, 12) and the pair the lineage lane offers is one no sample of
+    the type has ever held.
+
+    IT MUST BE AN ASSAY 104 DOES NOT CLAIM, which is why the parent is 6 and
+    not one of the assay-11 samples. 104's own claim names 11, that claim is
+    `GATE_UNREACHABLE`, and a blocked claim is taken by `PRE_GATE` four steps
+    before `PRE_UNREACHABLE` is reached -- so an edge to an assay-11 parent
+    would produce a gate refusal and no row at all. The real extract shows the
+    same fact from the other side: 0 of its 99,449 unreachable keys carry a
+    claim.
+
+    THE UUIDS ARE THE NODES' OWN, taken off the world rather than spelled here,
+    and that is load-bearing rather than tidy. `mode2.mode2_findings` reads the
+    sample's type as `types.get(uuid_of.get(sample_id))` -- uuid first -- and a
+    uuid absent from `nodes` yields no type, and so `type_registrations = None`
+    rather than 0, and so `CLS_ABSENCE_LINEAGE` rather than `CLS_UNREACHABLE`.
+    Written with an invented uuid this edge produced a lineage row and the
+    guard below went green against a world that could not exercise it.
+    """
+    uuid = dict(zip(w["samples"].sample_id.astype(int), w["samples"].uuid))
+    stype = dict(zip(w["nodes"].sample_id.astype(int), w["nodes"].type))
+    return (104, 6, uuid[104], uuid[6], stype[104], stype[6], None, None, None)
+
+
+def _run(tmp_path, extra_edges=None):
     """A full `main` over the imported world -> (out_dir, report text).
 
     The two edges are the ones `test_main_writes_exactly_two_artifacts_...`
     adds for the same reason: Mode 1's world carries none of its own, so
     without them Mode 2 emits nothing and every ceiling assertion below would
     be vacuously true against zero.
+
+    `extra_edges` is a callable over the world, so a caller can add a
+    population the base world has none of -- see `unreachable_edge` -- without
+    forking the world and without spelling a uuid the world derives. The
+    default adds nothing, so every existing caller runs the same two edges it
+    always did.
     """
     w = _world()
     w["edges"] = pd.DataFrame(
         [(100, 102, "TIS-100", "TIS-102", "TIS", "TIS", None, None, None),
-         (100, 101, "TIS-100", "TIS-101", "TIS", "TIS", None, None, None)],
+         (100, 101, "TIS-100", "TIS-101", "TIS", "TIS", None, None, None)]
+        + ([] if extra_edges is None else [extra_edges(w)]),
         columns=S.EDGE_COLUMNS,
     )
     extract, out = tmp_path / "extract", tmp_path / "out"
@@ -443,6 +480,193 @@ def test_the_two_directions_are_split_and_carry_a_survival_rate(tmp_path):
     assert "no threshold is chosen" in md.lower()
 
 
+# --- every row is named ------------------------------------------------------
+
+
+def _table_counts(section: str) -> dict[str, int]:
+    """`| label | **N** | ...` rows of a markdown table -> {label: N}.
+
+    The label's backticks are stripped so the table may quote a class token
+    without the test having to know that it does.
+    """
+    out = {}
+    for ln in section.splitlines():
+        m = re.match(r"^\|\s*`?([^|`]+?)`?\s*\|\s*\*\*([\d,]+)\*\*\s*\|", ln)
+        if m:
+            out[m.group(1).strip()] = int(m.group(2).replace(",", ""))
+    return out
+
+
+def _bullet_counts(section: str) -> dict[str, int]:
+    """`- **N** `LABEL` -- ...` bullets -> {label: N}."""
+    out = {}
+    for ln in section.splitlines():
+        m = re.match(r"^\s*-\s+\*\*([\d,]+)\*\*\s+`([^`]+)`", ln)
+        if m:
+            out[m.group(2)] = int(m.group(1).replace(",", ""))
+    return out
+
+
+def _old_rule_coverage(present: pd.Series) -> int:
+    """The rows the FOUR pre-2026-08-21 classes plus the null bucket cover.
+
+    The wrong rule, computed by hand, so the tests below assert a DIFFERENCE
+    and not merely a number. `CLS_UNREACHABLE` is deliberately not in this
+    tuple: it is the class the report stopped accounting for, and a test that
+    read the class list off `_schema.CLASSES` would silently start passing the
+    moment the schema changed, which is the failure mode it is guarding.
+    """
+    four = (S.CLS_ABSENCE_LINEAGE, S.CLS_ABSENCE_COMPAT, S.CLS_ALT_LABEL,
+            S.CLS_UNRESOLVED)
+    null = sum(int(n) for cls, n in present.items() if pd.isna(cls))
+    return sum(int(present.get(c, 0)) for c in four) + null
+
+
+def test_the_reports_class_census_accounts_for_every_finding(tmp_path):
+    """THE REPORT'S OWN PER-CLASS COUNTS MUST SUM TO ITS OWN STATED TOTAL.
+
+    This is not "the report mentions `CLS_UNREACHABLE`". Task 3 added a fifth
+    classification carrying, on the 2026-08-21 real extract, 99,449 of 170,786
+    rows, and every sentence in this report that had grouped on four classes
+    went short by that whole population WITHOUT LOOKING WRONG: the MODE_2 line
+    still stated a plausible total beside two plausible terms that did not sum
+    to it. A curator reading the page met 71,337 rows named and 99,449 not.
+
+    So what is asserted is a CLOSURE property over the rendered document. Every
+    row of `findings.csv` must be inside some named term of the report's own
+    census, and the census's rows must sum to the total the census itself
+    states. A SIXTH class breaks this test without anyone having to predict it:
+    if the report ever groups on a fixed list again, the sum falls short by the
+    population of whatever the list omits.
+
+    THE WRONG RULE IS SIMULATED BY HAND and asserted to differ. Over this world
+    the four-class rule is short by exactly the unreachable population -- the
+    same relationship the real extract shows -- so the test discriminates the
+    two rules rather than merely recomputing the right one.
+    """
+    out, md = _run(tmp_path, extra_edges=unreachable_edge)
+    findings = pd.read_csv(out / "findings.csv", low_memory=False)
+    present = findings.classification.value_counts(dropna=False)
+    n_unreachable = int(present.get(S.CLS_UNREACHABLE, 0))
+    assert n_unreachable, (
+        "this world emitted no CLS_UNREACHABLE row, so nothing below can "
+        "discriminate a report that names the class from one that does not")
+
+    # the wrong rule, by hand: short, and short by exactly the new class
+    wrong = _old_rule_coverage(present)
+    assert wrong != len(findings), (
+        "the four pre-2026-08-21 classes already cover every row, so this "
+        "world cannot tell the two rules apart")
+    assert len(findings) - wrong == n_unreachable
+
+    # ...and the right answer, read back off the document the operator reads
+    section = _section(md, RD.CENSUS_HEADING)
+    counted = _table_counts(section)
+    assert counted, f"the census section publishes no table:\n{section}"
+    assert sum(counted.values()) == len(findings), (
+        f"the census names {sum(counted.values()):,} rows and `findings.csv` "
+        f"holds {len(findings):,}; {len(findings) - sum(counted.values()):,} "
+        "row(s) are in no term on the page")
+    assert f"**{len(findings):,}**" in section, (
+        "the census never states the total its own rows are supposed to sum to")
+
+    # every class the FRAME carries is named with the count the frame holds
+    for cls, n in present.items():
+        label = RD.NO_CLASS if pd.isna(cls) else str(cls)
+        assert counted.get(label) == int(n), (
+            f"the census gives {label} {counted.get(label)!r} where the frame "
+            f"holds {int(n)}")
+    # ...and every class the VOCABULARY carries is named even at zero, because a
+    # class printed only when nonzero reads exactly like one never measured
+    for cls in S.CLASSES:
+        assert cls in counted, f"{cls} is absent from the census entirely"
+
+
+def test_the_mode_2_breakdown_sums_to_the_proposal_total_it_states(tmp_path):
+    """The site the shortfall shipped on: `- proposals: N -- a and b`.
+
+    Before this task that line read "**167,454** proposals -- **67,898**
+    corroborated by a lineage neighbour and **107** by co-registration alone".
+    68,005 against a stated 167,454, with no term for the difference. The two
+    terms were also taken off the WHOLE frame rather than off MODE_2's own
+    rows, so they were a subdivision of a population they had not been measured
+    over.
+
+    Both are asserted here: the breakdown is measured on MODE_2's rows, and its
+    terms sum to the total the same line states.
+    """
+    out, md = _run(tmp_path, extra_edges=unreachable_edge)
+    findings = pd.read_csv(out / "findings.csv", low_memory=False)
+    m2 = findings[findings["mode"] == S.MODE_2]
+    present = m2.classification.value_counts(dropna=False)
+    n_unreachable = int(present.get(S.CLS_UNREACHABLE, 0))
+    assert n_unreachable, "MODE_2 emitted no unreachable row in this world"
+    # the wrong rule, by hand, at this site
+    assert len(m2) - _old_rule_coverage(present) == n_unreachable
+
+    # THE PREAMBLE ONLY. `_section` stops at the next heading of the SAME level
+    # or higher, so the `## MODE_2` section swallows the `###` ceiling and
+    # survival subsections and their figures, which are not terms of this
+    # total. The rule below is about the headline and its own breakdown.
+    head = _section(md, S.MODE_2).split("\n###")[0]
+    figures = _bolded_ints(head)
+    assert figures, f"the MODE_2 section states no proposal count:\n{head}"
+    total, terms = figures[0], figures[1:]
+    assert total == len(m2), (
+        f"the MODE_2 headline states {total:,} proposals and the frame holds "
+        f"{len(m2):,}")
+    assert sum(terms) == total, (
+        f"the MODE_2 headline states {total:,} proposals and breaks them into "
+        f"terms summing to {sum(terms):,}, short by {total - sum(terms):,}; "
+        f"MODE_2 carries {n_unreachable:,} {S.CLS_UNREACHABLE} row(s)")
+
+    # ...and each term is ATTRIBUTED to the class it counts, so a reader can
+    # tell which population the shortfall would have been in
+    named = _bullet_counts(head)
+    for cls, n in present.items():
+        label = RD.NO_CLASS if pd.isna(cls) else str(cls)
+        assert named.get(label) == int(n), (
+            f"MODE_2 carries {int(n)} {label} row(s) and the breakdown says "
+            f"{named.get(label)!r}")
+
+
+def test_the_survival_table_covers_every_directioned_row_and_says_so(tmp_path):
+    """The curve's population is STATED, not left for a reader to assume.
+
+    The table was built over `CLS_ABSENCE_LINEAGE` alone, so after Task 3 it
+    described 67,898 of the 167,347 rows a lineage neighbour raised while
+    sitting under a heading that names neither number. Unreachable rows are
+    lineage-derived -- they carry a direction and a precedent rate -- so they
+    belong in it; what was missing was any sentence saying which rows are in.
+
+    Asserted as a relationship: every row carrying one of the two directions is
+    in the curve's denominator, and the section names the class rather than
+    leaving its inclusion to be inferred from a total.
+    """
+    out, md = _run(tmp_path, extra_edges=unreachable_edge)
+    findings = pd.read_csv(out / "findings.csv", low_memory=False)
+    directioned = findings[findings.action.isin((S.A_ADD_PARENT, S.A_ADD_CHILD))]
+    assert int((directioned.classification == S.CLS_UNREACHABLE).sum()), (
+        "no unreachable row carries a direction in this world")
+
+    section = _section(md, "Survival by direction")
+    # the denominator column is the whole directioned population, per direction
+    for action in (S.A_ADD_PARENT, S.A_ADD_CHILD):
+        n = int((directioned.action == action).sum())
+        if not n:
+            continue
+        assert f"| {action} |" in section, f"{action} is not in the curve"
+        assert f"| {n:,} |" in section, (
+            f"{action} covers {n:,} rows and no row of the table carries that "
+            "denominator; the curve is drawn over a subset of the population")
+    # ...and the population is named, not assumed
+    assert S.CLS_UNREACHABLE in section, (
+        "the survival section never says whether unreachable rows are in its "
+        "curve; a reader who assumes either way has no way to check")
+    assert f"**{len(directioned):,}**" in section, (
+        "the survival section states no population size")
+
+
 # --- integrity ---------------------------------------------------------------
 
 
@@ -680,8 +904,13 @@ def test_every_bolded_integer_in_the_prose_is_a_number_the_artifacts_hold(
 
     Bolding is the report's own convention for "this is a headline count", so
     the population this scans is the one the operator actually reads.
+
+    IT RUNS OVER THE WORLD WITH AN UNREACHABLE ROW IN IT, so the census table
+    and the two per-class breakdowns this task added are inside the scan rather
+    than beside it. Against the base world those sections render every class at
+    zero and the scan cannot tell a derived count from a hard-coded one.
     """
-    out, md = _run(tmp_path)
+    out, md = _run(tmp_path, extra_edges=unreachable_edge)
     findings = pd.read_csv(out / "findings.csv", low_memory=False)
     disposition = pd.read_csv(out / "mode3-disposition.csv")
     defects = pd.read_csv(out / "vocabulary-defects.csv")
@@ -712,6 +941,18 @@ def test_every_bolded_integer_in_the_prose_is_a_number_the_artifacts_hold(
     if "n_claims" in defects.columns and len(defects):
         legitimate.add(int(defects.n_claims.sum()))
         legitimate |= set(defects.groupby("defect").n_claims.sum().tolist())
+    # THE THREE PER-CLASS CENSUSES, two of which are SUBSET counts and so are
+    # unreachable from the whole-frame value_counts above. Listed rather than
+    # left to coincide: on this world every one of them is a single-digit
+    # integer that some unrelated count also holds, which is precisely the
+    # collision that makes a small fixture certify a wrong figure.
+    if len(findings):
+        directioned = findings[
+            findings.action.isin((S.A_ADD_PARENT, S.A_ADD_CHILD))]
+        legitimate.add(len(directioned))
+        for frame in (findings, findings[findings["mode"] == S.MODE_2],
+                      directioned):
+            legitimate |= set(int(n) for n in RD.classification_census(frame))
     # per-pattern sizes and the termed/untermed split, which the two pattern
     # tables and their preamble publish
     if len(findings):

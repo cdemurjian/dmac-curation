@@ -94,6 +94,121 @@ MODE_HEADINGS = {
     S.MODE_3: "MODE_3 -- no detector exists",
 }
 
+# The null classification, RENDERED and never blank, for the reason `NO_MODE`
+# is: a blank cell in a census reads as "not measured", and these rows were
+# measured. Mode 1's proposals are the population; they carry no class because
+# nothing classifies them.
+NO_CLASS = "no classification"
+
+CENSUS_HEADING = "Every finding, by classification"
+
+# What each classification SAYS, so the census names a population rather than a
+# token, and ASSERTED COMPLETE against the vocabulary that defines the tokens.
+#
+# THIS ASSERTION IS THE HALF THE REPORT CANNOT DERIVE. The census table below
+# is built from the frame's own `value_counts`, so a class that reaches a row
+# is printed whatever anyone remembered -- but a class that reaches NO row in
+# this run would still be silently absent from the page, and a class nobody
+# glossed would print an unreadable bare token. Adding a sixth class to
+# `_schema.CLASSES` without a line here fails at import rather than shipping
+# either. That is not hypothetical: `CLS_UNREACHABLE` was added on 2026-08-21
+# and every sentence in this module that had grouped on four classes went short
+# by its whole population without looking wrong.
+CLASS_GLOSS = {
+    S.CLS_ABSENCE_LINEAGE:
+        "a lineage neighbour carries the assay, and samples of this type ARE "
+        "registered in it elsewhere",
+    S.CLS_UNREACHABLE:
+        "a lineage neighbour carries the assay, but NO sample of this type is "
+        "registered in it anywhere -- the same pair the gate already refuses "
+        "when a CLAIM names one",
+    S.CLS_ABSENCE_COMPAT:
+        "no neighbour carries it; the pair co-registers on samples of this "
+        "type, so the absence is the anomaly",
+    S.CLS_ALT_LABEL:
+        "the pair NEVER co-registers on this type, so the term is a different "
+        "name for something already registered. PROPOSES NOTHING",
+    S.CLS_UNRESOLVED:
+        "neither test settles it, reported at its own size rather than folded "
+        "into a mode. PROPOSES NOTHING",
+    NO_CLASS:
+        "MODE_1's proposals, which no classifier reads: the sample is "
+        "registered in nothing, so there is no neighbour and no peer to test",
+}
+assert set(CLASS_GLOSS) == set(S.CLASSES) | {NO_CLASS}, (
+    f"CLASS_GLOSS is out of date with _schema.CLASSES: "
+    f"{set(S.CLASSES) - set(CLASS_GLOSS)} unglossed, "
+    f"{set(CLASS_GLOSS) - set(S.CLASSES) - {NO_CLASS}} unknown")
+
+# The three classes that name WHERE THE EVIDENCE CAME FROM, as against the two
+# that say no test settled the row. `_term_contrast_note` ranks terms on a
+# share of this, and it held two of the three until 2026-08-21.
+EVIDENCED = (S.CLS_ABSENCE_LINEAGE, S.CLS_UNREACHABLE, S.CLS_ABSENCE_COMPAT)
+
+
+def classification_census(findings: pd.DataFrame) -> pd.Series:
+    """Every row, by classification -> a Series summing to `len(findings)`.
+
+    BUILT FROM THE FRAME AND NOT FROM A LIST OF CLASSES THIS MODULE KNOWS
+    ABOUT, which is the whole point of it. A report that groups on a fixed
+    tuple describes the rows that tuple happens to cover and says nothing about
+    the rest; measured on the 2026-08-21 extract, that omission was 99,449 of
+    170,786 rows -- a majority of the document's subject, absent from it, with
+    every printed figure still individually correct.
+
+    So the index is whatever `value_counts(dropna=False)` finds, with three
+    additions and no subtractions:
+
+      * THE NULL BUCKET IS NAMED `NO_CLASS`, not dropped. It is Mode 1's
+        population and it is the largest thing a `dropna()` default has cost
+        this package -- three separate defects so far.
+      * EVERY CLASS IN `_schema.CLASSES` APPEARS EVEN AT ZERO, for the reason
+        `lineage.INTEGRITY_KEYS` are all printed: a population shown only when
+        nonzero reads, on a clean run, exactly like one never measured.
+      * A VALUE OUTSIDE `CLASSES` IS KEPT AND RANKED LAST rather than raising.
+        The census's job is to account for every row; a row carrying a class
+        the vocabulary has not heard of is exactly the row that must not
+        vanish.
+
+    The sum is not asserted here. It cannot fail -- the counts ARE the frame's
+    -- and a guard that cannot fail is one this branch has already had to
+    retract. What can fail is the RENDERED document, which is where
+    `test_the_reports_class_census_accounts_for_every_finding` asserts it.
+    """
+    if not len(findings):
+        return pd.Series({c: 0 for c in list(S.CLASSES) + [NO_CLASS]},
+                         dtype=int)
+    counts = findings.classification.value_counts(dropna=False)
+    out: dict[str, int] = {}
+    for value, n in counts.items():
+        out[NO_CLASS if pd.isna(value) else str(value)] = int(n)
+    for label in list(S.CLASSES) + [NO_CLASS]:
+        out.setdefault(label, 0)
+    order = list(S.CLASSES) + [NO_CLASS]
+    keys = order + [k for k in out if k not in order]
+    return pd.Series([out[k] for k in keys], index=keys, dtype=int)
+
+
+def _class_table(census: pd.Series) -> list[str]:
+    """The census as a table. ZEROS KEPT: see `classification_census`."""
+    return (["| classification | rows | what it says |", "|---|---|---|"]
+            + [f"| `{_cell(label)}` | **{n:,}** | "
+               f"{CLASS_GLOSS.get(label, 'UNGLOSSED')} |"
+               for label, n in census.items()])
+
+
+def _class_bullets(census: pd.Series) -> list[str]:
+    """The census as bullets under a mode's headline, EMPTY CLASSES DROPPED.
+
+    A zero is a measurement in the whole-document table and noise inside one
+    mode, where most classes cannot occur at all: `CLS_ALT_LABEL` proposes
+    nothing and so reaches no mode, and printing it at zero under MODE_2 would
+    invite a reader to wonder which rows it lost.
+    """
+    return [f"  - **{n:,}** `{_cell(label)}` -- "
+            f"{CLASS_GLOSS.get(label, 'UNGLOSSED')}"
+            for label, n in census.items() if n]
+
 
 def _num(v, places: int = 0) -> str:
     """A count or a rate, formatted, with nulls rendered rather than crashed on."""
@@ -247,6 +362,25 @@ def _term_contrast_note(findings: pd.DataFrame) -> list[str]:
     evidence comes from, and prints what it finds. If a future extract makes
     some other pair the sharpest example, the report says so instead of
     repeating this one.
+
+    THE DENOMINATOR IS THREE CLASSES AND WAS TWO. `CLS_UNREACHABLE` is an
+    evidence source like the other two -- a lineage neighbour carries the pair
+    and no sample of the type has ever held it -- so `lineage_share` had been a
+    share of a denominator that could be smaller than the population the same
+    table calls `rows`, and the third column was missing from a table whose
+    whole subject is where a term's evidence comes from.
+
+    ON THE 2026-08-21 ARTIFACTS THE CHANGE MOVES NOTHING, AND THAT IS A FACT
+    ABOUT THE GATE RATHER THAN A REASON TO SKIP IT. Measured on that run, 0 of
+    the 99,449 `CLS_UNREACHABLE` rows carry a `raw_value` at all -- a claim on a
+    pair with no registrations is `GATE_UNREACHABLE`, which blocks, so `PRE_GATE`
+    takes such a key before `PRE_UNREACHABLE` is reached -- and this function
+    groups only rows that have a term. The exemplar it finds is the same one it
+    found before: `TIS` / Tissue Collection (`74`), where `Bronchoalveolar
+    Lavage` is 84 lineage / 0 unreachable / 0 compat against `Granuloma`'s
+    0 / 0 / 1. The column is printed at zero rather than left out, for the
+    reason the integrity table prints its zeros, and the denominator is right
+    ahead of the run where that gate ordering changes.
     """
     f = findings[findings.raw_value.notna() & findings.classification.notna()]
     if not len(f):
@@ -254,15 +388,15 @@ def _term_contrast_note(findings: pd.DataFrame) -> list[str]:
     key = ["sample_type", "proposed_internal_assay_id",
            "proposed_internal_assay_title", "raw_value"]
     g = f.groupby(key).classification.value_counts().unstack(fill_value=0)
-    for c in (S.CLS_ABSENCE_LINEAGE, S.CLS_ABSENCE_COMPAT):
+    for c in EVIDENCED:
         if c not in g.columns:
             g[c] = 0
     g["n"] = g.sum(axis=1)
-    both = g[S.CLS_ABSENCE_LINEAGE] + g[S.CLS_ABSENCE_COMPAT]
-    g = g[both > 0]
+    evidenced = sum(g[c] for c in EVIDENCED)
+    g = g[evidenced > 0]
     if not len(g):
         return []
-    g["lineage_share"] = g[S.CLS_ABSENCE_LINEAGE] / both[both > 0]
+    g["lineage_share"] = g[S.CLS_ABSENCE_LINEAGE] / evidenced[evidenced > 0]
 
     best, best_score = None, 0.0
     for pair, sub in g.groupby(level=[0, 1, 2]):
@@ -286,15 +420,27 @@ def _term_contrast_note(findings: pd.DataFrame) -> list[str]:
         "",
         f"On `{stype}` / {title} (`{iaid}`), the terms do not agree about where",
         "their evidence comes from. Keyed only on (sample type, proposed",
-        f"assay), all {total:,} rows collapse into ONE pattern carrying both",
-        "classes and describing neither population:",
+        f"assay), all {total:,} rows collapse into ONE pattern carrying every",
+        "class below and describing none of the populations:",
         "",
-        "| term | rows | corroborated by a neighbour | on co-registration alone |",
-        "|---|---|---|---|",
+        "| term | rows | reachable neighbour | unreachable pair | "
+        "co-registration alone |",
+        "|---|---|---|---|---|",
         f"| `{_cell(hi_term)}` | {_num(hi['n'])} | "
-        f"{_num(hi[S.CLS_ABSENCE_LINEAGE])} | {_num(hi[S.CLS_ABSENCE_COMPAT])} |",
+        f"{_num(hi[S.CLS_ABSENCE_LINEAGE])} | {_num(hi[S.CLS_UNREACHABLE])} | "
+        f"{_num(hi[S.CLS_ABSENCE_COMPAT])} |",
         f"| `{_cell(lo_term)}` | {_num(lo['n'])} | "
-        f"{_num(lo[S.CLS_ABSENCE_LINEAGE])} | {_num(lo[S.CLS_ABSENCE_COMPAT])} |",
+        f"{_num(lo[S.CLS_ABSENCE_LINEAGE])} | {_num(lo[S.CLS_UNREACHABLE])} | "
+        f"{_num(lo[S.CLS_ABSENCE_COMPAT])} |",
+        "",
+        "`unreachable pair` is a lineage neighbour carrying an assay NO sample",
+        "of this type is registered in anywhere. It is a third evidence source",
+        "and not a subdivision of the first, and it is in the denominator these",
+        "terms are ranked on. It is printed even where it is zero everywhere,",
+        "which is the usual case and has a cause: a row on an unreachable pair",
+        "is raised by a neighbour and carries no term of its own, so it cannot",
+        "reach a table keyed on the term. A zero here is that fact, not an",
+        "omission.",
         "",
         "The two rest on different evidence and a curator would rule on them",
         "differently. NOTE what this is NOT: their co-registration RATES are",
@@ -537,6 +683,35 @@ def build_report(findings: pd.DataFrame,
         "",
     ]
 
+    # --- every row, named ----------------------------------------------------
+    # THE CLOSURE THE REST OF THE DOCUMENT IS CHECKED AGAINST. Every section
+    # below groups on something -- a mode, a direction, a term -- and a grouping
+    # can only describe the rows its own key covers. This one is built from the
+    # frame's own classification column, so it covers all of them by
+    # construction and a reader can bound what any later omission could be.
+    census = classification_census(findings)
+    lines += [
+        f"## {CENSUS_HEADING}",
+        "",
+        f"Every one of `findings.csv`'s **{n_findings:,}** rows is in exactly",
+        "one row of this table, and the table is built from the frame's own",
+        "`classification` column rather than from a list of classes this",
+        "report knows about. THAT DISTINCTION IS NOT DECORATIVE. On 2026-08-21",
+        "a fifth class was added and every sentence here that had grouped on",
+        "four went short by its entire population while every figure it",
+        "printed stayed individually correct -- the MODE_2 headline stated a",
+        "true total beside two true terms that did not sum to it, and the",
+        "difference had no name on the page.",
+        "",
+    ] + _class_table(census) + [
+        "",
+        "A class carrying no row in this run is printed at **0** rather than",
+        "omitted, for the reason the integrity table at the foot of this file",
+        "prints its zeros: a population shown only when it is nonzero reads,",
+        "on a clean run, exactly like one that was never measured.",
+        "",
+    ]
+
     # --- mode 1 -------------------------------------------------------------
     m1 = findings[findings["mode"] == S.MODE_1] if n_findings else findings
     lines += [
@@ -583,14 +758,23 @@ def build_report(findings: pd.DataFrame,
     ]
 
     # --- mode 2 -------------------------------------------------------------
+    # THE BREAKDOWN IS MEASURED ON MODE_2'S OWN ROWS and it used to be measured
+    # on the whole frame -- two `classes.get(...)` reads presented as a
+    # subdivision of a population they had never been counted over. They agreed
+    # on the 2026-08-21 extract, which is what let the wrong denominator live:
+    # a subdivision that happens to be right is not a subdivision.
+    m2 = findings[findings["mode"] == S.MODE_2] if n_findings else findings
+    m2_census = classification_census(m2)
     lineage_rows = int(classes.get(S.CLS_ABSENCE_LINEAGE, 0))
-    compat_rows = int(classes.get(S.CLS_ABSENCE_COMPAT, 0))
+    unreachable_rows = int(classes.get(S.CLS_UNREACHABLE, 0))
+    lineage_derived = lineage_rows + unreachable_rows
     lines += [
         f"## {MODE_HEADINGS[S.MODE_2]}",
         "",
-        f"- proposals: **{_mode(S.MODE_2):,}** -- "
-        f"**{lineage_rows:,}** corroborated by a lineage neighbour and "
-        f"**{compat_rows:,}** by co-registration alone",
+        f"- proposals: **{_mode(S.MODE_2):,}**, and the "
+        f"{int((m2_census > 0).sum())} term(s) below are the whole of that "
+        "count rather than a selection from it:",
+    ] + _class_bullets(m2_census) + [
         "",
         "**Nothing was written:** every row is a proposal awaiting operator",
         "approval, at every rate below.",
@@ -622,12 +806,31 @@ def build_report(findings: pd.DataFrame,
         "",
     ]
     if n_findings:
-        gap = int(ceiling["union_rows"]) - lineage_rows
+        # BOTH LINEAGE CLASSES COME OFF THE CEILING, and subtracting only the
+        # reachable one made this paragraph false rather than merely narrow:
+        # on the 2026-08-21 extract it read "104,440 of the ceiling reached no
+        # finding. That difference is exactly the rows the gate refused plus
+        # the rows Mode 1 claimed first", which the same run prints as 4,242
+        # and 749. The sentence was arithmetic about a number that had stopped
+        # denoting what its name said -- see `classify.FINDINGS_CENSUS_KEYS`,
+        # which records that `keys_lineage` is now the REACHABLE half only.
+        #
+        # These two counts stay WHOLE-FRAME, unlike the headline breakdown
+        # above. The identity here is against the lineage LANE's ceiling, so
+        # the term is every row the lane produced wherever it landed, and
+        # `lineage_taken_by_mode_1` is already subtracted separately. The two
+        # readings coincide today -- a Mode 1 row carries no classification at
+        # all -- and the ceiling is the one that would still be right if they
+        # ever stopped coinciding.
+        gap = int(ceiling["union_rows"]) - lineage_derived
         lines += [
             "**The ceiling is not what was emitted, and the gap is the point of",
             "the word.** The union above is "
-            f"{ceiling['union_rows']:,} rows; Mode 2 emitted {lineage_rows:,} "
-            f"lineage-corroborated rows, so {gap:,} of the ceiling reached no",
+            f"{ceiling['union_rows']:,} rows; Mode 2 emitted "
+            f"{lineage_derived:,} rows a lineage neighbour raised -- "
+            f"{lineage_rows:,} on a pair samples of the type do hold elsewhere "
+            f"and {unreachable_rows:,} on a pair none of them ever has -- so "
+            f"{gap:,} of the ceiling reached no",
             "finding. That difference is exactly the rows the vocabulary gate",
             "refused plus the rows Mode 1 claimed first -- a key the gate",
             "rejects reaches NO mode even where a neighbour carries the pair,",
@@ -639,12 +842,38 @@ def build_report(findings: pd.DataFrame,
             "",
         ]
 
-    lin = findings[findings.classification == S.CLS_ABSENCE_LINEAGE] \
+    # THE POPULATION IS EVERY ROW CARRYING A DIRECTION, and it was
+    # `CLS_ABSENCE_LINEAGE` alone. `precedent_survival` keys on `action`, so a
+    # row with no direction cannot enter the curve whatever is handed in --
+    # which means the filter was never what SELECTED the population, only what
+    # SHRANK it. On the 2026-08-21 extract it shrank a 167,347-row curve to
+    # 67,898 under a heading naming neither number.
+    directioned = findings[
+        findings.action.isin((S.A_ADD_PARENT, S.A_ADD_CHILD))] \
         if n_findings else findings
-    if len(lin):
-        survival = M2.precedent_survival(lin)
+    if len(directioned):
+        survival = M2.precedent_survival(directioned)
+        d_census = classification_census(directioned)
         lines += [
             "### Survival by direction -- a READING ORDER, never a permission",
+            "",
+            f"The population is **{len(directioned):,}** rows: every finding",
+            "carrying a DIRECTION, which is every row a lineage neighbour",
+            "raised and no other, since only a lineage row has a parent or a",
+            "child to add. THE CLASSES IN IT ARE NAMED RATHER THAN LEFT TO BE",
+            "INFERRED FROM THE TOTAL:",
+            "",
+        ] + _class_bullets(d_census) + [
+            "",
+            f"`{S.CLS_UNREACHABLE}` IS IN THIS CURVE AND THAT IS A DECISION.",
+            "Those rows are lineage-derived, carry a direction and carry a",
+            "precedent rate, so the rate means the same thing for them as for",
+            "any other row here and excluding them would publish a curve over a",
+            "minority of the population under a heading that names no",
+            "population at all. What their rate does NOT carry is the",
+            "reachability finding itself -- no sample of the type has ever held",
+            "the proposed assay -- and no threshold in this table reads that.",
+            "Read the class before the rate.",
             "",
             "The two directions are never pooled. At equal precedent rate they",
             "recover almost identically; what separates them is the bulk band,",
