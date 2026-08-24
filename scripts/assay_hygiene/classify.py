@@ -531,12 +531,22 @@ def mode1_findings(
     attached: pd.DataFrame,
     population,
     projects: dict[int, str],
+    *,
+    fallback_assay_ids: set[int],
 ) -> pd.DataFrame:
     """One row per (unregistered sample, proposed assay). Nothing is decided.
 
     The population is `unregistered_samples`' output and is passed in rather than
     re-derived, so this function cannot hold a second opinion about which samples
     are registered.
+
+    `fallback_assay_ids` IS REQUIRED, KEYWORD-ONLY AND HAS NO DEFAULT, for the
+    reason `mode2_findings.assay_pop` has none. An empty set is a LEGAL value
+    meaning "every assay record has a junction row", so a default would not
+    raise on a caller who forgot it -- it would silently report `internal` on
+    every row, which is precisely the wrong answer `id_namespace` exists to
+    stop. It comes from `precedent.fallback_assay_ids`; this lane does not
+    derive one, so it cannot hold a second opinion about that either.
 
     THE GATE RUNS FIRST and passage is `gate.reaches_modes`, read off
     `gate_failures`. A claim failing reachability or coherence reaches no row,
@@ -600,6 +610,7 @@ def mode1_findings(
         if sample_id not in pop:
             continue
         stype = str(c.sample_type)
+        assay_id = int(c.internal_assay_id)
         rows.append({
             "sample_id": sample_id,
             "uuid": c.uuid,
@@ -608,8 +619,9 @@ def mode1_findings(
             # measured, and empty. Never null: see the docstring.
             "registered_internal_assay_ids": "",
             "registered_internal_assay_titles": "",
-            "proposed_internal_assay_id": int(c.internal_assay_id),
+            "proposed_internal_assay_id": assay_id,
             "proposed_internal_assay_title": c.internal_assay_title,
+            "id_namespace": S.id_namespace(assay_id, fallback_assay_ids),
             "mode": S.MODE_1,
             "classification": None,
             "gate": c.gate,
@@ -1153,6 +1165,7 @@ def compat_findings(
     table: dict[tuple[str, int, int], tuple[float, int]],
     titles: dict[int, str],
     projects: dict[int, str],
+    fallback_assay_ids: set[int],
 ) -> pd.DataFrame:
     """One row per key the co-registration step claims. Nothing is decided.
 
@@ -1168,7 +1181,10 @@ def compat_findings(
     KEYWORD-ONLY, for the reason `mode2_findings` gives at eleven arguments:
     `titles` and `projects` are both `dict[int, str]` and `registered` is
     `dict[int, set[int]]`, so a positional call could transpose two of them and
-    produce a populated, wrong frame with no error.
+    produce a populated, wrong frame with no error. `fallback_assay_ids` is
+    required and has no default on the argument `mode1_findings` gives: an
+    empty set is legal, so a default would answer `internal` on every row
+    rather than raising on the caller who forgot it.
 
     `BAND_ESTABLISHES` OWNS THE MAPPING FROM BAND TO CLASS and `CLASS_PROPOSAL`
     owns the mapping from class to (mode, action). Neither is restated here:
@@ -1221,6 +1237,7 @@ def compat_findings(
             "registered_internal_assay_titles": reg_titles,
             "proposed_internal_assay_id": assay_id,
             "proposed_internal_assay_title": titles.get(assay_id),
+            "id_namespace": S.id_namespace(assay_id, fallback_assay_ids),
             "mode": mode,
             "classification": cls,
             "gate": c.gate,
@@ -1878,7 +1895,13 @@ def main(extract_dir: str = "assay-hygiene/extract",
     gated = G.gate_claims(claims, vocab, type_reg, types)
     attached = attach_gate(claims, gated)
     population = unregistered_samples(samples, membership, assays)
-    findings = mode1_findings(attached, population, project_index(samples))
+    # ONE fallback set, BOUND ONCE and handed to all three emitting lanes, for
+    # the reason `types` above is bound once: three separately-derived copies
+    # would be three answers to "which of these ids is a raw seek id", and the
+    # lanes write that answer into one column of one artifact.
+    fallback = B.fallback_assay_ids(assays)
+    findings = mode1_findings(attached, population, project_index(samples),
+                              fallback_assay_ids=fallback)
     census = mode1_census(attached, population, findings)
 
     print(f"MODE 1 over {len(samples):,} sample records and "
@@ -1911,6 +1934,7 @@ def main(extract_dir: str = "assay-hygiene/extract",
         assay_pop=M2.assay_population(membership, assays),
         titles=M2.assay_titles(assays),
         projects=project_index(samples),
+        fallback_assay_ids=fallback,
     )
     ceiling = L.mode2_ceiling(children_of, parents_of, registered)
     m2census = M2.mode2_census(m2, ceiling, attached)
@@ -1954,7 +1978,7 @@ def main(extract_dir: str = "assay-hygiene/extract",
     compat = compat_findings(
         attached, steps=steps, registered=registered,
         table=CP.co_registration(membership, assays, nodes),
-        titles=titles, projects=projects)
+        titles=titles, projects=projects, fallback_assay_ids=fallback)
     lanes = {
         PRE_MODE_1: findings,
         PRE_LINEAGE: m2,

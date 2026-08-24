@@ -372,10 +372,41 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 #   count is not, so reading the rate would make the answer depend on
 #   `precedent_direction`. Redundant with the count on purpose: the count is
 #   the evidence and this is the one predicate a filter can hold.
+# `id_namespace` says which id space `proposed_internal_assay_id` speaks, and
+#   it is the row's own answer to this package's signature failure. 17 SEEK
+#   assay records have no junction row and `precedent.assay_index` falls back
+#   to their own `assays.id`, deliberately and documented there -- so a column
+#   spelled `proposed_internal_assay_id` holds a raw SEEK id on some rows.
+#   Measured 2026-08-24, 1,321 of the 170,786 rows, over 8 of the 17.
+#
+#   NEITHER JOIN IS SAFE WITHOUT IT, and they fail in opposite directions. A
+#   consumer joining the column against `dmac.internal_assays` silently DROPS
+#   those 1,321. One joining it against `seek_production.assays` is worse than
+#   short: measured 2026-08-24, 162,370 of the other 169,465 rows carry an
+#   internal id that numerically collides with some seek `assays.id` -- 87
+#   distinct ids do -- so the join SUCCEEDS and returns the wrong assay record,
+#   and only the remaining 7,095 fail to match at all. A frame that looks right
+#   in both cases, and in the second one it is populated and wrong, which is
+#   this package's named failure class exactly.
+#
+#   IT DESCRIBES THE PROPOSED ID AND NOTHING ELSE ON THE ROW.
+#   `registered_internal_assay_ids` is resolved through the same fallback and
+#   can carry one too; it is a `;`-joined SET, so one scalar cannot describe it
+#   and a second column would be needed to. The proposed id is the one the
+#   write path resolves, which is why this one exists first.
+#
+#   `ID_NAMESPACES` is the vocabulary and `id_namespace` below is the one place
+#   the value is chosen. The SET it is chosen against is
+#   `precedent.fallback_assay_ids`, the package's single definition of "this
+#   record has no junction row", and every lane is HANDED it rather than
+#   deriving one -- a lane holding its own opinion about which ids are
+#   junction-less is the same class of defect as a second definition of
+#   "registered".
 FINDING_COLUMNS = [
     "sample_id", "uuid", "sample_type", "project_ids",
     "registered_internal_assay_ids", "registered_internal_assay_titles",
     "proposed_internal_assay_id", "proposed_internal_assay_title",
+    "id_namespace",
     "mode", "classification", "gate",
     "claim_tier", "contested", "source_field", "raw_value",
     "vocab_support", "vocab_purity", "vocab_provenance", "type_registrations",
@@ -388,6 +419,43 @@ FINDING_COLUMNS = [
     "precedent_supports",
     "proposed_by", "evidence_summary", "action",
 ]
+
+# The two id spaces `proposed_internal_assay_id` can hold, as the values
+# `FINDING_COLUMNS.id_namespace` takes. `NS_INTERNAL` is a dmac
+# `internal_assays`.id and `NS_SEEK_FALLBACK` is a raw seek_production
+# `assays`.id, standing in for one of the 17 records with no junction row.
+NS_INTERNAL = "internal"
+NS_SEEK_FALLBACK = "seek_fallback"
+ID_NAMESPACES = (NS_INTERNAL, NS_SEEK_FALLBACK)
+
+
+def id_namespace(assay_id, fallback: set[int]) -> str:
+    """Which id space `assay_id` speaks. One of `ID_NAMESPACES`.
+
+    THE ONE PLACE THE VALUE IS CHOSEN, and it lives here rather than in each of
+    the three emitting lanes because a one-line ternary copied three times is
+    how two of them end up disagreeing after an edit -- the same argument
+    `precedent.fallback_assay_ids` makes about the predicate it owns, one level
+    down.
+
+    `fallback` IS THE CALLER'S AND IS NOT DERIVED HERE. It comes from
+    `precedent.fallback_assay_ids`, the package's single definition of "this
+    record has no junction row", and this function is deliberately unable to
+    build one: a module that could would be a second opinion about which ids
+    are junction-less, which is exactly the class of defect the column exists
+    to expose. An EMPTY set is therefore a legal answer meaning "every record
+    is junctioned", and the lanes take theirs as a required argument so that no
+    default can quietly supply one.
+
+    `int()` GUARDS A STRING AND NOT A NUMPY SCALAR. `np.int64(490) in {490}` is
+    True and so is `np.float64(490.0) in {490}` -- numpy integers hash equal to
+    Python ints -- so the coercion buys nothing there. What it buys is the
+    round-trip: an id read back out of `findings.csv` or handed in from a
+    hand-built frame can arrive as `"490"`, which matches nothing in the set
+    and would report every row `internal` with no error at all.
+    """
+    return NS_SEEK_FALLBACK if int(assay_id) in fallback else NS_INTERNAL
+
 
 # --- emit (stage E) ----------------------------------------------------------
 # Increment 3's contract, with no consumer anywhere in the tree. `decided_by`

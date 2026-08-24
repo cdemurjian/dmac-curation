@@ -284,8 +284,9 @@ def _pipeline(w=None):
                           G.sample_type_index(w["nodes"]))
     attached = X.attach_gate(claims, gated)
     population = X.unregistered_samples(w["samples"], w["membership"], w["assays"])
-    findings = X.mode1_findings(attached, population,
-                                X.project_index(w["samples"]))
+    findings = X.mode1_findings(
+        attached, population, X.project_index(w["samples"]),
+        fallback_assay_ids=P.fallback_assay_ids(w["assays"]))
     return w, claims, gated, attached, population, findings
 
 
@@ -658,7 +659,7 @@ def test_the_project_column_carries_every_project_a_sample_holds_deduped_and_sor
 
 
 def test_the_finding_frame_is_exactly_the_shared_contract_and_is_totally_sorted():
-    """`FINDING_COLUMNS`, all 37, in order, sorted on BOTH keys of the grain.
+    """`FINDING_COLUMNS`, all 38, in order, sorted on BOTH keys of the grain.
 
     A curator diffs this artifact between runs and the claims frame arrives in
     whatever order the extractor wrote `samples.parquet`, an order
@@ -677,7 +678,7 @@ def test_the_finding_frame_is_exactly_the_shared_contract_and_is_totally_sorted(
     """
     _, _, _, attached, population, findings = _pipeline()
     assert list(findings.columns) == S.FINDING_COLUMNS
-    assert len(S.FINDING_COLUMNS) == 37
+    assert len(S.FINDING_COLUMNS) == 38
     # one row per (sample, proposed assay), which is the grain the writer takes
     assert not findings.duplicated(
         ["sample_id", "proposed_internal_assay_id"]).any()
@@ -1501,6 +1502,9 @@ def _pipeline2(w=None):
         assay_pop=M2.assay_population(w["membership"], w["assays"]),
         titles=M2.assay_titles(w["assays"]),
         projects=X.project_index(w["samples"]),
+        # a property of the ASSAYS frame and of nothing else, so it is not one
+        # of the indexes a test blinds -- see `mode2_findings`
+        fallback_assay_ids=P.fallback_assay_ids(w["assays"]),
     )
     return w, bundle, M2.mode2_findings(attached, **bundle)
 
@@ -2050,11 +2054,11 @@ def test_mode_2_asserts_nothing_about_the_co_registration_test_it_never_ran():
 
 
 def test_the_mode_2_frame_is_the_shared_contract_and_is_totally_sorted():
-    """`FINDING_COLUMNS`, all 37, in order, sorted on both keys of the grain."""
+    """`FINDING_COLUMNS`, all 38, in order, sorted on both keys of the grain."""
     w, bundle, findings = _pipeline2()
 
     assert list(findings.columns) == S.FINDING_COLUMNS
-    assert len(S.FINDING_COLUMNS) == 37
+    assert len(S.FINDING_COLUMNS) == 38
     assert not findings.duplicated(
         ["sample_id", "proposed_internal_assay_id"]).any()
 
@@ -2624,8 +2628,9 @@ def test_the_real_extract_reproduces_mode_1s_population_before_and_after_the_gat
     gated = G.gate_claims(r["claims"], r["vocabulary"], type_reg,
                           G.sample_type_index(r["nodes"]))
     attached = X.attach_gate(r["claims"], gated)
-    findings = X.mode1_findings(attached, population,
-                                X.project_index(r["samples"]))
+    findings = X.mode1_findings(
+        attached, population, X.project_index(r["samples"]),
+        fallback_assay_ids=P.fallback_assay_ids(r["assays"]))
     census = X.mode1_census(attached, population, findings)
 
     # BEFORE the gate
@@ -2730,6 +2735,7 @@ def test_the_real_extract_reproduces_the_ceiling_and_both_directions_separately(
         assay_pop=M2.assay_population(r["membership"], r["assays"]),
         titles=M2.assay_titles(r["assays"]),
         projects=X.project_index(r["samples"]),
+        fallback_assay_ids=P.fallback_assay_ids(r["assays"]),
     )
     census = M2.mode2_census(findings, ceiling, X.attach_gate(r["claims"], gated))
 
@@ -3052,7 +3058,9 @@ def _pipeline3(w=None):
                           registered=registered, candidates=candidates,
                           type_reg=type_reg, types=types, uuid_of=uuid_of)
     steps = X.precedence_steps(keys)
-    m1 = X.mode1_findings(attached, population, projects)
+    fallback = P.fallback_assay_ids(w["assays"])
+    m1 = X.mode1_findings(attached, population, projects,
+                          fallback_assay_ids=fallback)
     m2 = M2.mode2_findings(
         attached, children_of=children_of, parents_of=parents_of,
         uuid_of=uuid_of, registered=registered,
@@ -3060,9 +3068,10 @@ def _pipeline3(w=None):
         reg_projects=M2.registration_projects(w["membership"], w["assays"]),
         types=types, type_reg=type_reg,
         assay_pop=M2.assay_population(w["membership"], w["assays"]),
-        titles=titles, projects=projects)
+        titles=titles, projects=projects, fallback_assay_ids=fallback)
     compat = X.compat_findings(attached, steps=steps, registered=registered,
-                               table=table, titles=titles, projects=projects)
+                               table=table, titles=titles, projects=projects,
+                               fallback_assay_ids=fallback)
     lanes = {X.PRE_MODE_1: m1, X.PRE_LINEAGE: m2, X.PRE_UNREACHABLE: m2,
              X.PRE_COMPAT: compat, X.PRE_MODE_3: X.mode3_findings()}
     findings = X.unify_findings(steps, lanes)
@@ -3073,7 +3082,12 @@ def _pipeline3(w=None):
                "candidates": candidates, "population": population,
                "keys": keys, "steps": steps, "table": table, "titles": titles,
                "projects": projects, "lanes": lanes, "findings": findings,
-               "census": census}
+               "census": census,
+               # the lineage indexes, so a test re-running ONE lane with a
+               # perturbed argument does it from the same objects this pipeline
+               # used rather than rebuilding them and comparing two worlds
+               "children_of": children_of, "parents_of": parents_of,
+               "uuid_of": uuid_of, "types": types, "type_reg": type_reg}
 
 
 def _key_step(parts, sample_id, assay_id):
@@ -3797,7 +3811,7 @@ def test_the_unified_frame_is_the_shared_contract_totally_sorted_and_one_row_per
     findings = parts["findings"]
 
     assert list(findings.columns) == S.FINDING_COLUMNS
-    assert len(S.FINDING_COLUMNS) == 37
+    assert len(S.FINDING_COLUMNS) == 38
     keys = list(zip(findings.sample_id, findings.proposed_internal_assay_id))
     assert len(keys) == len(set(keys))
     assert keys == sorted(keys)
@@ -3809,6 +3823,62 @@ def test_the_unified_frame_is_the_shared_contract_totally_sorted_and_one_row_per
         ignore_index=True)
     raw = list(zip(unsorted.sample_id, unsorted.proposed_internal_assay_id))
     assert raw != sorted(raw), "the lanes must arrive unsorted or this is vacuous"
+
+
+def test_every_lane_names_the_id_space_and_reads_it_off_the_fallback_set():
+    """`id_namespace` on all four lanes, and it is an ARGUMENT and not a guess.
+
+    `_world3` HAS NO JUNCTION-LESS RECORD, which is read off the world below
+    rather than assumed, so every row it emits is honestly `internal` -- and an
+    assertion that only ever sees `internal` would pass on three lanes that
+    hard-coded the string. So each emitting lane is RE-RUN against a fallback
+    set naming an assay it actually proposes, and every row of that assay must
+    flip. A lane ignoring the argument fails; a lane reading it cannot.
+
+    The junction-less case itself, and the two joins the column exists to stop
+    from failing silently, are in
+    `tests/test_assay_hygiene_mode2.py::test_every_row_names_the_id_space_its_proposed_assay_lives_in`,
+    over `_world2`, which has one.
+    """
+    w, parts = _pipeline3()
+    findings = parts["findings"]
+
+    assert P.fallback_assay_ids(w["assays"]) == set(), (
+        "_world3 junctions every assay; this test's premise is that world")
+    assert set(findings.id_namespace) == {S.NS_INTERNAL}
+    assert findings.id_namespace.notna().all()
+
+    # THE SAME THREE LANES, WITH 12 DECLARED A FALLBACK ID. Mode 1, the lineage
+    # lane and the compatibility lane each propose 12 in this world, so one
+    # perturbation discriminates all three at once.
+    m1 = X.mode1_findings(parts["attached"], parts["population"],
+                          parts["projects"], fallback_assay_ids={12})
+    m2 = M2.mode2_findings(
+        parts["attached"], children_of=parts["children_of"],
+        parents_of=parts["parents_of"], uuid_of=parts["uuid_of"],
+        registered=parts["registered"],
+        rules=M2.precedent_rules(w["precedent"]),
+        reg_projects=M2.registration_projects(w["membership"], w["assays"]),
+        types=parts["types"], type_reg=parts["type_reg"],
+        assay_pop=M2.assay_population(w["membership"], w["assays"]),
+        titles=parts["titles"], projects=parts["projects"],
+        fallback_assay_ids={12})
+    compat = X.compat_findings(
+        parts["attached"], steps=parts["steps"], registered=parts["registered"],
+        table=parts["table"], titles=parts["titles"],
+        projects=parts["projects"], fallback_assay_ids={12})
+
+    for name, lane in (("mode 1", m1), ("lineage", m2), ("compat", compat)):
+        marked = set(lane.proposed_internal_assay_id[
+            lane.id_namespace == S.NS_SEEK_FALLBACK])
+        assert marked == {12}, f"the {name} lane did not read its fallback set"
+        assert set(lane.proposed_internal_assay_id[
+            lane.id_namespace == S.NS_INTERNAL]) == \
+            set(lane.proposed_internal_assay_id) - {12}
+
+    # Mode 3 emits no row, and carries the column anyway: a mode absent from
+    # the contract reads as a mode nobody ran
+    assert "id_namespace" in X.mode3_findings().columns
 
 
 def test_precedent_supports_is_null_on_every_lane_that_reads_no_rule():
@@ -4100,7 +4170,9 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
         r"(?:MODE 1|LINEAGE|UNREACHABLE|COMPAT|MODE 3) +([\d,]+)", flat)
     assert [int(g.replace(",", "")) for g in table_claim] == moved
 
-    m1 = X.mode1_findings(attached, population, projects)
+    fallback = P.fallback_assay_ids(r["assays"])
+    m1 = X.mode1_findings(attached, population, projects,
+                          fallback_assay_ids=fallback)
     m2 = M2.mode2_findings(
         attached, children_of=children_of, parents_of=parents_of,
         uuid_of=uuid_of, registered=registered,
@@ -4109,9 +4181,10 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
         reg_projects=M2.registration_projects(r["membership"], r["assays"]),
         types=types, type_reg=type_reg,
         assay_pop=M2.assay_population(r["membership"], r["assays"]),
-        titles=titles, projects=projects)
+        titles=titles, projects=projects, fallback_assay_ids=fallback)
     compat = X.compat_findings(attached, steps=steps, registered=registered,
-                               table=table, titles=titles, projects=projects)
+                               table=table, titles=titles, projects=projects,
+                               fallback_assay_ids=fallback)
     lanes = {X.PRE_MODE_1: m1, X.PRE_LINEAGE: m2, X.PRE_UNREACHABLE: m2,
              X.PRE_COMPAT: compat, X.PRE_MODE_3: X.mode3_findings()}
     findings = X.unify_findings(steps, lanes)
@@ -4413,14 +4486,15 @@ def test_a_row_where_nothing_reached_a_population_carries_a_null_rate_not_a_meas
     and it is empty, which is exactly what makes `compat_band` read
     `BAND_NO_SUPPORT` rather than `BAND_NEVER`.
     """
-    _, parts = _pipeline3()
+    w, parts = _pipeline3()
     row = _found(parts["findings"], 600, 12)
     assert pd.notna(row.co_reg_rate) and row.co_reg_rate > 0.0, (
         "the unmutated world must measure a rate here or this proves nothing")
 
     empty = X.compat_findings(
         parts["attached"], steps=parts["steps"], registered=parts["registered"],
-        table={}, titles=parts["titles"], projects=parts["projects"])
+        table={}, titles=parts["titles"], projects=parts["projects"],
+        fallback_assay_ids=P.fallback_assay_ids(w["assays"]))
     assert len(empty) == len(parts["lanes"][X.PRE_COMPAT]) == 4
 
     got = empty[(empty.sample_id == 600)

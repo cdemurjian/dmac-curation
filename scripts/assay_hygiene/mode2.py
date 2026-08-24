@@ -664,16 +664,17 @@ def mode2_findings(
     assay_pop: dict[int, int],
     titles: dict[int, str],
     projects: dict[int, str],
+    fallback_assay_ids: set[int],
 ) -> pd.DataFrame:
     """One row per (sample, assay) a lineage neighbour holds. Nothing is decided.
 
-    ELEVEN KEYWORD-ONLY INDEXES, and the keyword is the guard. Five of them are
+    TWELVE KEYWORD-ONLY INDEXES, and the keyword is the guard. Five of them are
     `dict[int, ...]` and two more are keyed on a 2-tuple, so a positional call
     could transpose `children_of` with `parents_of`, `titles` with `projects` or
     `type_reg` with `reg_projects` and get a populated, wrong frame with no
     error -- this package's named failure class, at an interface Task 8 calls.
     `lineage.py` separates its own two near-identical functions by arity for the
-    same reason; at twelve arguments only the name is left to separate them.
+    same reason; at thirteen arguments only the name is left to separate them.
 
     `assay_pop` IS REQUIRED AND HAS NO DEFAULT, which matters more than it looks.
     An empty dict is a legal population index in which EVERY assay holds zero
@@ -684,6 +685,14 @@ def mode2_findings(
     all three off `kept_rows`, and one of them built off the full membership
     would let the held-out registrations decide which lane a cold proposal lands
     in.
+
+    `fallback_assay_ids` IS REQUIRED FOR THE SAME REASON AND BLINDS TO NOTHING.
+    An empty set is legal -- it means every assay record has a junction row --
+    so a default would answer `internal` on every row and raise nothing, which
+    is the wrong answer `id_namespace` exists to stop. It is read off the
+    ASSAYS frame and never off membership, so `backtest` hands it the full one
+    beside its three blinded indexes: which records have a junction row is not
+    something a held-out registration can reveal.
 
     THE DIRECTION AND THE RATE. `lineage.neighbour_registers` returns the
     relation and names ONE neighbour, `RELATION_ACTION` turns that into the
@@ -857,6 +866,16 @@ def mode2_findings(
             "registered_internal_assay_titles": reg_titles,
             "proposed_internal_assay_id": assay_id,
             "proposed_internal_assay_title": title,
+            # THE ONE LANE THAT ACTUALLY EMITS THE OTHER NAMESPACE. All 1,321
+            # `seek_fallback` rows on the real extract are this lane's, because
+            # a fallback id reaches a row through a NEIGHBOUR's registration
+            # rather than through the vocabulary -- `gate.gate_claims` blocks a
+            # claim on a pair with no registrations, and every one of these
+            # pairs has none. It is emitted by all three lanes anyway: the
+            # column is a property of the id, not of the lane, and a lane
+            # writing null there would make "no fallback in this world"
+            # indistinguishable from "this lane never checked".
+            "id_namespace": S.id_namespace(assay_id, fallback_assay_ids),
             "mode": S.MODE_2,
             "classification": row_class,
             # the claim block, null wherever no GATED claim names this pair --

@@ -76,7 +76,7 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
     itself as `registered_internal_assay_ids`, so there is nothing for a
     tiebreak to recover later and nothing at the end to protect. The successor
     below is strictly stronger than the assertion it replaces: the old test
-    pinned two facts about one column, this one pins all 37 columns, their
+    pinned two facts about one column, this one pins all 38 columns, their
     order, and their uniqueness.
 
     THIS LINE SAID 34 while the paragraph two below it explains why the count
@@ -93,6 +93,17 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
     it is accurate as one. Nullable, because "no rule on this hop" and "a rule
     that reads never" are the two states the rest of the precedent block
     already keeps apart.
+
+    38 and not 37 the same day. `id_namespace` rides immediately behind
+    `proposed_internal_assay_id` and says which id space that value speaks:
+    1,321 of the 170,786 rows hold a raw seek `assays.id`, standing in for one
+    of the 17 records `precedent.assay_index` finds no junction row for. A
+    consumer joining the column against dmac internal ids silently drops those
+    1,321 and one joining it against seek ids silently mismatches the other
+    169,465, and both return a frame that looks right. It is the row's own
+    answer to the confusion this package's docstrings name as its signature
+    failure, and it is placed next to the id rather than at the end because it
+    qualifies that one column and nothing else.
 
     34 and not 31 since 2026-08-17. `co_reg_registered_internal_assay_id` names
     which pair the winning rate measured, and
@@ -127,6 +138,7 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
         "sample_id", "uuid", "sample_type", "project_ids",
         "registered_internal_assay_ids", "registered_internal_assay_titles",
         "proposed_internal_assay_id", "proposed_internal_assay_title",
+        "id_namespace",
         "mode", "classification", "gate",
         "claim_tier", "contested", "source_field", "raw_value",
         "vocab_support", "vocab_purity", "vocab_provenance", "type_registrations",

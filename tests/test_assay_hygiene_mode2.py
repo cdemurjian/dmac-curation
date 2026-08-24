@@ -578,3 +578,60 @@ def test_a_rule_that_has_never_once_co_registered_is_marked_unsupported():
     assert _pairs(findings[findings.precedent_supports.isna()]) == \
         _pairs(findings[findings.precedent_n_both.isna()])
 
+def test_every_row_names_the_id_space_its_proposed_assay_lives_in():
+    """`id_namespace`, and the two joins it stops from failing silently.
+
+    `_world2`'s seek record 490 has no junction row, so `assay_index` gives it
+    its OWN id as the internal one and `(430, 490)` proposes a raw SEEK
+    `assays.id` in a column spelled `proposed_internal_assay_id`. That fallback
+    is deliberate and documented -- see `precedent.assay_index` -- and until
+    now nothing on the row said which of the two id spaces the value lives in.
+
+    ON THE REAL EXTRACT IT IS 1,321 ROWS OF 170,786, measured 2026-08-24, over
+    8 of the 17 junction-less records. A consumer joining that column against
+    dmac internal ids silently drops those 1,321. One joining against SEEK ids
+    does something worse than come up short: 162,370 of the other 169,465
+    carry an internal id that numerically collides with some seek `assays.id`,
+    so the join SUCCEEDS and returns the WRONG assay, and only 7,095 miss.
+    BOTH JOINS ARE SIMULATED HERE BY HAND, so the assertion is a difference
+    between two rules rather than a restatement of one.
+
+    THE FIXTURE SHOWS THE DROP AND NOT THE COLLISION. `_world2`'s seek ids are
+    `11 + SEEK_OFFSET` and its internal ids are 11-14, chosen not to collide,
+    so the seek join here keeps only the marked row. The collision above is a
+    property of the real numbering and no world this suite builds reproduces
+    it; what both worlds share is that neither join is right without the flag.
+
+    The set comes from `precedent.fallback_assay_ids`, which is the package's
+    single definition of "this record has no junction row", and it is read off
+    the world here rather than named as a literal.
+    """
+    w, _, findings = _pipeline2()
+    fallback = B.fallback_assay_ids(w["assays"])
+    assert fallback == {490}
+
+    assert set(findings.id_namespace) <= set(S.ID_NAMESPACES)
+    # BOTH values occur, so neither branch is a dead constant in this world
+    assert set(findings.id_namespace) == {S.NS_INTERNAL, S.NS_SEEK_FALLBACK}
+
+    marked = _pairs(findings[findings.id_namespace == S.NS_SEEK_FALLBACK])
+    assert marked == {(430, 490)}
+    assert marked == _pairs(
+        findings[findings.proposed_internal_assay_id.isin(fallback)])
+
+    everything = _pairs(findings)
+    # JOIN ONE: against dmac internal ids. It drops exactly the marked rows.
+    genuine = {int(i) for i in w["assays"].internal_assay_id.dropna()}
+    assert genuine == {11, 12, 13, 14}
+    on_internal = _pairs(
+        findings[findings.proposed_internal_assay_id.isin(genuine)])
+    assert everything - on_internal == marked
+    assert len(marked) == 1, "the drop must be non-empty or this proves nothing"
+
+    # JOIN TWO: against SEEK assay ids. It keeps ONLY the marked rows and
+    # mismatches every other one -- the mirror failure, and the one that
+    # returns a populated, wrong frame rather than a short one.
+    seek = {int(a) for a in w["assays"].assay_id}
+    on_seek = _pairs(findings[findings.proposed_internal_assay_id.isin(seek)])
+    assert on_seek == marked
+    assert len(everything - on_seek) == len(everything) - len(marked) == 27

@@ -732,6 +732,12 @@ def backtest(
         assay_pop=M2.assay_population(kept_rows, assays),
         titles=M2.assay_titles(assays),
         projects=X.project_index(samples),
+        # NOT BLINDED, AND IT CANNOT BE. Which assay records have a junction
+        # row in `dmac.assays_internal_assays` is a property of the assays
+        # frame, which no split touches; holding out a registration reveals
+        # nothing about it. So this reads the FULL frame beside the three
+        # indexes above that are deliberately built off `kept_rows`.
+        fallback_assay_ids=B.fallback_assay_ids(assays),
     )
     leaked = set(findings.proposed_by) - {X.BY_PRECEDENT, X.BY_LINEAGE_ONLY}
     if leaked:
