@@ -347,6 +347,49 @@ def test_a_null_rate_row_is_excluded_rather_than_treated_as_zero():
     assert _blocks([row]) == []
 
 
+# --- what routes a BLOCKED class off the sheet: nothing --------------------
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "LATENT HAZARD, open on purpose: nothing routes a blocked class off the "
+    "review sheet. They are absent today only because an unreachable pair's "
+    "precedent rate is structurally 0.0 and the floor catches it. Closing this "
+    "is an operator-facing call -- see the docstring -- and when it closes, "
+    "strict=True turns this into an UNEXPECTED PASS so the marker cannot rot."
+))
+@pytest.mark.parametrize("blocked", [
+    S.CLS_UNREACHABLE, S.CLS_BOOTSTRAP, S.CLS_ALT_LABEL])
+def test_a_blocked_class_never_reaches_the_review_sheet(blocked):
+    """EXPECTED RED, and it is a latent hazard rather than a defect today.
+
+    `build_blocks` filters on `mode == MODE_2` and `precedent_rate >= floor`
+    and reads no `classification` column at all. The blocked classes are absent
+    from today's sheet by COINCIDENCE, not by routing: an unreachable or
+    bootstrap pair has a structurally zero precedent rate, so the floor happens
+    to catch them. Give one a non-zero rate -- which is all it takes -- and it
+    goes in front of the operator carrying a proposal the pipeline has already
+    decided against, with no gate anywhere in the path.
+
+    This is xfail rather than fixed because fixing it is NOT mechanical. The
+    same `build_blocks` is the canonical cohort keyer that
+    `tests/test_assay_hygiene_rulings.py` calls at `floor=0.0` to match the
+    operator's rulings, and routing on class there would change which cohorts
+    a ruling matches AND would make
+    `test_the_real_extract_drops_every_cohort_the_operator_rejected` pass by
+    moving a classification -- exactly what that test's docstring forbids and
+    what its `strict=True` now catches. Whoever closes this must decide where
+    the class filter belongs, and that is an operator-facing call.
+
+    When it is closed, this goes green, `strict=True` reports an UNEXPECTED
+    PASS, and the marker must be deleted deliberately.
+    """
+    row = _m2(901, "TIS-240101ENG-901", rate=0.90)
+    row["classification"] = blocked
+    assert _blocks([row]) == [], (
+        f"a {blocked} row with a 0.90 precedent rate reached the review "
+        f"sheet; nothing routes on classification")
+
+
 # --- the neighbour: the correction that cost ten rulings ---------------------
 
 
