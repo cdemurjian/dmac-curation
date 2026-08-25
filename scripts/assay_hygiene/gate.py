@@ -231,8 +231,9 @@ MIN_VOCAB_PURITY = 0.75
 # is a category error a consumer filtering on membership would trip over.
 #
 # NEITHER COLUMN DECIDES PASSAGE. `reaches_modes` does, through `blocks_mode`.
-# `gate == GATE_PASS` is not that test and using it drops 25,974 claims the
-# design intends to propose on.
+# `gate == GATE_PASS` is not that test and using it drops 18,652 claims the
+# design intends to propose on. (Re-measured 2026-08-25; it read 25,974 before
+# the four vocabulary retirements of 2026-08-21.)
 GATE_COLUMNS = [
     "sample_id", "uuid", "sample_type",
     "internal_assay_id", "internal_assay_title",

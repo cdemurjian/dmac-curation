@@ -92,7 +92,10 @@ confusion has already produced a wrong Mode 2 ceiling on this branch.
 PASSAGE IS `gate.reaches_modes`, WHICH READS `gate_failures`. Never
 `gate == GATE_PASS`: `gate` is the most severe outcome only, the two floors are
 tuned numbers that are RECORDED rather than blocking, and reading passage off
-that column drops 25,974 claims across the package and 612 Mode 1 rows.
+that column drops 18,652 claims across the package and 612 Mode 1 rows.
+(Re-measured 2026-08-25; the claim count read 25,974 before the four
+vocabulary retirements of 2026-08-21. The 612 is a Mode 1 ROW count and is
+not re-derived here.)
 
     PYTHONPATH=scripts uv run --with pandas --with pyarrow \\
         python -m assay_hygiene.classify
@@ -559,8 +562,12 @@ def mode1_findings(
     `gate` alone is lossless here, which is why `FINDING_COLUMNS` needs no
     `gate_failures`: a row that reaches a mode has no blocking failure, so its
     failure set is a subset of `{GATE_LOW_SUPPORT}` and the two columns carry the
-    same fact. 3,511 claims on the real extract fail a blocking test AND a floor
+    same fact. 3,495 claims on the real extract fail a blocking test AND a floor
     at once, and every one of them is blocked before it gets here.
+    (Re-measured 2026-08-25; it read 3,511 before the four vocabulary
+    retirements of 2026-08-21. `gate.gate_claims` carried the corrected figure
+    and these two prose sites did not, which is the partial fix the prose
+    census predicted.)
 
     A CONTESTED SAMPLE IS NOT SUPPRESSED and every candidate it names is emitted,
     each carrying the tier its OWN evidence earned. `T_CONFLICT` is retired:

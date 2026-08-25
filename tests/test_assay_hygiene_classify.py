@@ -24,7 +24,7 @@ simulates the wrong rule by hand and asserts the two answers DIFFER.
 PASSAGE IS `gate.reaches_modes` AND NEVER `gate == GATE_PASS`. The two floors are
 tuned numbers, so they are RECORDED on the row and do not block; reachability and
 coherence rest on evidence with no tuned number in them, and they do. Reading
-passage off the `gate` column instead drops 25,974 claims across the package and
+passage off the `gate` column instead drops 18,652 claims across the package and
 one row here, and
 `test_a_claim_under_a_tuned_floor_still_reaches_mode_1_carrying_its_gate_outcome`
 is the regression for it.
@@ -437,7 +437,8 @@ def test_a_claim_under_a_tuned_floor_still_reaches_mode_1_carrying_its_gate_outc
     Mode 1 carrying the weakness an operator reads.
 
     The wrong rule -- passage is `gate == GATE_PASS` -- is simulated and drops
-    this row. Across the package it drops 25,974 claims.
+    this row. Across the package it drops 18,652 claims (re-measured
+    2026-08-25; it read 25,974 before the 2026-08-21 vocabulary retirements).
     """
     _, _, _, attached, _, findings = _pipeline()
 
@@ -459,7 +460,7 @@ def test_the_gate_column_carries_every_failure_a_row_that_reaches_a_mode_can_hav
     """`FINDING_COLUMNS` has `gate` and no `gate_failures`, and that is lossless.
 
     Only here. `gate` holds the most severe outcome and `gate_failures` the
-    complete set, and 3,511 claims on the real extract fail a blocking test AND
+    complete set, and 3,495 claims on the real extract fail a blocking test AND
     a floor at once -- but every one of those is BLOCKED and reaches no finding
     row. A row that reaches a mode has no blocking failure, so its failure set is
     a subset of {GATE_LOW_SUPPORT} and the two columns are equivalent by
