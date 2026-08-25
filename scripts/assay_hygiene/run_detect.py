@@ -571,15 +571,22 @@ def build_report(findings: pd.DataFrame,
     """
     n_findings, n_flags = len(findings), len(disposition)
     cohorts = cohort_table(findings)
-    # ACTIONABLE vs EMITTED. 6,188 of the real extract's rows carry
-    # `action == NONE` and reach no mode; calling every row a proposal
-    # overstates the output by 3.5%, which the first version of this report did.
+    # ACTIONABLE vs EMITTED. Re-measured 2026-08-25, 1,959 of the real
+    # extract's rows carry `action == NONE` and reach no mode; calling every row
+    # a proposal overstates the output by 1.1%, which the first version of this
+    # report did. (It read 6,188 and 3.5% before the 2026-08-21 rework.)
     n_none = int((findings.action == "NONE").sum()) if n_findings else 0
     n_actionable = n_findings - n_none
     counts = findings["mode"].value_counts(dropna=False) if n_findings \
         else pd.Series(dtype=int)
     classes = findings.classification.value_counts(dropna=False) if n_findings \
         else pd.Series(dtype=int)
+    # The rows a lineage NEIGHBOUR anchors: Mode 2 less the compatibility lane,
+    # which proposes off co-registration and has no neighbour. Derived rather
+    # than quoted, because the literal that stood here read 167,330 against a
+    # frame holding 167,347.
+    n_neighbour = int(counts.get(S.MODE_2, 0)) - int(
+        classes.get(S.CLS_ABSENCE_COMPAT, 0))
 
     def _mode(m):
         return int(counts.get(m, 0))
@@ -657,7 +664,11 @@ def build_report(findings: pd.DataFrame,
         "coexists, so the term is an alternative label, or no test settled "
         "it). Calling all "
         f"{n_findings:,} of them proposals overstates the output by "
-        f"{n_none / n_findings:.1%}",
+        # GUARDED, like every other ratio in this function. `build_report`
+        # is reachable with an empty findings frame -- a run over an extract
+        # with no absences in it -- and this was the one site that raised
+        # ZeroDivisionError there while `if n_findings` guarded the rest.
+        f"{(n_none / n_findings) if n_findings else 0:.1%}",
         f"- `mode3-disposition.csv` -- all **{n_flags:,}** of increment 1's "
         "flags, carrying the step that now claims each one, so increment 1's "
         "output is superseded traceably rather than deleted",
@@ -690,10 +701,16 @@ def build_report(findings: pd.DataFrame,
         "",
         "The design states the rule -- in Mode 2, target the assay record the",
         "registered neighbour is already in -- and NO STAGE IN THIS INCREMENT",
-        "IMPLEMENTS IT. Measured against that rule, 166,757 of the 167,330",
-        "neighbour-anchored rows resolve to exactly one SEEK record and 573 to",
-        "two. Mode 1 has no neighbour for the rule to use at all, so its 2,166",
-        "rows are not covered by it.",
+        f"IMPLEMENTS IT. {n_neighbour:,} rows are neighbour-anchored and so "
+        "are the rows the rule would apply to; Mode 1 has no neighbour for it "
+        f"to use at all, so its **{_mode(S.MODE_1):,}** rows are not covered "
+        "by it. A one-off pass on 2026-08-21 read 166,757 of a then-167,330 "
+        "neighbour-anchored rows resolving to exactly one SEEK record and 573 "
+        "to two. THAT SPLIT IS NOT RE-DERIVED HERE and is quoted as history: "
+        "no code in this repository resolves an internal id to a SEEK record, "
+        "so nothing can keep those two numbers current. Its denominator is the "
+        "count on the left of this sentence and was 17 rows adrift by "
+        "2026-08-25, which is how it was found.",
         "",
     ]
 

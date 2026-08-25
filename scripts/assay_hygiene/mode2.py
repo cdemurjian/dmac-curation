@@ -172,12 +172,16 @@ SURVIVAL_COLUMNS = ["threshold", "action", "rows", "samples", "rule_groups",
 #     rows = rows_add_parent + rows_add_child
 #     rows = rows_with_precedent + rows_without_precedent
 #
-# `rows_with_a_blocked_claim` OVERLAPS `rows` minus `rows_proposed_by_both` and
-# partitions nothing: a rejected claim contributes NOTHING to `proposed_by`, so
-# such a row carries whatever its precedent evidence earns -- `BY_PRECEDENT` on a
-# hop with a rule, and `BY_LINEAGE_ONLY` on one without. This key exists so the
-# rejected claim is counted rather than silently unused. 4,255 rows on the real
-# extract carry one, and 2 of them are `BY_LINEAGE_ONLY`.
+# `rows_with_a_blocked_claim` OVERLAPS `rows` minus the ACCEPTED-CLAIM ROWS --
+# `rows_proposed_by_both` plus `rows_proposed_by_claim_no_rule`, the pair named
+# below -- and partitions nothing. It read "minus `rows_proposed_by_both`" until
+# 2026-08-25, which was tight only while that key was the whole accepted-claim
+# population; the fifth proposal source of 2026-08-21 ended that.
+# A rejected claim contributes NOTHING to `proposed_by`, so such a row carries
+# whatever its precedent evidence earns -- `BY_PRECEDENT` on a hop with a rule,
+# and `BY_LINEAGE_ONLY` on one without. This key exists so the rejected claim is
+# counted rather than silently unused. Re-measured 2026-08-25: 4,242 rows on the
+# real extract carry one, and 2 of them are `BY_LINEAGE_ONLY`.
 #
 # THE COUNT DOES NOT MOVE WITH THAT SPLIT, because it is read off the GATE frame
 # and never off `proposed_by`. This comment said "proposed BY_PRECEDENT like any

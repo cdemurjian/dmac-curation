@@ -301,7 +301,9 @@ _SHARED_PAYLOAD = sorted(
 #
 # EVERY KEY IS SCOPED TO MODE 1'S POPULATION, including the two `claim_rows`
 # ones. A claim on a REGISTERED sample is Mode 2's or Mode 3's question and is
-# counted nowhere here: `claim_rows` is 2,912 of the real extract's 138,007. The
+# counted nowhere here: `claim_rows` is 2,119 of the real extract's 130,764
+# (re-measured 2026-08-25; it read 2,912 of 138,007 before the four vocabulary
+# retirements of 2026-08-21). The
 # scope is in the name of the frame rather than of the key, so it is stated here
 # once and `main` prints it under a header naming the mode.
 MODE1_CENSUS_KEYS = (
@@ -998,8 +1000,9 @@ def absence_keys(
 
     A CLAIM NAMING AN ASSAY THE SAMPLE ALREADY HOLDS RAISES NO KEY. There is no
     absence, so there is nothing to propose -- and it is the largest single
-    exclusion in stage C by far: 123,439 of the 138,007 attached claims, 89% of
-    them. `claims_agreeing_with_a_registration` names every one rather than
+    exclusion in stage C by far: 122,011 of the 130,764 attached claims, 93% of
+    them (re-measured 2026-08-25; it read 123,439 of 138,007, 89%, before the
+    four vocabulary retirements of 2026-08-21). `claims_agreeing_with_a_registration` names every one rather than
     leaving a reader to subtract, because the direction of that number is
     dangerous: it grows whenever a curator registers something, and every one it
     gains is a key this pass stops raising.
@@ -1077,8 +1080,10 @@ def claims_agreeing_with_a_registration(
     `gate.untyped_registration_samples`, because a list a reader can spot-check
     is a different artifact from a number they must take on trust.
 
-    Measured on the real extract 2026-08-17: 123,439 of the 138,007 attached
-    claims, which is 89.4% of them and the largest exclusion anywhere in stage C.
+    Re-measured on the real extract 2026-08-25: 122,011 of the 130,764 attached
+    claims, which is 93.3% of them and the largest exclusion anywhere in stage C.
+    It read 123,439 of 138,007 (89.4%) when measured 2026-08-17, before the four
+    vocabulary retirements.
     The direction to watch is UPWARD: every claim that joins this list is a key
     this pass stops raising, so silent growth shrinks all three modes at once
     while looking exactly like a curator doing their job.
@@ -1204,7 +1209,7 @@ def compat_findings(
     exactly once each, inside `_PRECEDENCE_TESTS`, rather than being restated as
     three `if`s a later edit could disagree with.
 
-    KEYWORD-ONLY, for the reason `mode2_findings` gives at eleven arguments:
+    KEYWORD-ONLY, for the reason `mode2_findings` gives at twelve arguments:
     `titles` and `projects` are both `dict[int, str]` and `registered` is
     `dict[int, set[int]]`, so a positional call could transpose two of them and
     produce a populated, wrong frame with no error. `fallback_assay_ids` is

@@ -52,7 +52,7 @@ this whole increment is a response to.
 So a claim carries a SET of outcomes and not one. `gate` is the most severe,
 `gate_failures` is all of them, and whether the claim proceeds is neither of
 those: it is `reaches_modes`. Comparing `gate` to `GATE_PASS` to decide passage
-is wrong and will silently drop 25,974 claims.
+is wrong and will silently drop 18,652 claims.
 
 The gate is not a mode. It proposes no membership change, every claim it rules
 on is reported in `vocabulary-defects.csv` and routed to
@@ -63,18 +63,34 @@ writes one csv.
     PYTHONPATH=scripts uv run --with pandas --with pyarrow \
         python -m assay_hygiene.gate
 
-Measured over the real extract 2026-08-17 at the defaults below.
+RE-MEASURED 2026-08-25 over the real extract at the defaults below, every
+figure re-derived rather than adjusted.
 
-Over all 138,007 claims, by most severe outcome: 107,424 PASS, 25,974
-GATE_LOW_SUPPORT, 4,554 GATE_UNREACHABLE, 55 GATE_INCOHERENT. **4,609 are
-BLOCKED (3.3%) and 133,398 reach a mode, 25,974 of them carrying a recorded
+Over all 130,764 claims, by most severe outcome: 107,559 PASS, 18,652
+GATE_LOW_SUPPORT, 4,553 GATE_UNREACHABLE, 0 GATE_INCOHERENT. **4,553 are
+BLOCKED (3.5%) and 126,211 reach a mode, 18,652 of them carrying a recorded
 floor failure.**
+
+THE DENOMINATOR MOVED AND SO DID EVERY NUMERATOR. It read 138,007 / 107,424 /
+25,974 / 4,554 / 55 / 4,609 / 133,398 until 2026-08-25, measured 2026-08-17 and
+never re-derived after the operator retired four vocabulary terms on 2026-08-21.
+Correcting the denominator alone would have been worse than leaving it: not one
+of the seven survived.
+
+GATE_INCOHERENT NOW FIRES ON NOTHING, and that is a finding rather than a
+rounding. `incoherent_families` returns `{}` on the shipped vocabulary -- no
+term family maps to two assays any more -- so the coherence test is a guard
+against a state the data is not currently in, and the 55 it once caught are
+gone with the retired terms. It is kept because the state is reachable, not
+because it is occupied.
 
 Over the 866 flags increment 1 reported: 225 PASS, 598 GATE_LOW_SUPPORT, 31
 GATE_UNREACHABLE, 12 GATE_INCOHERENT. **43 are BLOCKED and 823 reach a mode**,
 598 of those carrying a recorded floor failure. Under an earlier revision where
 the floors blocked, 641 of the 866 were stopped; that is the change this split
-made and it is why it was made.
+made and it is why it was made. THAT PARAGRAPH IS HISTORY AND IS SCOPED TO
+INCREMENT 1'S ARTIFACT. `audit.audit_contradictions` re-derives that population
+at 585 on this extract; see `docs/findings/2026-08-25-the-prose-figure-census.md`.
 """
 from __future__ import annotations
 
@@ -117,8 +133,9 @@ from .precedent import assay_index
 # different questions, two different units, and the value 3 means "three
 # independent samples" here and "three labelled edges" there.
 #
-# The value: 3 rejects 83 of 736 vocabulary rows, 2,131 of 138,007 claims and 4
-# of the 866 flags. It is deliberately the weakest of the three tests, because
+# The value: 3 rejects 90 of 736 vocabulary rows and 2,119 of 130,764 claims
+# (re-measured 2026-08-25; it read 83 and 2,131 of 138,007 before the four
+# vocabulary retirements), and 4 of increment 1's 866 flags. It is deliberately the weakest of the three tests, because
 # held-out accuracy shows NO penalty for thin support -- scored by sample over
 # 333,717 test edges, terms resting on 2 samples predict at 99.8% and terms
 # resting on 100+ at 93.6%. The floor is therefore justified on provenance and
@@ -129,16 +146,20 @@ MIN_VOCAB_SAMPLES = 3
 
 # `MIN_VOCAB_PURITY` is the discriminating floor and it IS anchored on a
 # measurement, the one `run_evidence.purity_band_accuracy` publishes. Held out
-# by sample over 333,717 test edges: terms below 0.75 purity predict at 65.8%,
-# terms in 0.75-0.90 at 88.1%, terms at or above 0.90 at 99.9%. So a mapping
+# by sample over 333,717 test edges: terms below 0.75 purity predict at 68.1%,
+# terms in 0.75-0.90 at 81.4%, terms at or above 0.90 at 99.9%. So a mapping
 # under it is right about two times in three, and a proposal resting on one is
 # marked as such for the operator reading it.
 #
-# It is what MARKS `Type: Illumina Library` -> 24 DNA Extraction at purity 0.707
-# over 2,210 samples, which drove 212 of increment 1's 250 ABSENCE_COMPAT flags
-# and 269 of the 866. No support floor in either unit touches that row. Note
-# MARKS and not stops: those 269 claims still reach their mode and arrive
-# carrying `GATE_LOW_SUPPORT` and the purity that earned it.
+# It is what MARKED `Type: Illumina Library` -> 24 DNA Extraction at purity
+# 0.707 over 2,210 samples, which drove 212 of increment 1's 250
+# ABSENCE_COMPAT flags and 269 of the 866. No support floor in either unit
+# touched that row. Note MARKED and not stopped: those 269 claims still reached
+# their mode and arrived carrying `GATE_LOW_SUPPORT` and the purity that earned
+# it. THE WORKED EXAMPLE IS NOW HISTORY: as of 2026-08-25 that term carries a
+# null `internal_assay_id`, support 0 and purity 0.0 -- it was one of the four
+# the operator retired -- so it maps nothing and marks nothing. The mechanism it
+# illustrates is unchanged and the floor still has that job.
 #
 # THIS FLOOR IS UNCALIBRATED, AND IT IS A REPORTING BAND UNTIL IT IS NOT.
 # It does not block. `blocks_mode` excludes `GATE_LOW_SUPPORT`, so a claim under
@@ -169,9 +190,10 @@ MIN_VOCAB_SAMPLES = 3
 # surface. Until then: 0.75 IS A NUMBER SOMEONE CHOSE, it is not the output of
 # any curve, and every row it marks says so.
 #
-# Blocking on the two floors would have stopped 641 of the 866 and 30,583 of
-# the 138,007 claims -- purity on an axis measured to be the wrong one --
-# silently, ahead of every mode.
+# Blocking on the two floors would stop 22,147 of the 130,764 claims -- purity
+# on an axis measured to be the wrong one -- silently, ahead of every mode.
+# (Re-measured 2026-08-25; it read 30,583 of 138,007. It would also have
+# stopped 641 of increment 1's 866 flags, which is scoped to that artifact.)
 MIN_VOCAB_PURITY = 0.75
 
 
@@ -197,8 +219,8 @@ MIN_VOCAB_PURITY = 0.75
 # genuine internal ids under 122 different titles.
 # `gate` is the MOST SEVERE outcome and `gate_failures` is ALL of them,
 # `;`-joined in the order the tests run. The pair exists because a claim can
-# fail a blocking test and a tuned one at once -- 3,511 of the 138,007 do, and
-# one more fails both blocking tests -- and a single column collapsing to
+# fail a blocking test and a tuned one at once -- 3,495 of the 130,764 do, and
+# none fails both blocking tests today -- and a single column collapsing to
 # whichever fired first would lose the other. On
 # the real extract that loss runs in the dangerous direction: it would hide a
 # recorded weakness behind a block, so the finding row an operator reads would
@@ -622,9 +644,10 @@ def gate_claims(
 
     `gate` holds the first failure in that order, which is the most severe;
     `gate_failures` holds all of them; and passage is `reaches_modes`, which is
-    neither. 3,511 of the 138,007 claims fail a blocking test AND a floor, and
-    an earlier revision reported only the first -- so the finding row for a
-    blocked claim showed a clean mapping for a mapping that is not clean.
+    neither. Re-measured 2026-08-25: 3,495 of the 130,764 claims fail a
+    blocking test AND a floor, and an earlier revision reported only the first
+    -- so the finding row for a blocked claim showed a clean mapping for a
+    mapping that is not clean.
 
     The curator exemption sits BELOW reachability and above everything else, and
     that placement is the ruling rather than an accident. A human decision
@@ -640,8 +663,9 @@ def gate_claims(
     sample's several fields onto one row per assay and reports the first BACKED
     source in `CLAIM_FIELDS` order, so a claim backed by two vocabulary rows is
     gated on the one the frame names and not on both. Measured on the real
-    extract, 10,497 of the 138,007 claims pass on their representative row while
-    another row also backing that same assay would have been rejected. The
+    extract 2026-08-25, 6,677 of the 130,764 claims pass on their
+    representative row while another row also backing that same assay would
+    have been rejected. The
     defective row is still reported in `vocabulary-defects.csv`, which is keyed
     on the vocabulary and not on claims, so nothing is hidden -- but a claim
     corroborated by a clean row and a defective one is admitted, and closing
@@ -652,7 +676,7 @@ def gate_claims(
     `audit.registered_internal`. Both are silent-wrong-answer failures: a
     skipped claim disappears from Modes 1 and 2 with no count anywhere, and an
     untyped claim cannot be tested for reachability and would read as a PASS,
-    which is the laundering this gate exists to stop. 0 of the 138,007 claims
+    which is the laundering this gate exists to stop. 0 of the 130,764 claims
     hit either today.
 
     Neither input frame is mutated.
@@ -790,10 +814,13 @@ def vocabulary_defects(
     values to both functions, which is what keeps it inert meanwhile.
 
     THE WHOLE FAMILY IS EMITTED, including members no claim rests on. On the
-    real vocabulary `flowjo 10.8.1` backs 0 of the 138,007 claims while sitting
-    in the family that splits across 30, 31 and 153, and a file naming only the
-    members a claim happened to reach would ask a curator to fix one row of a
-    split they cannot see. Members with no claim carry `n_claims` 0, which is a
+    real vocabulary `flowjo 10.8.1` backs 0 of the 130,764 claims, and until
+    2026-08-21 it sat in a family that split across 30, 31 and 153 -- a file
+    naming only the members a claim happened to reach would ask a curator to fix
+    one row of a split they cannot see. That family is now retired: all six
+    `flowjo*` rows carry a null `internal_assay_id`, so it splits across nothing
+    and `incoherent_families` returns `{}`. The rule is unchanged; the example
+    is history. Members with no claim carry `n_claims` 0, which is a
     fact about this run rather than an absence.
 
     `GATE_UNREACHABLE` rows key on the (term, sample_type, assay) triple and the

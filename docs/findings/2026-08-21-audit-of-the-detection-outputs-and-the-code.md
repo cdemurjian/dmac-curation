@@ -128,7 +128,7 @@ The self-reference is real and it is total, not partial. Measured over the whole
 extract:
 
 ```
-n_child_only observations (EDGES) summed over all hops : 666,515
+n_child_only observations (EDGES) summed over all hops : 666,939
 distinct (parent, assay) ADD_PARENT candidates raised  :  55,007
 inflation factor                                       :    12.1x
 ```
@@ -144,16 +144,37 @@ a floor on the problem rather than its size.
 
 **But the extension I proposed to the operator earlier today does not hold, and
 I am withdrawing it.** I suggested the self-reference distorts the rate and
-explains why 157k rows sat below the 0.50 floor. Measured over the 229 hops with
+explains why 157k rows sat below the 0.50 floor. Measured over the 270 hops with
 ≥50 forward observations, comparing the shipped edge-grained rate against a
 sample-grained rate:
 
 ```
-rate_edge   >= 0.50 : 100 hops
-rate_sample >= 0.50 : 102 hops
 median |delta|      : 0.000      max |delta|: 0.622
-hops that cross the floor when regrained: 6 of 229
+hops that cross the floor when regrained: 8 of 270
 ```
+
+**Two figures in this section were corrected on 2026-08-24**, re-derived during
+Task 6 by a route that also reproduced the shipped `precedent.csv` row-for-row on
+all ten of its pre-existing columns, and then checked again by an independent
+reviewer. `n_child_only` summed is **666,939**, not the 666,515 first published
+here; and the regrain moves **8 of 270** hops, not 6 of 229. The conclusion is
+unchanged and slightly strengthened — 8 of 270 is a smaller share than 6 of 229.
+
+**The two errors have different explanations, and only one of them is explained.**
+The hop count is accounted for: my grouping keyed on `(child_type, parent_type,
+assay)` — three components — while `RULE_KEY` has four, so it collapsed across
+projects. That is exact, and reproduces 229 against 270. **The edge count is
+not.** Every `(edge, assay)` observation lands in exactly one key at *either*
+grain, so the grouping cannot move the sum, and the reviewer measured 666,939
+under both. Nor does a re-mine explain it: the shipped csv already summed to
+666,939, pinned by a test since `289f7f1`. **So 666,515 was simply wrong, and I
+do not know how it was produced.** It is recorded here unexplained rather than
+given a plausible cause, which is the failure mode this document exists to name.
+
+One further distinction, from the same review: **55,007 is the *internal*-grained
+candidate count** and equals `lineage.mode2_ceiling`'s `add_parent_rows`. The
+666,939 edges literally raise **55,032** candidates at seek grain. Both are
+correct; a sentence pairing "666,939 edges" with "55,007 candidates" is not.
 
 The fan-out inflates numerator and denominator together, so the *rate* is
 materially unchanged and the floor lands in almost the same place. The defect is
@@ -196,9 +217,25 @@ neither figure re-derives).
 
 This is a documented design decision, not a bug in itself — but the column is
 named `proposed_internal_assay_id` and nothing marks which 1,321 of its values
-speak the other namespace. Any consumer joining that column against internal ids
-silently drops them; any consumer joining it against SEEK ids silently
-mismatches the other 169,465. See defect F.
+speak the other namespace.
+
+**Measured 2026-08-24, and worse than "mismatches" — verified independently
+twice.** Of the 169,465 rows carrying a genuine internal id, **162,370 carry a
+value that numerically collides with a real SEEK `assays.id`**, over **87
+distinct ids**; only **7,095** miss. The proposed internal ids span 1–188 while
+seek ids reach 482. So a naive join of this column against SEEK ids does not
+fail loudly — **it succeeds and returns the wrong assay, on 96% of the file**.
+Joining the other way silently drops the 1,321.
+
+That is a silent-wrong-answer join over almost the whole artifact, in the column
+a write path must resolve. It is the single strongest argument for the
+`id_namespace` marking added in Task 8, and for the writer never joining on this
+column at all — it must resolve through `precedent.assay_index`, the package's
+one crossing.
+
+Also unflagged: `registered_internal_assay_ids` resolves through the same
+fallback and carries no marker. It is a joined *set*, so one scalar cannot
+describe it, and the writer's "existing ∪ additions" step meets that directly.
 
 Under the weaker project-filter rule, over all 170,786 rows: 161,218 resolve to
 one, **6,306 are ambiguous**, 2,281 have no record in the sample's project, and

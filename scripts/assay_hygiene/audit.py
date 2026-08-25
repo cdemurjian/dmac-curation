@@ -164,7 +164,8 @@ def audit_contradictions(
     # wins over a frame whose row order is not stable across extracts, and 85
     # claims land on such an id -- 7 of which would report the other node's
     # type. uuid is unique there (0 duplicates over 177,392 rows) and all
-    # 138,007 claims carry one that resolves.
+    # 130,764 claims carry one that resolves (re-measured 2026-08-25; the claims
+    # frame read 138,007 before the four vocabulary retirements of 2026-08-21).
     types = {
         u: (None if pd.isna(t) else str(t))
         for u, t in zip(nodes.uuid, nodes.type)

@@ -283,8 +283,9 @@ def test_the_whole_family_is_reported_and_not_only_the_member_a_claim_rests_on()
     """Report the family; do not auto-resolve it.
 
     Only `cometchip` carries a claim here, and `cometchip v2` carries none --
-    exactly the real shape, where `flowjo 10.8.1` backs 0 of the 138,007 claims
-    while sitting in the family that splits across 30, 31 and 153. A defect
+    exactly the real shape, where `flowjo 10.8.1` backs 0 of the 130,764 claims
+    and, until the 2026-08-21 retirements, sat in a family that split across 30,
+    31 and 153. A defect
     file naming only the member a claim happened to rest on would tell a
     curator to fix one row of a split they cannot see, so every member is
     emitted, claim or no claim.
@@ -763,7 +764,8 @@ def test_a_tuned_floor_is_recorded_on_the_row_and_does_not_stop_it():
 def test_a_claim_failing_a_blocking_and_a_tuned_test_carries_both():
     """One claim, two defects, and neither may hide the other.
 
-    Measured on the real extract, 3,511 of the 138,007 claims are in this state.
+    Re-measured on the real extract 2026-08-25, 3,495 of the 130,764 claims are
+    in this state.
     An earlier revision reported only the most severe, so a blocked claim's
     finding row showed a clean mapping for a mapping that is not clean -- and a
     curator fixing the reachability problem would have been handed a term still
@@ -805,7 +807,7 @@ def test_an_unresolvable_claim_raises_rather_than_being_skipped():
     and 2 would otherwise have proposed on -- silently, with no count anywhere.
     A claim whose uuid has no type cannot be tested for reachability and would
     read as PASS, which is the laundering this gate exists to stop. Measured on
-    the real extract, 0 of the 138,007 claims hit either, so both are guards on
+    the real extract, 0 of the 130,764 claims hit either, so both are guards on
     a property that holds today rather than on one that does not.
     """
     vocab = _vocab(("Type", "good", 11, "Comet Chip", 900, 850, 0.99,

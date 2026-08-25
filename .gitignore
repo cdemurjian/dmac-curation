@@ -109,6 +109,16 @@ assay-hygiene/
 assay-hygiene-*/
 
 # ============================================================
+# Run assets. assets/RUN<N>/ holds a complete curation run: the
+# production extract, every human ruling, the agent verdicts and
+# calibration, the stage-0 write manifest, and the review surfaces.
+# It carries real sample identifiers -- this repository is PUBLIC and
+# already needed a history rewrite on 2026-08-21 to strip 1,570 of
+# them. Nothing under assets/ is ever committed.
+# ============================================================
+assets/
+
+# ============================================================
 # The operator's rulings, copied into tests/fixtures/ so the
 # tests that read them can run. THEY ARE CURATION OUTPUT AND
 # MUST NEVER BE COMMITTED: `mode2-rulings.tsv` carries protocol
@@ -129,3 +139,15 @@ assay-hygiene-*/
 # ============================================================
 *rulings*.tsv
 *verdicts*.csv
+
+# ============================================================
+# Session state and handoff reports. `.claude/reports/*.json` carry protocol
+# and sample identifiers verbatim -- a Task 12 commit swept six of them into
+# this PUBLIC repository on 2026-08-25 and the branch had to be rewritten.
+# The handoff skill writes here; those reports stay local.
+# ============================================================
+.claude/
+
+# Generated FairDomHub task scripts. Written per-task against live project ids
+# and frequently carry sample uids; several are destructive (delete_samples_*).
+scripts/fdh/generated/*.py

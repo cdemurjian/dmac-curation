@@ -186,14 +186,18 @@ def mine_precedent(
     extract, the two grains differ by an order of magnitude:
 
         n_child_only, summed over the 961 rules  (EDGES)     666,939
-        distinct (parent, internal assay) those edges raise    55,007   12.1x
+        distinct (parent, internal assay) those edges raise    55,032   12.1x
         largest single rule    303,866 edges over    616 samples         493x
         largest fan-out ratio    1,575 edges over      3 samples         525x
 
-    55,007 IS EXACTLY `lineage.mode2_ceiling`'s `add_parent_rows`, which is the
-    corroboration and not a coincidence: every child-only edge names a parent
-    the house has NOT registered in that assay, which is the definition of an
-    ADD_PARENT candidate. Summing `n_child_only_samples` instead gives 57,946,
+    THAT SECOND LINE READ 55,007 UNTIL 2026-08-25 AND 55,007 IS A DIFFERENT
+    QUANTITY. Re-derived at the edge grain the child-only edges raise 55,032
+    distinct (parent, internal assay) pairs, and 55,057 at the SEEK assay grain.
+    55,007 is `lineage.mode2_ceiling`'s `add_parent_rows`, which walks the
+    lineage index rather than the edge frame and lands 25 lower. The two
+    corroborate each other and are not the same number: every child-only edge
+    names a parent the house has NOT registered in that assay, which is the
+    definition of an ADD_PARENT candidate. Summing `n_child_only_samples` instead gives 57,946,
     because a rule is scoped to one (project, hop) and a parent with children
     of two types is counted once per rule.
 

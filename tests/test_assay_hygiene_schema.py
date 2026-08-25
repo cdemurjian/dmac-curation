@@ -66,7 +66,7 @@ def test_the_two_precedent_counts_ride_beside_their_sample_grained_halves():
     `n_child_only` counts EDGES and `n_child_only_samples` counts the distinct
     samples behind them, and the second is only legible as the check on the
     first if it is adjacent to it. On the real extract the pair reads 666,939
-    against 55,007 distinct candidates over the whole frame, so a reader who
+    against 55,032 distinct candidates over the whole frame, so a reader who
     finds one number without the other reads a fan-out as a population.
 
     Both frames are asserted, because the finding row BORROWS these columns
@@ -88,8 +88,14 @@ def test_the_two_precedent_counts_ride_beside_their_sample_grained_halves():
     # Both are still computed over the EDGE counts -- regraining them moves 8
     # of 270 real hops and would move a ranking 1,012 adjudications rest on --
     # so a `_samples` rate appearing here is a change nobody measured.
+    #
+    # BOTH SPELLINGS, because the obvious one is the one the old predicate
+    # could not see: `propagation_rate_samples` ends `_samples` and not
+    # `_rate`, so `c.endswith("_rate") and "sample" in c` matched nothing that
+    # anyone would actually name. It caught `*_sample_rate` alone.
     assert not [c for c in S.PRECEDENT_COLUMNS
-                if c.endswith("_rate") and "sample" in c]
+                if "sample" in c and ("rate" in c.split("sample")[0]
+                                      or c.endswith("_rate"))]
 
 
 def test_fixture_shapes_match_declared_columns():
@@ -132,7 +138,7 @@ def test_finding_columns_are_one_row_per_sample_and_proposed_assay():
     ride immediately behind the edge counts they check. The edge counts are
     not refusals -- `precedent_n_child_only` counts edges whose PARENT the
     house has not registered, and that parent IS the ADD_PARENT proposal, so
-    666,939 such edges raise 55,007 distinct candidates and the worked case
+    666,939 such edges raise 55,032 distinct candidates and the worked case
     reads 1,300 edges over 325 samples. `dossier.build_dossiers` showed only
     the edge count, under a reading calling it repeated refusal, through 1,012
     agent adjudications. See

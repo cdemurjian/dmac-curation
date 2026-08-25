@@ -2962,7 +2962,7 @@ def _world3():
 
     ALSO: 620 is TIS in 11 and claims 11, which it already holds. It is an
     absence of nothing, it is in no input key, and it is counted by name --
-    123,439 claims on the real extract are this shape, which is 89% of them.
+    122,011 claims on the real extract are this shape, which is 93% of them.
     """
     nodes, membership, samples, edges = [], [], [], []
     known: dict[int, str] = {}
@@ -3649,8 +3649,8 @@ def test_the_classes_partition_every_claim_backed_absence_and_every_lineage_pair
     A key is in the input when the sample is NOT registered in the assay AND
     either a metadata claim names the pair or a lineage neighbour registers it.
     A claim naming an assay the sample already holds is an absence of nothing
-    and is in no key; 123,439 claims on the real extract are that shape, which
-    is 89% of the 138,007, and they are counted by name rather than dropped.
+    and is in no key; 122,011 claims on the real extract are that shape, which
+    is 93% of the 130,764, and they are counted by name rather than dropped.
 
     Every key gets exactly one step, the six steps sum to the input, and the
     keys claimed by `NON_EMITTING_STEPS` are the difference between the input
@@ -3787,8 +3787,8 @@ def test_a_claim_agreeing_with_a_registration_proposes_nothing_and_is_counted_by
 
     Nothing is dropped silently: the excluded pairs are returned by name, not
     merely counted, following `registered_samples_absent_from_samples` and
-    `gate.untyped_registration_samples`. On the real extract this is 123,439 of
-    the 138,007 attached claims -- the single largest exclusion in stage C, and
+    `gate.untyped_registration_samples`. On the real extract this is 122,011 of
+    the 130,764 attached claims -- the single largest exclusion in stage C, and
     the one whose silent growth would shrink every mode at once.
     """
     _, parts = _pipeline3()
@@ -4410,17 +4410,21 @@ def test_no_key_the_gate_refuses_is_refused_for_an_INCOHERENT_TERM_alone():
 
     refused = [k for k, step in steps.items() if step == X.PRE_GATE]
     assert len(refused) == 4553
+    # The `Counter` pins EVERY refused key's blocker set to exactly
+    # {GATE_UNREACHABLE}, which already excludes {GATE_INCOHERENT} and every
+    # mixture of the two. A separate `assert not [... == {GATE_INCOHERENT}]`
+    # stood here until 2026-08-25 and could not fail while this line held --
+    # and neither could its twin over `with_neighbour`, which is a subset of
+    # `refused`. Struck rather than kept: an assertion that cannot fail reads
+    # as coverage and is not.
     assert Counter(
         ";".join(sorted(blockers[k])) for k in refused) == {
         S.GATE_UNREACHABLE: 4553}
-    assert not [k for k in refused if blockers[k] == {S.GATE_INCOHERENT}]
 
     # ...and specifically over the population the split would have recovered:
     # a refused key that a lineage neighbour ALSO offers.
     with_neighbour = [k for k in refused if keys[k].lineage]
     assert len(with_neighbour) == 4242
-    assert not [k for k in with_neighbour
-                if blockers[k] == {S.GATE_INCOHERENT}]
 
     # the root cause, one layer up: no family maps to two assays, so no claim
     # can carry the outcome. Asserted through `gate.incoherent_families`, the

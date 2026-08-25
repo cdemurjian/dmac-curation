@@ -22,6 +22,7 @@
 - **Test discipline, from `tests/test_assay_hygiene_classify.py`'s own header:** every guard reads its expected value off the frame AND simulates the wrong rule by hand, asserting the two DIFFER. A test that asserts a count proves only that the code produced that count.
 - **Artifacts live at `assay-hygiene-bak/`,** not `assay-hygiene/`. The working directory was removed; read the extract from `assay-hygiene-bak/extract/` and the products from `assay-hygiene-bak/artifacts/`.
 - Run scripts: `PYTHONPATH=scripts uv run --with pandas --with pyarrow python <script>`
+- **Mutation-test by editing the source file and re-running pytest — never by rebinding a module attribute in-process.** Found the hard way in Task 3: a harness that rebound `X.PRECEDENCE` reported GREEN on live mutations, because `precedence_step`'s signature is `order=PRECEDENCE` and a **default argument binds at definition time**, so a later rebinding cannot reach it. A harness that proves itself is this package's signature failure and it appeared *inside* the round that was fixing a tautological guard. Also clear the pyc cache between mutation runs, and note WHERE it is: `~/.bashrc` sets `PYTHONPYCACHEPREFIX`, so bytecode lives **outside the repo** — clearing `$REPO/**/__pycache__` clears nothing. A same-second restore then leaves a stale `.pyc` that validates and runs the *mutated* code after you have restored the source. This has produced a phantom failure twice in this run, in two different tasks. Clear `~/.cache/python`.
 
 ---
 
@@ -496,6 +497,39 @@ git commit -m "feat(assay-hygiene): the lineage lane finally meets the reachabil
 
 ---
 
+### Task 3b: The operator report has to name the new class
+
+Added after Task 3's review. Task 3 Step 9 correctly forbade touching `run_detect.py` — it has no `lanes` dict by deliberate design, and its own docstring (lines 16-24) records that re-assembling one there was tried and rejected. But the report it *writes* groups on the old classes only, so after Task 3 it describes 67,898 rows and leaves 99,449 unnamed on the page a curator reads. This was originally folded into Task 11; Task 11 is blocked on Track A, which would have left the largest operator-facing consequence of Task 3 unowned indefinitely.
+
+**This task is a hard prerequisite for showing any report to the operator.** A report that silently omits 99,449 rows is worse than no report.
+
+**Files:**
+- Modify: `scripts/assay_hygiene/run_detect.py:257-265`, `:586-593`, `:642`
+- Test: `tests/test_assay_hygiene_run_detect.py`
+
+**Interfaces:**
+- Consumes: `_schema.CLS_UNREACHABLE` and the `keys_unreachable` / `rows_cls_unreachable` census keys from Task 3.
+- Produces: no new public interface — a report that accounts for every row.
+
+- [ ] **Step 1: Measure what the report currently prints, before changing it.** Run `run_detect.main` over the real extract and record the three defects verbatim, so the fix is checked against observed output rather than against this description:
+  - `:586-593` prints "**167,454** proposals — **67,898** corroborated by a lineage neighbour and **107** by co-registration alone". Those two sum to 68,005 against a stated 167,454; 99,449 rows are in neither term.
+  - `:642` restricts the survival-by-direction table to `CLS_ABSENCE_LINEAGE`, so it now covers 67,898 rows rather than the 167,347 a reader will assume.
+  - `:257-265` drops `CLS_UNREACHABLE` out of the `lineage_share` denominator entirely.
+
+- [ ] **Step 2: Write the failing test.** Assert over a fixture world that **every row in `findings.csv` is accounted for by some named term in the report** — that the report's per-class counts sum to its own stated total. Build the world so it contains at least one `CLS_UNREACHABLE` row, and assert the test goes red against the current code. This is the guard that matters: not "does it mention the new class" but "can any class go unnamed again". A future sixth class must break this test.
+
+- [ ] **Step 3: Run it, confirm red for the right reason** — the sum falls short by exactly the unreachable count, not for a fixture-construction reason.
+
+- [ ] **Step 4: Fix the three sites.** Name `CLS_UNREACHABLE` in the proposals breakdown; decide and state explicitly whether the survival table covers it (it is lineage-derived, so it has a direction and belongs there — but say so in the prose rather than letting the reader assume); and put it in the `lineage_share` denominator. Where a figure changes meaning rather than value, say what it now denotes.
+
+- [ ] **Step 5: Re-run over the real extract**, confirm every printed figure is derived, and confirm the report's own totals reconcile to 170,786.
+
+- [ ] **Step 6: Also inspect `review.write_review` and `review_mode2.py`** for the same failure, which Task 3's implementer flagged as uninspected. If they tolerate a fifth class, say so with evidence; if they do not, report it rather than fixing it here — that is Task 11's scope.
+
+- [ ] **Step 7: Commit.**
+
+---
+
 ### Task 4: The bootstrap lane
 
 The independent review puts ~2,035 legitimate first-of-a-kind registrations inside the 99,449. The assay-143 finding turned on exactly such a case being right, and 47 unreachable cohorts were approved by agents reading the biology. An unreachable pair is not automatically wrong — it is a claim that the house has a systematic gap, and that is a different review question deserving a different sheet.
@@ -625,15 +659,33 @@ This is what converts "smaller" into "trustworthy". The operator ruled 111 Mode 
 
 ---
 
-### Task 10: Bound the reject-side error
+### Task 10: A stratified validation sample
 
-132,546 agent `REJECT` verdicts were never audited in that direction; only the approve side was. At the measured ~5% false-approve floor, roughly 6–7k plausible rows may be buried there — real missing registrations that would stay missing.
+**Redesigned 2026-08-24 after Task 9.** The original task sampled only the agent REJECT bucket. Task 9 established something that makes a wider sample necessary: the operator's 111 rulings **cannot validate the reachability gate at all**, only show it harmless. Unreachable pairs carry `precedent_rate` 0.0 by construction and the sheet he ruled on starts at 0.50, so the populations are structurally disjoint — 792 of 1,114 rated cohorts hold a reclassified row and not one is among the 111. **The 99,449 rows this rework moves have no human validation whatsoever.**
 
-- [ ] **Step 1:** Draw a random sample of 200 cohorts from the REJECT bucket with a fixed, recorded seed. `Math.random`-style irreproducibility is not acceptable here; the sample must be re-drawable.
-- [ ] **Step 2:** Build a review sheet for the sample in the operator's stated format — CSV first, HTML second, cohort-level, with a punt option.
-- [ ] **Step 3:** **Operator checkpoint.** He rules the 200.
-- [ ] **Step 4:** Compute the false-reject rate with a confidence interval and extrapolate to the 132,546. Write it up.
-- [ ] **Step 5:** If the rate is material, the REJECT bucket cannot be used as a filter and Task 11's surface must include a re-judged slice. Record the decision either way.
+One review sitting, three strata, ~200 cohorts, answering the three open questions at once.
+
+| stratum | population | question it answers | cohorts |
+|---|---|---|---|
+| **A** | `CLS_UNREACHABLE`, non-bootstrap — 90,478 rows | is the reachability gate right? | 100 |
+| **B** | `CLS_BOOTSTRAP` — 8,971 rows | did the `<100` threshold find real gaps, or noise? | 50 |
+| **C** | agent-`REJECT` cohorts still on a primary surface | is the reject side sound, or are ~6–7k plausible rows buried? | 50 |
+
+**Files:** create `scripts/assay_hygiene/validation_sample.py`; test `tests/test_assay_hygiene_validation_sample.py`.
+
+- [ ] **Step 1: Draw the sample reproducibly.** A fixed seed, recorded in the output and in the module docstring. `Math.random`-style irreproducibility is unacceptable: the operator must be able to re-draw the identical sample, and a later reader must be able to check that the sample was not chosen after seeing the answers. Write a test that draws twice and asserts identity, and draws with a different seed and asserts difference — the second half is what makes the first non-vacuous.
+
+- [ ] **Step 2: Sample at COHORT level, not row level.** The operator rules cohorts; a row-level sample would ask him the same question hundreds of times and bias the result toward large cohorts. Record each cohort's row count so the eventual rate can be reported both per-cohort and row-weighted — they will differ and both matter.
+
+- [ ] **Step 3: Build the sheet in his stated format** — CSV first, HTML second, cohort level, **with a punt option**. An agent or a human must be able to answer "I cannot tell" without being forced to a yes/no; forcing a binary is how a false-approve floor gets manufactured. Carry per cohort: the evidence sentence, `type_registrations`, the proposed assay's total population, `precedent_supports`, both precedent grains, `id_namespace`, and up to five example samples with their metadata.
+
+- [ ] **Step 4: State the power of the sample before anyone rules.** For each stratum, print what a 0-event outcome would bound the rate to at 95%. With n=50 and zero events the upper bound is roughly 6%; with n=100 roughly 3%. If a stratum is too small to bound anything useful, say so rather than letting the sample imply a precision it does not have.
+
+- [ ] **Step 5: OPERATOR CHECKPOINT.** He rules the ~200. **The task is complete here** — steps 6-7 consume rulings that do not exist yet.
+
+- [ ] **Step 6 (after the checkpoint): Compute each stratum's rate with a confidence interval,** per-cohort and row-weighted, and extrapolate to its population. Write it up as a findings document.
+
+- [ ] **Step 7 (after the checkpoint): Act on what it says.** If stratum A shows a material false-block rate, the gate needs an exception path before any artifact ships. If B is mostly noise, the threshold moves. If C is material, the REJECT bucket cannot be used as a filter and Task 11's surface must include a re-judged slice.
 
 ---
 
@@ -646,6 +698,24 @@ This is what converts "smaller" into "trustworthy". The operator ruled 111 Mode 
 - [ ] **Step 3:** Every row on every sheet carries: `write_target_seek_assay_id` (from the Track A resolution stage — **this task is blocked until that lands**), gate outcome, `reachable`, `precedent_supports`, both precedent grains, `id_namespace`, and the evidence sentence.
 - [ ] **Step 4:** Print a row budget at the top of the report, derived, in the shape of Task 2's baseline table so the two are diffable.
 - [ ] **Step 5:** **Operator checkpoint.** Hand it over.
+
+---
+
+### Task 12: The prose-figure sweep
+
+**Independent of the rework, and deferrable.** This is pre-existing drift, not damage from any task here. It is in the plan so it is not lost, and the final whole-branch review triages whether it must land before merge. Nothing else depends on it.
+
+Two audits and three task reviews all landed on the same conclusion: fixing prose figures one review at a time costs more than one sweep. The concrete population, counted during Task 3's re-review:
+
+- **`138,007` and `123,439`** measure **130,764** and **122,011**. **27 occurrences on 24 lines across 7 files** — `gate.py` 8, `tests/test_assay_hygiene_classify.py` 8, `classify.py` 5 (`:302`, `:950`, `:1029`), `tests/test_assay_hygiene_gate.py` 3, and one each in `audit.py`, `_schema.py`, `tests/test_assay_hygiene_audit.py`. **All prose** — `grep 138007\|123439` finds nothing asserted, so no test guards a single one. `123,439 / 138,007` is quoted as "89% of attached claims" and is the largest single exclusion in stage C, so it is not a decorative number.
+- `classify.py:242` — `_SHARED_PAYLOAD` "names today's four members" (hedged, different family from the one Task 1 corrected).
+- `mode2.py:122` — says `rows_with_a_blocked_claim` overlaps "`rows` minus `rows_proposed_by_both`"; true but no longer tight since Task 1 added a fifth proposal source.
+- `docs/assay-hygiene-increment-2-deferred-minors.md:147` — still carries the `6/4/23` figure retracted in Task 1. **This one is a live trap**: it is the source the struck test quoted, so anything re-reading that ledger reintroduces the defect. Priority within this task.
+
+- [ ] **Step 1: Enumerate before fixing.** Grep the package for every numeric literal appearing in a comment or docstring, and produce a table: file, line, figure, what it claims to count, measured value, verdict (correct / stale / meaning-shifted / unmeasurable). Commit the table. It is the deliverable even if no figure is then changed, because the audits' recurring finding is that nobody knows which figures are trustworthy.
+- [ ] **Step 2: Fix the stale ones**, re-deriving each with a command actually run. Where a figure's *meaning* shifted rather than its value, say what it now denotes — the pattern Task 3 established.
+- [ ] **Step 3: Consider a guard.** The reason 27 wrong figures survived is that no test reads them. Assess whether a test that extracts declared figures from docstrings and re-derives them is worth building, or whether it would be a maintenance burden worse than the drift. **Recommending against it is an acceptable outcome** — say why, with the count of figures that would need machine-readable annotation.
+- [ ] **Step 4: Commit.**
 
 ---
 

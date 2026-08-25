@@ -37,7 +37,7 @@ WHAT A DOSSIER CARRIES, and why each part is needed:
                         edges whose PARENT the house has not registered, and
                         that parent is the ADD_PARENT proposal itself, so the
                         denominator is made of the proposals. 666,939 such
-                        edges raise 55,007 distinct candidates across the
+                        edges raise 55,032 distinct candidates across the
                         extract, 12.1x. It was the reading in front of all
                         1,012 agent adjudications of 2026-08-21. See
                         `precedent.mine_precedent`.

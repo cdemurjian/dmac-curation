@@ -1172,7 +1172,7 @@ def reworked(tmp_path_factory) -> pd.DataFrame:
 def test_the_real_extract_draws_the_stratified_sample_it_documents(reworked):
     """Every figure this task reports, re-derived by the suite.
 
-    Measured 2026-08-24 over `assay-hygiene-bak/extract`. Populations: stratum
+    Measured 2026-08-24 over `assets/RUN1/01-extract`. Populations: stratum
     A is 655 cohorts over 90,478 rows (8 of which carry no precedent rate and
     reach no cohort), B is 137 over 8,971, and C is 106 of the 756 agent
     REJECT cohorts still on a primary surface, over 43,604 rows.

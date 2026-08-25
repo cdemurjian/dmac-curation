@@ -3,7 +3,7 @@
 WHAT THIS FILE IS FOR. The 2026-08-21 rework reclassified 99,449 of the
 170,786 proposals in the real-extract run as `CLS_UNREACHABLE` (90,478) or
 `CLS_BOOTSTRAP` (8,971) -- measured by running `run_evidence` then `run_detect`
-over `assay-hygiene-bak/extract` into a scratch directory. That is a large
+over `assets/RUN1/01-extract` into a scratch directory. That is a large
 claim to put in front of a human, and the only ground truth this package owns
 about house convention is the 111 Mode 2 cohorts and 17 Mode 1 cohorts he ruled
 BY HAND. If the reworked detector drops a cohort he approved, or still proposes
@@ -23,7 +23,7 @@ repository is PUBLIC and needed a history rewrite on 2026-08-21 to strip 1,570
 sample identifiers out of 66 commits, because a file deleted in a later commit
 is still public in its history. `mode2-rulings.tsv` keys cohorts on strings
 from that same namespace -- one of them is a protocol filename. So the rulings
-live under `assay-hygiene-bak/rulings/`, they are copied into `tests/fixtures/`
+live under `assets/RUN1/00-rulings/`, they are copied into `tests/fixtures/`
 by hand, `.gitignore` refuses `*rulings*.tsv` at any depth, and
 `test_the_restored_rulings_can_never_reach_this_public_repository` asserts that
 refusal rather than trusting it. Everything below reads the cohort keys OUT of
@@ -89,11 +89,15 @@ RECLASSIFIED = (S.CLS_UNREACHABLE, S.CLS_BOOTSTRAP)
 
 # The evidence layer's two outputs that the detection layer READS. They are
 # copied into the scratch run rather than re-mined because `run_evidence` over
-# this extract reproduces all three of its artifacts byte-identically --
-# verified 2026-08-24 by md5 against `assay-hygiene-bak/artifacts/`:
-# vocabulary.csv 211f91ff..., precedent.csv 37f0add1..., claims.parquet
-# e7810d97... -- so re-mining them would cost the run without changing a byte
-# of its input. What is NOT copied is `findings.csv`: every classification this
+# this extract reproduces BOTH OF THEM byte-identically -- re-verified
+# 2026-08-25 by md5 against `assets/RUN1/04-artifacts/`: vocabulary.csv
+# 211f91ff..., claims.parquet e7810d97... -- so re-mining them would cost the
+# run without changing a byte of its input. `precedent.csv` NO LONGER matches
+# that baseline and the comment claimed it did until 2026-08-25: commit 9090d20
+# gave the frame its two `_samples` columns, so it now reads acb7f3b5... against
+# the baseline's 37f0add1.... It is not in `EVIDENCE_INPUTS` and is re-mined by
+# `classify.main`, so the drift costs this file nothing -- but a reader
+# checking the md5s would have found one that does not reconcile. What is NOT copied is `findings.csv`: every classification this
 # file judges is produced by `classify.main` inside the fixture below.
 EVIDENCE_INPUTS = ("claims.parquet", "vocabulary.csv")
 
@@ -102,7 +106,7 @@ _MISSING_RULINGS = (
     "repository, which is public and whose fixtures would otherwise carry "
     "identifiers from the namespace a history rewrite already had to strip. "
     "They live beside the other assay-hygiene artifacts under "
-    "assay-hygiene-bak/rulings/; copy them into tests/fixtures/ to run this.")
+    "assets/RUN1/00-rulings/; copy them into tests/fixtures/ to run this.")
 
 
 def _rulings(path) -> pd.DataFrame:
@@ -135,7 +139,7 @@ def reworked(tmp_path_factory) -> pd.DataFrame:
     """The REWORKED detector, run over the real extract into a scratch dir.
 
     NOT a csv read off disk. `assay-hygiene/findings.csv` is the PRE-rework
-    artifact the operator's sheet was built from, and `assay-hygiene-bak/` is
+    artifact the operator's sheet was built from, and `assets/RUN1/` is
     read-only on purpose so that a default-path run fails rather than
     overwriting the baseline this file compares against. So the run happens
     here, in `tmp_path_factory`, and the frame under test is the one this
@@ -151,8 +155,16 @@ def reworked(tmp_path_factory) -> pd.DataFrame:
     for f in EVIDENCE_INPUTS:
         shutil.copy(ARTIFACTS / f, out / f)
         (out / f).chmod(0o644)      # the baseline copies are read-only
-    assert X.main(str(EXTRACT), str(out)) == 0
-    return pd.read_csv(out / "findings.csv", low_memory=False)
+    # `classify.main` has ONE `return` and it is the literal 0, so comparing
+    # its result to 0 asserts nothing; it stood here until 2026-08-25. What is
+    # worth asserting is that the run produced the artifact this fixture is
+    # about, which a raise inside `main` or a silent early exit would not.
+    X.main(str(EXTRACT), str(out))
+    findings = out / "findings.csv"
+    assert findings.exists(), (
+        "classify.main returned without writing findings.csv; there is nothing "
+        "for this file to judge")
+    return pd.read_csv(findings, low_memory=False)
 
 
 @pytest.fixture(scope="session")
@@ -328,7 +340,17 @@ def test_the_real_extract_drops_every_cohort_the_operator_rejected(
 
     A rejected cohort has left the primary surface if it is no longer emitted
     at all, or if what remains of it is `CLS_UNREACHABLE`, `CLS_BOOTSTRAP` or
-    `CLS_ALT_LABEL` -- all three route somewhere other than the review sheet.
+    `CLS_ALT_LABEL`. NOTHING ROUTES ON CLASSIFICATION and this docstring said
+    otherwise until 2026-08-25: `review_mode2.build_blocks` filters on
+    `mode == MODE_2` and `precedent_rate >= floor` and reads no `classification`
+    column at all. The three are off the sheet for two DIFFERENT structural
+    reasons, and both are properties of the data rather than a routing rule --
+    `CLS_ALT_LABEL` rows carry no mode, so the first predicate drops them; and
+    an unreachable or bootstrap pair has a structurally zero precedent rate, so
+    the second does. `test_no_reclassified_row_could_have_reached_the_sheet`
+    below asserts the second half directly. A reader who believed the routing
+    story would expect a classification change alone to move a cohort off the
+    sheet, and it cannot.
     Seven of the nine Mode 1 rejections already qualify, discharged by the
     `tif`/`png` vocabulary retirements the operator's own rulings caused; that
     is a vocabulary fix working and it is counted as a pass here.
@@ -414,10 +436,10 @@ def test_the_real_extract_reclassifies_no_row_that_could_reach_the_sheet(
         f"a reclassified row carries precedent rate {top}, above the 0.0 an "
         "unreachable pair can structurally have. The claim that the gate "
         "cannot have touched the operator's sheet no longer holds.")
-    reached = gated[gated.precedent_rate >= M.FLOOR]
-    assert not len(reached), (
-        f"{len(reached)} reclassified row(s) sit at or above the {M.FLOOR} "
-        "floor and WERE on the sheet the operator ruled")
+    # `top == 0.0` above already forbids any row at or above M.FLOOR (0.50),
+    # so the `reached` assertion that stood here until 2026-08-25 could not
+    # fail. Struck: the max IS the check, and a second line that cannot go red
+    # reads as a second check.
 
     sheet = reworked[(reworked["mode"] == S.MODE_2)
                      & (reworked.precedent_rate >= M.FLOOR)]

@@ -45,8 +45,8 @@ def measure(findings_csv: str, extract_dir: str) -> dict[str, int]:
     }
 
 
-def main(findings_csv="assay-hygiene-bak/artifacts/findings.csv",
-         extract_dir="assay-hygiene-bak/extract") -> int:
+def main(findings_csv="assay-hygiene/findings.csv",
+         extract_dir="assay-hygiene/extract") -> int:
     got = measure(findings_csv, extract_dir)
     print("| key | rows |")
     print("|---|---|")

@@ -95,9 +95,11 @@ RULE_KEY = ["project_id", "child_type", "parent_type", "internal_assay_id"]
 # count of the proposals themselves, never of the house declining them. One
 # parent fans out over every child it has, so the edge count says how connected
 # the graph is where the sample count says how many samples are involved.
-# Measured on this extract: 666,939 `n_child_only` edges raise 55,007 distinct
+# Measured on this extract: 666,939 `n_child_only` edges raise 55,032 distinct
 # (parent, internal assay) ADD_PARENT candidates -- 12.1x -- and the largest
-# single rule is 303,866 edges over 616 samples, 493x.
+# single rule is 303,866 edges over 616 samples, 493x. (It read 55,032 as 55,007
+# until 2026-08-25; 55,007 is `lineage.mode2_ceiling`'s `add_parent_rows`, which
+# is a different traversal and lands 25 lower. See `precedent.mine_precedent`.)
 #
 # THE COLUMN DOES NOT SUM TO THAT CEILING AND IS NOT MEANT TO. Summing
 # `n_child_only_samples` over the 961 rules gives 57,946, not 55,007: a rule is
@@ -746,9 +748,9 @@ GATE_OUTCOMES = (GATE_PASS, GATE_UNREACHABLE, GATE_INCOHERENT, GATE_LOW_SUPPORT)
 # GATE_INCOHERENT rest on evidence with no tuned number in them, and they do.
 #
 # `gate.blocks_mode` is the single place that rule lives and is what every
-# consumer calls. Nothing may re-derive blocking from this tuple: measured
-# 2026-08-17 on the real extract, doing so stops 30,583 of the 138,007 claims
-# where the rule stops 4,609.
+# consumer calls. Nothing may re-derive blocking from this tuple: re-measured
+# 2026-08-25 on the real extract, doing so stops 22,147 of the 130,764 claims
+# where the rule stops 4,553.
 GATE_REJECTIONS = (GATE_UNREACHABLE, GATE_INCOHERENT, GATE_LOW_SUPPORT)
 
 # What a gated claim turns out to be. ABSENCE and CONTRADICTION are not the same

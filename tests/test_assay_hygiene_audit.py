@@ -181,7 +181,7 @@ def test_the_flagged_row_reports_the_type_of_its_own_node():
     wins is whichever row sits later in nodes.parquet, whose order
     test_assay_hygiene_stage0.py already records as unstable across extracts.
     uuid is unique in that frame (0 duplicates over 177,392 rows) and every one
-    of the 138,007 claims carries one that resolves, so it is both the correct
+    of the 130,764 claims carries one that resolves, so it is both the correct
     key and an available one.
     """
     membership = pd.DataFrame([(100, 2)], columns=S.MEMBERSHIP_COLUMNS)

@@ -144,7 +144,7 @@ record of what is OPEN, which is the argument for this file.
 
 ### Task 7
 
-- [x] (ledger:815) CARRY TO TASK 8: _proposal_source's refusal is safe live and unsafe against a smaller rule set (fires 6/4/23 at 20%/seed-7/50% hold-outs) — exactly the configuration that would close the unmeasured-vocabulary concern — and NOTHING in Task 7 pins it. No test asserts the raise fires under a reduced rule set. Task 8 inherits a measured claim with no regression guard.
+- [x] (ledger:815) CARRY TO TASK 8: _proposal_source's refusal is safe live and unsafe against a smaller rule set (~~fires 6/4/23 at 20%/seed-7/50% hold-outs~~ — **the 6/4/23 figure is RETRACTED, struck by Task 1 of the 2026-08-21 mode2 rework and re-confirmed by Task 12's figure sweep on 2026-08-25. It cannot have been measured where it was said to come from: `backtest.cold_run` passes an EMPTY attached frame, so `claim_of` is empty, `claim` is always `None`, and the (claim, no rule) combination `_proposal_source` would have raised on is unreachable there by construction. No re-derivation was attempted. Do not carry this number forward; anything re-reading this ledger reintroduces it.**) — exactly the configuration that would close the unmeasured-vocabulary concern — and NOTHING in Task 7 pins it. No test asserts the raise fires under a reduced rule set. Task 8 inherits a measured claim with no regression guard.
       **RESOLVED by Task 8: `test_the_proposal_source_refusal_fires_under_a_reduced_rule_set` ships at tests/test_assay_hygiene_classify.py:3507. Verified 2026-08-18.**
 
 ### Task 8
