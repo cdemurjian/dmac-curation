@@ -329,6 +329,17 @@ def test_the_real_extract_keeps_every_mode1_cohort_the_operator_approved(
 # --- what the rework BUYS: the cohorts he rejected ---------------------------
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "EXPECTED RED and it is a DELIVERABLE, not a defect: the rework removed "
+    "none of the 13 rejected cohorts still on a primary surface, and the "
+    "failure message names them. strict=True is the guard the docstring asks "
+    "for -- if this ever passes, pytest reports an UNEXPECTED PASS and the "
+    "suite goes red, so nobody can retire the measurement by moving a "
+    "threshold. A real fix (a detector stops emitting them) must delete this "
+    "marker deliberately. NOTE: on a checkout with no fixtures the test SKIPS "
+    "and this marker never applies -- see pytest_terminal_summary in "
+    "tests/conftest.py, which refuses to let that read as a green measurement."
+))
 def test_the_real_extract_drops_every_cohort_the_operator_rejected(
         reworked, context):
     """EXPECTED RED. The list in the failure message is this task's deliverable.

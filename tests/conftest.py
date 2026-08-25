@@ -103,3 +103,51 @@ def curation_project(tmp_path):
         },
     }, indent=2))
     return tmp_path
+
+
+# --- the skipped-measurement banner ------------------------------------------
+# WHY THIS EXISTS. This package's extract-backed tests are the only thing that
+# measures the rework against production data, and they `pytest.skip` when
+# `assay-hygiene/extract` is absent -- which is the state of CI and of every
+# fresh clone, because the fixtures carry sample identifiers and this repository
+# is PUBLIC. A run with all 24 of them skipped therefore reports FULLY GREEN
+# while having measured nothing at all.
+#
+# That is not hypothetical. A "1196 passed / 16 skipped" baseline was read as
+# healthy for several days on this project while 21 tests were skipping on a
+# missing path. It also hides a DELIVERABLE: the strict-xfail in
+# test_assay_hygiene_rulings.py is red on purpose and names the 13 rejected
+# cohorts a primary surface still proposes; where it skips, that measurement
+# silently ceases to exist.
+#
+# The skip itself is correct -- you cannot measure without data. What is wrong
+# is that it is SILENT. This makes it loud without making it fail, so CI stays
+# green for the right reason and a human reading the tail of a local run cannot
+# mistake "did not measure" for "measured and found nothing".
+_MEASUREMENT_CONVENTION = "_real_extract_"
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """Announce, at the end of the run, any measurement that did not happen."""
+    skipped = terminalreporter.stats.get("skipped", [])
+    missed = sorted({r.nodeid for r in skipped
+                     if _MEASUREMENT_CONVENTION in getattr(r, "nodeid", "")})
+    if not missed:
+        return
+    tr = terminalreporter
+    tr.write_sep("=", "MEASUREMENTS THAT DID NOT RUN", red=True, bold=True)
+    tr.write_line(
+        f"{len(missed)} extract-backed test(s) skipped. This run did NOT "
+        f"measure the rework against production data, and a green result "
+        f"above does not mean the measurement passed -- it means it was "
+        f"never taken.")
+    tr.write_line(
+        "  Cause: assay-hygiene/extract is absent (expected on CI and on any "
+        "fresh clone; the fixtures carry sample identifiers and are not in "
+        "git).")
+    tr.write_line(
+        "  Hidden by this: test_the_real_extract_drops_every_cohort_the_"
+        "operator_rejected is xfail(strict=True) and names 13 cohorts a "
+        "primary surface still proposes. Skipped, it reports nothing.")
+    for nodeid in missed:
+        tr.write_line(f"    - {nodeid}")
