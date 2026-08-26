@@ -123,8 +123,8 @@ this ordering prevents.
   CFU data node. Only propose a new type after confirming no existing tier is the intended home —
   a false `proposed_new` sends the curator to the NExtSEEK admins for nothing.
 - **UID lab code and date stamp are per curation batch, not per project.** One study can legitimately
-  mix them: FairDomHub study 1395 carries `NHP-240116FLY-*` and `PAV-240116FLY-*` for the animal tier
-  alongside `DNA-250702FOR-*` and `D.SEQ-250722FOR-*` for the molecular tier — two labs, three dates,
+  mix them: FairDomHub study 1395 carries `NHP-190602FLY-*` and `PAV-190602FLY-*` for the animal tier
+  alongside `DNA-190705FOR-*` and `D.SEQ-190706FOR-*` for the molecular tier — two labs, three dates,
   one tree. Do not force a single stamp across every tier; record the batch each tier belongs to.
 - For sample types not in `sampletypes_db.json`, mark `PENDING_SCHEMA` and add a question for the NExtSEEK admin.
   In `sample_tree.json` the same node gets `"match_type": "proposed_new"`, which draws it with a

@@ -580,12 +580,12 @@ def test_fixture_cannot_reach_ambiguity_or_a_dark_parent():
 def test_prod_uid_regex_rejects_the_two_letter_antibody_type():
     # This is the production defect stage 0 works around. If this test ever
     # goes green-by-passing, production has been fixed and the override can go.
-    assert S.UID_RE_PROD.match("AB-250723FOR-3") is None
-    assert S.UID_RE_FIXED.match("AB-250723FOR-3") is not None
+    assert S.UID_RE_PROD.match("AB-190703FOR-3") is None
+    assert S.UID_RE_FIXED.match("AB-190703FOR-3") is not None
 
 
 def test_both_regexes_agree_on_three_letter_types():
-    for uid in ("TIS-260107SES-1", "D.ADNKA-250917FOR-98", "MUS-220122SAS-125"):
+    for uid in ("TIS-190110SES-1", "D.ADNKA-190704FOR-98", "MUS-191201SAS-125"):
         assert S.UID_RE_PROD.match(uid) is not None
         assert S.UID_RE_FIXED.match(uid) is not None
 

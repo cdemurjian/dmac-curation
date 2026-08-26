@@ -648,13 +648,13 @@ def test_module_imports():
 def test_mint_uid_signature():
     """mint_uid should exist and accept (sample_type, lab, date, n) → str."""
     assert hasattr(_common, "mint_uid"), "mint_uid function expected"
-    uid = _common.mint_uid("RNA", "KAM", "260527", 1)
-    assert uid == "RNA-260527KAM-1"
+    uid = _common.mint_uid("RNA", "KAM", "190902", 1)
+    assert uid == "RNA-190902KAM-1"
 
 
 def test_mint_uid_format():
-    uid = _common.mint_uid("D.SEQ", "ENG", "260514", 42)
-    assert uid == "D.SEQ-260514ENG-42"
+    uid = _common.mint_uid("D.SEQ", "ENG", "190504", 42)
+    assert uid == "D.SEQ-190504ENG-42"
 ```
 
 - [ ] **Step 6: Run the test**
@@ -1043,8 +1043,8 @@ wb = Workbook()
 ws = wb.active
 ws.title = 'Samples'
 ws.append(['UID', 'Name', 'Parent'])
-ws.append(['RNA-260527KAM-1', 'A1_tube1', 'TIS-250218KAM-1'])
-ws.append(['RNA-260527KAM-2', 'A1_tube2', 'TIS-250218KAM-1'])
+ws.append(['RNA-190902KAM-1', 'A1_tube1', 'TIS-190905KAM-1'])
+ws.append(['RNA-190902KAM-2', 'A1_tube2', 'TIS-190905KAM-1'])
 ws2 = wb.create_sheet('Instructions')
 ws2.append(['Field', 'Type', 'Description'])
 wb.save('tests/fixtures/sample.xlsx')
@@ -1079,8 +1079,8 @@ def test_inspect_with_sheet_filter():
         capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0
-    assert "RNA-260527KAM-1" in result.stdout
-    assert "RNA-260527KAM-2" in result.stdout
+    assert "RNA-190902KAM-1" in result.stdout
+    assert "RNA-190902KAM-2" in result.stdout
 ```
 
 - [ ] **Step 4: Run the test**

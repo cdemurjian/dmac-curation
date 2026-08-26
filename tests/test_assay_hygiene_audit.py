@@ -175,8 +175,8 @@ def test_the_flagged_row_reports_the_type_of_its_own_node():
 
     Measured on the real extract 2026-08-14: 86 sample_ids carry TWO node rows
     under two different uuids, 51 of those pairs disagree on type (a MUS node
-    and an RNA node sharing one sample_id, e.g. 165987 = MUS-250620SAR-2 and
-    RNA-250620SAR-2), and 85 claim rows land on such a sample_id. Keyed on
+    and an RNA node sharing one sample_id, e.g. 165987 = MUS-191101SAR-2 and
+    RNA-191101SAR-2), and 85 claim rows land on such a sample_id. Keyed on
     sample_id, 7 of those claims report the OTHER node's type -- and which one
     wins is whichever row sits later in nodes.parquet, whose order
     test_assay_hygiene_stage0.py already records as unstable across extracts.

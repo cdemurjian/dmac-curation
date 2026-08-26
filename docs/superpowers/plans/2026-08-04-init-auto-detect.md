@@ -229,15 +229,15 @@ def _make_xlsx(sheets):
 
 def test_extract_labs_aggregates_by_lab_code():
     xlsx = _make_xlsx([
-        ("CEL", [("CEL-260730WHI-1", "Cameron Flower"),
-                 ("CEL-260731WHI-2", "Forest White")]),
-        ("D.MSP", [("D.MSP-260729AGA-1", "Nathalie Agar"),
+        ("CEL", [("CEL-190220WHI-1", "Cameron Flower"),
+                 ("CEL-190221WHI-2", "Forest White")]),
+        ("D.MSP", [("D.MSP-190219AGA-1", "Nathalie Agar"),
                    ("not-a-uid", "ignored")]),
     ])
     labs = {l.code: l for l in dc.extract_labs(xlsx)}
     assert labs["WHI"].count == 2
     assert labs["WHI"].scientists == ["Cameron Flower", "Forest White"]
-    assert labs["WHI"].latest == "260731"
+    assert labs["WHI"].latest == "190221"
     assert labs["AGA"].count == 1
     assert "AGA" in labs and labs["AGA"].scientists == ["Nathalie Agar"]
 ```
@@ -319,15 +319,15 @@ git commit -m "feat(detect): extract per-lab-code aggregates from a project expo
 
 ```python
 def test_rank_labs_author_match_beats_count():
-    labs = [dc.LabInfo("AGA", 50, ["Nathalie Agar"], "260701"),
-            dc.LabInfo("WHI", 5, ["Cameron Flower", "Forest White"], "260731")]
+    labs = [dc.LabInfo("AGA", 50, ["Nathalie Agar"], "190219"),
+            dc.LabInfo("WHI", 5, ["Cameron Flower", "Forest White"], "190221")]
     ranked = dc.rank_labs(labs, dc.Evidence(author_surnames=["white", "flower"]))
     assert ranked[0].code == "WHI"
 
 
 def test_rank_labs_recency_tiebreak_when_no_author():
-    labs = [dc.LabInfo("AAA", 10, ["X"], "260101"),
-            dc.LabInfo("BBB", 10, ["Y"], "260731")]
+    labs = [dc.LabInfo("AAA", 10, ["X"], "190101"),
+            dc.LabInfo("BBB", 10, ["Y"], "190221")]
     ranked = dc.rank_labs(labs, dc.Evidence())
     assert ranked[0].code == "BBB"
 
@@ -337,12 +337,12 @@ def test_guess_pi_prefers_arg():
 
 
 def test_guess_pi_author_match():
-    labs = [dc.LabInfo("WHI", 5, ["Cameron Flower", "Forest White"], "260731")]
+    labs = [dc.LabInfo("WHI", 5, ["Cameron Flower", "Forest White"], "190221")]
     assert dc.guess_pi(labs, dc.Evidence(author_surnames=["white"]), None) == "white"
 
 
 def test_guess_pi_fallback_first_scientist_surname():
-    labs = [dc.LabInfo("WHI", 5, ["Forest White"], "260731")]
+    labs = [dc.LabInfo("WHI", 5, ["Forest White"], "190221")]
     assert dc.guess_pi(labs, dc.Evidence(), None) == "white"
 ```
 

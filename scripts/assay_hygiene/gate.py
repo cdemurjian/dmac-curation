@@ -289,7 +289,7 @@ def sample_type_index(nodes: pd.DataFrame) -> dict[str, str]:
     `audit.audit_contradictions` made and for the same measured reason:
     `sample_id` is not unique in `nodes` -- 86 sample_ids carry two node rows
     under two uuids and 51 of those pairs disagree on type (165987 is both
-    MUS-250620SAR-2 and RNA-250620SAR-2) -- while uuid is unique over all
+    MUS-191101SAR-2 and RNA-191101SAR-2) -- while uuid is unique over all
     177,392 rows. A sample_id-keyed dict resolves the disagreements by
     last-write-wins over a frame whose row order is not stable across extracts.
 

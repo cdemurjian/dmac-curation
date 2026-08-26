@@ -88,7 +88,7 @@ def test_adapt_nextseek_workbook_reads_per_type_sheets(tmp_path):
 
 def test_adapt_nextseek_workbook_infers_type_from_uid_when_no_column(tmp_path):
     p = tmp_path / "x_AllMetadata.xlsx"
-    _xlsx(p, {"Sheet1": (["UID", "Parent"], [["D.SEQ-260721KAM-3", "RNA-1"]])})
+    _xlsx(p, {"Sheet1": (["UID", "Parent"], [["D.SEQ-190903KAM-3", "RNA-1"]])})
     got = ad.adapt_nextseek_workbook(p)
     assert got.samples[0].sample_type == "D.SEQ"
 

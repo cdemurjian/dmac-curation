@@ -83,7 +83,7 @@ here*, not *the answer is wrong*. Two rows sit at `share` 1.00 with a high
 
 - `Protocol: 18032418`, 35 NHP samples, candidate 56 `Patient Visit`,
   `base_rate` 0.875. Rule 3 below: the answer is no assay at all.
-- `Protocol: p.fly-240924-v1_nx_flynn_sop_v1.zip;`, 799 TIS samples, candidate
+- `Protocol: p.pqr-190110-v1_nx_sop_v1.zip;`, 799 TIS samples, candidate
   74 `Tissue Collection`, `base_rate` 0.998. But the same filename **without**
   the trailing `;` is already in `vocabulary.csv` at support 15,919 mapping to
   74. A stray delimiter split one term in two, and that, not membership, is
@@ -147,8 +147,8 @@ honest short file is the deliverable, a padded long one is not.
 
    | value | status | assay |
    |---|---|---|
-   | `p.eng-230912-v1_in-vivo-comet-assay-protocol.docx` | unresolved, 2,271 samples | carriers unanimously registered in 138 `CometChip Assay` |
-   | `p.eng-230913-v1_in-vivo-comet-chip---mus.docx` | already learned, support 31 | 14 `Chemical challenge` |
+   | `p.mno-190108-v1_in-vivo-comet-assay-protocol.docx` | unresolved, 2,271 samples | carriers unanimously registered in 138 `CometChip Assay` |
+   | `p.mno-190109-v1_in-vivo-comet-chip---mus.docx` | already learned, support 31 | 14 `Chemical challenge` |
 
    Nearly identical strings, different assays. Let membership decide, never the
    filename.

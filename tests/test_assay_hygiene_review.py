@@ -311,15 +311,15 @@ def test_the_uid_parse_recovers_the_lab_and_the_date_from_the_house_shape():
     convention-derived field touches has to be guarded, which is what the two
     tests below are for.
     """
-    got = R.parse_uid("D.IMG-240910LAU-68")
-    assert got["lab"] == "LAU" and got["date"] == "240910"
+    got = R.parse_uid("D.IMG-191001LAU-68")
+    assert got["lab"] == "LAU" and got["date"] == "191001"
     assert got["type"] == "D.IMG" and got["serial"] == "68"
 
 
 @pytest.mark.parametrize("bad", [
     "TIS-100",                       # the shape a synthetic fixture uses
     "2720-Group 01-G181_TMZ_IC_PD",  # a real extract uuid, measured below
-    "MUS-240910LAU-68\xa0",          # a real one, with a trailing NBSP
+    "MUS-191001LAU-68\xa0",          # a real one, with a trailing NBSP
     "D.IMG-24091LAU-68",             # five date digits
     "D.IMG-240910-68",               # no lab
     "",
@@ -335,7 +335,7 @@ def test_a_uid_that_does_not_match_the_house_shape_fails_loudly(bad):
 
     Measured on the 2026-08-14 extract: 0 of the 2,166 MODE_1 uuids fail this
     parse, and 2 of the 163,379 sample uuids do -- `2720-Group 01-...`, which
-    is not a UID at all, and `MUS-240910LAU-68` carrying a trailing NON-BREAKING
+    is not a UID at all, and `MUS-191001LAU-68` carrying a trailing NON-BREAKING
     SPACE. The second is the one that argues for the raise: it is one invisible
     character from valid, and `.strip()`ing it would be this module quietly
     repairing someone else's data defect.

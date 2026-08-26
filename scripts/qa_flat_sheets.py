@@ -165,7 +165,7 @@ def main(upload_path, cfg):
         # (1b) Collision with the LIVE DB (stamp-collision second net).
         # A NEW upload UID that already exists in the master baseline will
         # UPDATE (overwrite) that record on upload rather than insert — the
-        # failure mode behind the 260730WHI/260729WHI incidents.
+        # failure mode behind the 190220WHI/190219WHI incidents.
         if uid and uid in prev_uids:
             issues["uid_exists_in_db"].append(uid)
 

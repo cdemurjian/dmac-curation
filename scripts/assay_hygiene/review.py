@@ -199,7 +199,7 @@ def parse_uid(uuid: str) -> dict:
     MEASURED on the 2026-08-14 extract: 0 of the 2,166 MODE_1 uuids fail this
     parse, so the guard costs the real run nothing today. 2 of the 163,379
     sample uuids DO fail it -- `2720-Group 01-G181_TMZ_IC_PD`, which is not a
-    UID at all, and `MUS-240910LAU-68` carrying a trailing NON-BREAKING SPACE.
+    UID at all, and `MUS-191001LAU-68` carrying a trailing NON-BREAKING SPACE.
     The second is the case that argues for raising rather than repairing: it is
     one invisible character away from valid, `.strip()` would silently swallow
     it, and this module would then be quietly correcting someone else's data

@@ -243,7 +243,7 @@ def lineage_index(
 
     Two more populations leave the index and are counted:
 
-      self_loop_edges      1 row, `CEL-200702FOR-1` -> itself. Excluded, because
+      self_loop_edges      1 row, `CEL-190701FOR-1` -> itself. Excluded, because
                            a sample that is its own neighbour can satisfy the
                            lineage test with its own registration, and a claim
                            corroborating itself reads in the artifact exactly

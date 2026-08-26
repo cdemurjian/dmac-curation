@@ -2069,11 +2069,11 @@ import _common  # noqa: E402
 # ---- surviving shared API -------------------------------------------------
 
 def test_mint_uid_signature():
-    assert _common.mint_uid("RNA", "KAM", "260527", 1) == "RNA-260527KAM-1"
+    assert _common.mint_uid("RNA", "KAM", "190902", 1) == "RNA-190902KAM-1"
 
 
 def test_mint_uid_format():
-    assert _common.mint_uid("D.SEQ", "ENG", "260514", 42) == "D.SEQ-260514ENG-42"
+    assert _common.mint_uid("D.SEQ", "ENG", "190504", 42) == "D.SEQ-190504ENG-42"
 
 
 def test_placeholder_marker_shape():
@@ -2157,7 +2157,7 @@ def test_write_4sheet_xlsx_emits_four_sheets(tmp_path):
     out = tmp_path / "T.xlsx"
     _common.write_4sheet_xlsx(
         out, "MUS",
-        samples=[{"UID": "MUS-260527KAM-1", "Name": "m1"}],
+        samples=[{"UID": "MUS-190902KAM-1", "Name": "m1"}],
         assay_titles=["Tissue Collection"],
     )
     wb = openpyxl.load_workbook(out)
@@ -2170,7 +2170,7 @@ def test_write_4sheet_xlsx_populates_ontology_when_given(tmp_path):
     out = tmp_path / "T.xlsx"
     _common.write_4sheet_xlsx(
         out, "MUS",
-        samples=[{"UID": "MUS-260527KAM-1", "Strain": "C57BL/6J"}],
+        samples=[{"UID": "MUS-190902KAM-1", "Strain": "C57BL/6J"}],
         assay_titles=[],
         ontology={"Strain": ["C57BL/6J", "BALB/c"]},
     )
@@ -2187,7 +2187,7 @@ def test_ontology_fields_are_declared_controlled_in_instructions(tmp_path):
     out = tmp_path / "T.xlsx"
     _common.write_4sheet_xlsx(
         out, "MUS",
-        samples=[{"UID": "MUS-260527KAM-1", "Strain": "C57BL/6J"}],
+        samples=[{"UID": "MUS-190902KAM-1", "Strain": "C57BL/6J"}],
         assay_titles=[],
         ontology={"Strain": ["C57BL/6J"]},
     )
@@ -2256,15 +2256,15 @@ def placeholder(what: str) -> str:
 # UID minting
 # ---------------------------------------------------------------------------
 def mint_uid(sample_type: str, lab: str, date: str, n: int) -> str:
-    """Canonical 4-arg UID minter: ``mint_uid('RNA', 'KAM', '260527', 1)``
-    -> ``'RNA-260527KAM-1'``.
+    """Canonical 4-arg UID minter: ``mint_uid('RNA', 'KAM', '190902', 1)``
+    -> ``'RNA-190902KAM-1'``.
 
     This is the universal UID format documented in SKILL.md: ``<TYPE>-YYMMDD<LAB>-N``.
 
     Args:
       sample_type: SampleType abbreviation, e.g. ``'OOC'``, ``'D.SEQ'``.
       lab:         Lab code suffix, e.g. ``'KAM'``, ``'ENG'``.
-      date:        6-digit YYMMDD string, e.g. ``'260527'``.
+      date:        6-digit YYMMDD string, e.g. ``'190902'``.
       n:           Integer counter (1-based).
     """
     return f"{sample_type}-{date}{lab}-{n}"
@@ -2483,7 +2483,7 @@ SCIENTIST = "Firstname Lastname"
 # Existing UIDs this project's new rows cite as Parent, keyed by whatever
 # natural identifier the PI's data uses.
 PARENT_UID_REUSE = {
-    # "HUVEC": "CEL-241211KAM-1",
+    # "HUVEC": "CEL-190901KAM-1",
 }
 
 # Manuscript section headers used verbatim as `Protocol` field values.
@@ -4645,16 +4645,16 @@ def test_retrieve_flag_exists():
 
 def test_load_retrieve_uids_reads_one_per_line(tmp_path):
     p = tmp_path / "RETRIEVE.TXT"
-    p.write_text("D.SEQ-260527KAM-1\nD.IMG-260527KAM-2\n\n")
+    p.write_text("D.SEQ-190902KAM-1\nD.IMG-190902KAM-2\n\n")
     assert review.load_retrieve_uids(p) == {
-        "D.SEQ-260527KAM-1", "D.IMG-260527KAM-2"}
+        "D.SEQ-190902KAM-1", "D.IMG-190902KAM-2"}
 
 
 def test_load_retrieve_uids_strips_whitespace_and_blanks(tmp_path):
     p = tmp_path / "RETRIEVE.TXT"
-    p.write_text("  D.SEQ-260527KAM-1  \n\n\n  \nD.IMG-260527KAM-2\n")
+    p.write_text("  D.SEQ-190902KAM-1  \n\n\n  \nD.IMG-190902KAM-2\n")
     assert review.load_retrieve_uids(p) == {
-        "D.SEQ-260527KAM-1", "D.IMG-260527KAM-2"}
+        "D.SEQ-190902KAM-1", "D.IMG-190902KAM-2"}
 
 
 def test_load_retrieve_uids_missing_file_returns_none(tmp_path):
@@ -6383,7 +6383,7 @@ def test_artifact_feeds_write_4sheet_xlsx_end_to_end(tmp_path):
     out = tmp_path / "ArmA_D.VIA.xlsx"
     _common.write_4sheet_xlsx(
         out, "D.VIA",
-        samples=[{"UID": "D.VIA-260721KAM-1", "Type": "MTS assay"}],
+        samples=[{"UID": "D.VIA-190903KAM-1", "Type": "MTS assay"}],
         assay_titles=["Cell Viability Assay"],
         ontology=ontology,
     )
@@ -8650,7 +8650,7 @@ def test_adapt_nextseek_workbook_reads_per_type_sheets(tmp_path):
 
 def test_adapt_nextseek_workbook_infers_type_from_uid_when_no_column(tmp_path):
     p = tmp_path / "x_AllMetadata.xlsx"
-    _xlsx(p, {"Sheet1": (["UID", "Parent"], [["D.SEQ-260721KAM-3", "RNA-1"]])})
+    _xlsx(p, {"Sheet1": (["UID", "Parent"], [["D.SEQ-190903KAM-3", "RNA-1"]])})
     got = ad.adapt_nextseek_workbook(p)
     assert got.samples[0].sample_type == "D.SEQ"
 
@@ -11676,12 +11676,12 @@ from report import adapters, mapping, execute, render, validate_artifact
 wb = Workbook(); ws = wb.active; ws.title = "Samples"
 ws.append(["uid", "sampletype", "parent", "json_metadata"])
 for i in (1, 2, 3):
-    ws.append([f"D.SEQ-260721KAM-{i}", "D.SEQ", "TIS-260721KAM-1",
-               json.dumps({"UID": f"D.SEQ-260721KAM-{i}",
-                           "Parent": "TIS-260721KAM-1",
+    ws.append([f"D.SEQ-190903KAM-{i}", "D.SEQ", "TIS-190903KAM-1",
+               json.dumps({"UID": f"D.SEQ-190903KAM-{i}",
+                           "Parent": "TIS-190903KAM-1",
                            "LibraryLayout": "paired"})])
-ws.append(["TIS-260721KAM-1", "TIS", "",
-           json.dumps({"UID": "TIS-260721KAM-1", "Tissue": "liver"})])
+ws.append(["TIS-190903KAM-1", "TIS", "",
+           json.dumps({"UID": "TIS-190903KAM-1", "Tissue": "liver"})])
 wb.save("ArmA.xlsx")
 
 normalized = adapters.adapt(pathlib.Path("ArmA.xlsx"))
@@ -11955,11 +11955,11 @@ If artifacts already exist, **use them** and skip Step 2. Four such run dirs wer
 
 - [ ] **Step 2: Only if none exist — generate one run**
 
-Take a UID set from `e2e/catalog.json` family `reporting`, which carries real production UIDs (`D.SEQ-221031SHA-67-PUB`, `D.SEQ-230512FOR-288-PUB`, `D.MSP-230828GRI-4-PUB`):
+Take a UID set from `e2e/catalog.json` family `reporting`, which carries real production UIDs (`D.SEQ-190210SHA-67-PUB`, `D.SEQ-190702FOR-288-PUB`, `D.MSP-190802GRI-4-PUB`):
 
 ```bash
 cd /home/cdemu/code/chat_nextseek
-uv run cli.py -q "Build me a GEO Submission for D.SEQ-221031SHA-67-PUB D.SEQ-230512FOR-288-PUB"
+uv run cli.py -q "Build me a GEO Submission for D.SEQ-190210SHA-67-PUB D.SEQ-190702FOR-288-PUB"
 ```
 
 **This makes live API calls against production NExtSEEK and needs credentials.** If credentials are unavailable, stop here and report — do **not** hand-author a fake response. A fabricated fixture that diverges from the real five-level nesting is worse than no fixture, because it would make the adapter tests pass against a shape the API never returns.
@@ -12199,7 +12199,7 @@ is worse than having no fixture.
 
    ```bash
    cd /home/cdemu/code/chat_nextseek
-   uv run cli.py -q "Build me a GEO Submission for D.SEQ-221031SHA-67-PUB"
+   uv run cli.py -q "Build me a GEO Submission for D.SEQ-190210SHA-67-PUB"
    ```
 
 3. Scrub before committing. Run directories contain real tokens and localhost

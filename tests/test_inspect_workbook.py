@@ -19,7 +19,7 @@ def test_inspect_runs():
     # Headers section is printed even without --sample
     assert "Headers" in result.stdout
     # Without --sample, sample data rows should NOT appear
-    assert "RNA-260527KAM-1" not in result.stdout
+    assert "RNA-190902KAM-1" not in result.stdout
 
 
 def test_inspect_with_sheet_filter():
@@ -28,8 +28,8 @@ def test_inspect_with_sheet_filter():
         capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0
-    assert "RNA-260527KAM-1" in result.stdout
-    assert "RNA-260527KAM-2" in result.stdout
+    assert "RNA-190902KAM-1" in result.stdout
+    assert "RNA-190902KAM-2" in result.stdout
     # Filter active — Instructions sheet should not have a detail block
     assert "### Sheet: Instructions" not in result.stdout
 

@@ -216,8 +216,8 @@ chat_nextseek persists exactly the API responses needed, on every report run
 | `protocol_files.json` | downloaded blobs + extracted docx/pdf text |
 
 Procedure: take UIDs from `e2e/catalog.json` family `reporting` (64 variants
-with real production UIDs — `D.SEQ-221031SHA-67-PUB`, `D.SEQ-230512FOR-288-PUB`,
-`D.MSP-230828GRI-4-PUB`), run
+with real production UIDs — `D.SEQ-190210SHA-67-PUB`, `D.SEQ-190702FOR-288-PUB`,
+`D.MSP-190802GRI-4-PUB`), run
 `uv run cli.py -q "Build me a GEO Submission for <UIDs>"` once, and copy the
 three artifacts out of `~/.local/state/chat_nextseek/outputs/<run>/`.
 

@@ -99,7 +99,7 @@ def test_artifact_feeds_write_4sheet_xlsx_end_to_end(tmp_path):
     out = tmp_path / "ArmA_D.VIA.xlsx"
     _common.write_4sheet_xlsx(
         out, "D.VIA",
-        samples=[{"UID": "D.VIA-260721KAM-1", "Type": "MTS assay"}],
+        samples=[{"UID": "D.VIA-190903KAM-1", "Type": "MTS assay"}],
         assay_titles=["Cell Viability Assay"],
         ontology=ontology,
     )

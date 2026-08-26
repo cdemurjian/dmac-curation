@@ -477,8 +477,8 @@ _NO_SAMPLES_ROW = object()
 # A sops extract in the shape of the real one: titles are UID filenames.
 _SOPS = [
     (39, "P.URL-200101-V1_url-form-protocol.docx"),
-    (45, "P.FOR-200623-V1_Bacterial-inoculum-batch-preparation-protocol.docx"),
-    (46, "P.WHI-200519-V1_Whitelist-protocol.pdf"),
+    (45, "P.ABC-190101-V1_Bacterial-inoculum-batch-preparation-protocol.docx"),
+    (46, "P.DEF-190102-V1_Whitelist-protocol.pdf"),
 ]
 _TITLE_45 = _SOPS[1][1]
 _TITLE_46 = _SOPS[2][1]
@@ -1252,7 +1252,7 @@ def test_report_states_which_of_the_url_ids_nothing_in_the_extract_corroborates(
             _edge(child_id=2, protocol_id=9999, protocol_source="sop_url",
                   protocol_title=None),
             _edge(child_id=3, protocol_id=45, protocol_source="title",
-                  protocol_title="P.FOR-200623-V1_x.docx"),
+                  protocol_title="P.ABC-190101-V1_x.docx"),
             # a null title that is NOT a URL id: it resolved nothing at all, and
             # counting it here would report an uncorroborated write that the
             # plan does not contain

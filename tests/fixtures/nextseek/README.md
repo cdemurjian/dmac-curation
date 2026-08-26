@@ -35,7 +35,7 @@ is worse than having no fixture.
 
    ```bash
    cd /home/cdemu/code/chat_nextseek
-   uv run cli.py -q "Build me a GEO Submission for D.SEQ-221031SHA-67-PUB"
+   uv run cli.py -q "Build me a GEO Submission for D.SEQ-190210SHA-67-PUB"
    ```
 
 3. Scrub before committing. Run directories contain real tokens and localhost

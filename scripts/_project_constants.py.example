@@ -15,7 +15,7 @@ SCIENTIST = "Firstname Lastname"
 # Existing UIDs this project's new rows cite as Parent, keyed by whatever
 # natural identifier the PI's data uses.
 PARENT_UID_REUSE = {
-    # "HUVEC": "CEL-241211KAM-1",
+    # "HUVEC": "CEL-190901KAM-1",
 }
 
 # Manuscript section headers used verbatim as `Protocol` field values.

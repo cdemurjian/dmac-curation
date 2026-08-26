@@ -42,15 +42,15 @@ def placeholder(what: str) -> str:
 # UID minting
 # ---------------------------------------------------------------------------
 def mint_uid(sample_type: str, lab: str, date: str, n: int) -> str:
-    """Canonical 4-arg UID minter: ``mint_uid('RNA', 'KAM', '260527', 1)``
-    -> ``'RNA-260527KAM-1'``.
+    """Canonical 4-arg UID minter: ``mint_uid('RNA', 'KAM', '190902', 1)``
+    -> ``'RNA-190902KAM-1'``.
 
     This is the universal UID format documented in SKILL.md: ``<TYPE>-YYMMDD<LAB>-N``.
 
     Args:
       sample_type: SampleType abbreviation, e.g. ``'OOC'``, ``'D.SEQ'``.
       lab:         Lab code suffix, e.g. ``'KAM'``, ``'ENG'``.
-      date:        6-digit YYMMDD string, e.g. ``'260527'``.
+      date:        6-digit YYMMDD string, e.g. ``'190902'``.
       n:           Integer counter (1-based).
     """
     return f"{sample_type}-{date}{lab}-{n}"

@@ -66,12 +66,12 @@ def test_precedent_carries_internal_assay_title_for_display():
 def test_prod_uid_regex_rejects_the_two_letter_antibody_type():
     # This is the production defect stage 0 works around. If this test ever
     # goes green-by-passing, production has been fixed and the override can go.
-    assert S.UID_RE_PROD.match("AB-250723FOR-3") is None
-    assert S.UID_RE_FIXED.match("AB-250723FOR-3") is not None
+    assert S.UID_RE_PROD.match("AB-190703FOR-3") is None
+    assert S.UID_RE_FIXED.match("AB-190703FOR-3") is not None
 
 
 def test_both_regexes_agree_on_three_letter_types():
-    for uid in ("TIS-260107SES-1", "D.ADNKA-250917FOR-98", "MUS-220122SAS-125"):
+    for uid in ("TIS-190110SES-1", "D.ADNKA-190704FOR-98", "MUS-191201SAS-125"):
         assert S.UID_RE_PROD.match(uid) is not None
         assert S.UID_RE_FIXED.match(uid) is not None
 
@@ -1710,7 +1710,7 @@ Stage 0 closes the historical 8,120 antibody edges. It does not stop new ones fr
 Follow `docs/ISSUE-CONVENTIONS.md` in the NExtSEEK repo and validate with `scripts/validate_issue.py`. Content:
 
 - **Title:** `UID_RE rejects the two-letter AB sample type, silently dropping every antibody parent reference`
-- **Body:** production (`main-stable-260811 @ 83b8b99`) runs `^([AD]\.)?[A-Z]{3,}-...`; `[A-Z]{2,}` is required. `AB` is the only sample type in the database shorter than three characters. Consequence: 8,131 parent references are discarded before an edge is built, and all 874 `AB` parents have zero incoming `DERIVED_FROM`. The fix is already on `dev-v4-merge` (`nextseek_api/batch_upload/helpers.py`), so this is a deploy, not a code change. Include the reproduction: `UID_RE.match("AB-250723FOR-3")` returns `None` in the running container.
+- **Body:** production (`main-stable-260811 @ 83b8b99`) runs `^([AD]\.)?[A-Z]{3,}-...`; `[A-Z]{2,}` is required. `AB` is the only sample type in the database shorter than three characters. Consequence: 8,131 parent references are discarded before an edge is built, and all 874 `AB` parents have zero incoming `DERIVED_FROM`. The fix is already on `dev-v4-merge` (`nextseek_api/batch_upload/helpers.py`), so this is a deploy, not a code change. Include the reproduction: `UID_RE.match("AB-190703FOR-3")` returns `None` in the running container.
 
 - [ ] **Step 2: Ask the operator before filing**
 

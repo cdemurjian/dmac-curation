@@ -159,8 +159,8 @@ def audit_contradictions(
     # Keyed on uuid and NOT sample_id. `nodes` is documented as a uuid index
     # and sample_id is not unique in it: measured on the real extract
     # 2026-08-14, 86 sample_ids carry two node rows under two uuids and 51 of
-    # those pairs disagree on type (165987 is both MUS-250620SAR-2 and
-    # RNA-250620SAR-2). A sample_id-keyed dict resolves those by last-write-
+    # those pairs disagree on type (165987 is both MUS-191101SAR-2 and
+    # RNA-191101SAR-2). A sample_id-keyed dict resolves those by last-write-
     # wins over a frame whose row order is not stable across extracts, and 85
     # claims land on such an id -- 7 of which would report the other node's
     # type. uuid is unique there (0 duplicates over 177,392 rows) and all

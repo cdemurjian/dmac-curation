@@ -22,9 +22,9 @@ sequenced. The two share three letters and nothing else.
 
     sample types      D.GPT 145 | TIS 80 | DNA 40
     Type field        "GPT Library"
-    Protocol          P.ENG-251216-V1_gpt_delta_assay_LinVo-Dec2025.pdf
-                      P.ESS-201123-V1_gpt-NextGen-Protocol-.pdf
-                      P.ESS-230308-V2_Duplex-sequencing.docx
+    Protocol          P.MNO-190105-V1_gpt_delta_assay-Dec2025.pdf
+                      P.JKL-190106-V1_gpt-NextGen-Protocol-.pdf
+                      P.JKL-190107-V2_Duplex-sequencing.docx
     Name field        19-1060_liver_GPTassay, 19-1148_liver_GPTassay, ...
 
     clearly gpt-delta evidence   185 of 265

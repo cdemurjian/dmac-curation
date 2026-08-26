@@ -46,7 +46,7 @@ Parse `$ARGUMENTS`: optional `<arm>` (letter or short name). If omitted, list ar
 
 ## Behavioral rules
 
-- **UID stamp is not free until proven free.** `<DATE><LAB>` (e.g. `260731WHI`) is
+- **UID stamp is not free until proven free.** `<DATE><LAB>` (e.g. `190221WHI`) is
   shared across every curator's batches. Minting from N=1 into a stamp another
   batch already used silently overwrites their records on upload — a real
   incident (Flower_Tyro clobbered 18 Leddy immunopeptidomics rows). The

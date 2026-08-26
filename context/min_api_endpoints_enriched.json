@@ -18,7 +18,7 @@
     ],
     "llm_hint": "Use when the user provides explicit UIDs and wants full sample metadata including all related parent/child samples. This is the correct endpoint for 'retrieve all samples associated with UID X' \u2014 not samples/{uid}/ GET. POST body must use field name \"identifiers\" (list of UID strings).",
     "example_intents": [
-      "Retrieve all metadata for NHP-220630FLY-1-PUB and its derived samples",
+      "Retrieve all metadata for NHP-190601FLY-1-PUB and its derived samples",
       "Download an Excel spreadsheet with data for samples 12345 and 67890"
     ],
     "request_body": {
@@ -70,8 +70,8 @@
     ],
     "llm_hint": "Use when the user wants to see the full sample lineage or derivation tree from a specific known UID. Requires a UID. For full metadata export of associated samples, use admin/samples/retrieve/ instead.",
     "example_intents": [
-      "Show me all samples derived from NHP-220630FLY-2-PUB",
-      "What tissue and cell samples came from PAT-241113DFC-3?"
+      "Show me all samples derived from NHP-190601FLY-2-PUB",
+      "What tissue and cell samples came from PAT-190401DFC-3?"
     ]
   },
   {
@@ -141,7 +141,7 @@
     "llm_hint": "Use only when the user explicitly asks to create or register a new sample.",
     "example_intents": [
       "Register a new tissue sample for the water study",
-      "Add a new blood draw sample for PAV-220630FLY-3"
+      "Add a new blood draw sample for PAV-190601FLY-3"
     ]
   },
   {
@@ -163,8 +163,8 @@
     ],
     "llm_hint": "Use only for explicit update/modify operations on a specific sample UID. Do NOT use for retrieval.",
     "example_intents": [
-      "Update NHP-220630FLY-1-PUB scientist to John Doe",
-      "Change the study name for sample TIS-230324BOO-39-PUB"
+      "Update NHP-190601FLY-1-PUB scientist to John Doe",
+      "Change the study name for sample TIS-190301BOO-39-PUB"
     ]
   },
   {
@@ -183,7 +183,7 @@
     ],
     "llm_hint": "Use only when the user explicitly asks to delete a specific sample.",
     "example_intents": [
-      "Remove sample NHP-220630FLY-1-PUB from the system",
+      "Remove sample NHP-190601FLY-1-PUB from the system",
       "Delete sample 321"
     ]
   },

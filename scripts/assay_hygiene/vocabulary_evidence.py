@@ -39,7 +39,7 @@ TWO THINGS HERE ARE LOAD-BEARING AND BOTH WERE BUGS FIRST.
    reported 61, 58 and 59 confounded terms. The two guards are not equals. The
    TIE-BREAK is the one that decides answers: keep `sorted()` and drop it, and
    the table is perfectly stable and 23 of 266 rows name a DIFFERENT assay --
-   `p.eng-251216-v1_rna-extraction-protocol.docx` moving from 64 Short Read
+   `p.mno-190105-v1_rna-extraction-protocol.docx` moving from 64 Short Read
    Sequencing to 61 RNA Extraction, and 8 rows flipping between an assay and
    its own `X Analysis` twin (30/31, 25/71, 89/91). `sorted()` on its own is
    decorative given the tie-break -- byte-identical output, measured -- and is

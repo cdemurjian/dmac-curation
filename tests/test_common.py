@@ -14,11 +14,11 @@ import _common  # noqa: E402
 # ---- surviving shared API -------------------------------------------------
 
 def test_mint_uid_signature():
-    assert _common.mint_uid("RNA", "KAM", "260527", 1) == "RNA-260527KAM-1"
+    assert _common.mint_uid("RNA", "KAM", "190902", 1) == "RNA-190902KAM-1"
 
 
 def test_mint_uid_format():
-    assert _common.mint_uid("D.SEQ", "ENG", "260514", 42) == "D.SEQ-260514ENG-42"
+    assert _common.mint_uid("D.SEQ", "ENG", "190504", 42) == "D.SEQ-190504ENG-42"
 
 
 def test_placeholder_marker_shape():
@@ -102,7 +102,7 @@ def test_write_4sheet_xlsx_emits_four_sheets(tmp_path):
     out = tmp_path / "T.xlsx"
     _common.write_4sheet_xlsx(
         out, "MUS",
-        samples=[{"UID": "MUS-260527KAM-1", "Name": "m1"}],
+        samples=[{"UID": "MUS-190902KAM-1", "Name": "m1"}],
         assay_titles=["Tissue Collection"],
     )
     wb = openpyxl.load_workbook(out)
@@ -115,7 +115,7 @@ def test_write_4sheet_xlsx_populates_ontology_when_given(tmp_path):
     out = tmp_path / "T.xlsx"
     _common.write_4sheet_xlsx(
         out, "MUS",
-        samples=[{"UID": "MUS-260527KAM-1", "Strain": "C57BL/6J"}],
+        samples=[{"UID": "MUS-190902KAM-1", "Strain": "C57BL/6J"}],
         assay_titles=[],
         ontology={"Strain": ["C57BL/6J", "BALB/c"]},
     )
@@ -132,7 +132,7 @@ def test_ontology_fields_are_declared_controlled_in_instructions(tmp_path):
     out = tmp_path / "T.xlsx"
     _common.write_4sheet_xlsx(
         out, "MUS",
-        samples=[{"UID": "MUS-260527KAM-1", "Strain": "C57BL/6J"}],
+        samples=[{"UID": "MUS-190902KAM-1", "Strain": "C57BL/6J"}],
         assay_titles=[],
         ontology={"Strain": ["C57BL/6J"]},
     )

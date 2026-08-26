@@ -609,7 +609,7 @@ def test_a_neighbour_in_membership_but_absent_from_samples_still_settles_the_abs
 
 
 def test_a_self_loop_is_excluded_so_a_sample_cannot_settle_its_own_absence():
-    """One real edge, CEL-200702FOR-1 -> itself, and it must not become a neighbour.
+    """One real edge, CEL-190701FOR-1 -> itself, and it must not become a neighbour.
 
     Left in, `children_of[70]` would contain 70, and the lineage test would be
     satisfied by the sample's own registration -- a claim corroborating itself

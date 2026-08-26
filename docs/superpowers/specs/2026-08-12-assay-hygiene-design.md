@@ -81,7 +81,7 @@ what stage 0 would write is a plain `Parent` field:
 
 So nearly three quarters of the write asserts that a flow-cytometry sample
 derives from its calibration file, e.g.
-`D.FLOW-220720SAS-12 -> D.FCS-230206SAS-47 ("...IL6 APC (Beads).fcs")`. That is
+`D.FLOW-191202SAS-12 -> D.FCS-191203SAS-47 ("...IL6 APC (Beads).fcs")`. That is
 a much larger share than the original ruling implied, and excluding
 `CompensationFCSParent` would have been a one-line change dropping stage 0 from
 90,534 edges to roughly 24,000. It was put back to the operator with the measured
@@ -126,8 +126,8 @@ The dominant pattern is a cross-stage hop where the child sits in the assay that
 produced it and the parent sits in the assay that produced *it*:
 
 ```
-CHILD  D.IMG-230913ENG-430   -> ['Comet Chip']
-PARENT TIS-230830ENG-244     -> ['Tissue Collection']
+CHILD  D.IMG-190503ENG-430   -> ['Comet Chip']
+PARENT TIS-190502ENG-244     -> ['Tissue Collection']
 ```
 
 That could be read as a deliberate outputs-only curation convention. It is not.
@@ -295,7 +295,7 @@ Diffed against the graph:
    by the child's metadata, and across the whole `CHILD_OF` set 881 edges are
    undeclared, over 291 distinct children of which 240 declare no parent at all.
    Promotion would resurrect parent references a curator has since changed.
-   A worked example: `DNA-260224SES-7` now declares `Parent: TIS-260107SES-1`,
+   A worked example: `DNA-190111SES-7` now declares `Parent: TIS-190110SES-1`,
    while `CHILD_OF` still points at six DNA siblings.
 3. **It is idempotent against future ingests.** Deriving from metadata makes
    stage 0 produce exactly what a *fixed* pipeline would produce, so a later
@@ -316,7 +316,7 @@ v4-stable-wt    \A([A-Z]\.)?[A-Z]{2,}-\d{6}[A-Z]{2,5}-\d+(-PUB\d*)?\Z
 
 `[A-Z]{3,}` requires a sample type code of three or more letters. Exactly one
 sample type in the database is shorter: **`AB`**, the antibody type. So
-`UID_RE.match("AB-250723FOR-3")` returns `False` on production, every antibody
+`UID_RE.match("AB-190703FOR-3")` returns `False` on production, every antibody
 parent reference is silently discarded before any edge is built, and no
 `DERIVED_FROM` edge to an `AB` sample has ever been created. Confirmed: 874
 distinct `AB` parents exist as nodes, with **0** incoming `DERIVED_FROM`.
@@ -421,7 +421,7 @@ sops.title uniqueness                                        553 / 553
 So the rule this spec mandates would set `protocol_id` on **1 edge out of 90,534**, while 79.7% of
 the graph's existing edges carry one, resolvable for 94% of the planned population by a rule the
 database demonstrably uses. Production `Protocol` values are overwhelmingly SOP titles
-(`P.FOR-200623-V1_BL2-Monocytes-Isolation-Protocol-v1.docx`), not `/sops/<id>` URLs.
+(`P.ABC-190101-V1_BL2-Monocytes-Isolation-Protocol-v1.docx`), not `/sops/<id>` URLs.
 
 The implementation is faithful: `_build_derived_from_payloads` really does use `_SOP_URL_RE`. But
 that function is normally fed an upload sheet carrying `sop_id` explicitly, and the URL regex is
@@ -452,7 +452,7 @@ The real source is the **upload sheet's explicit `sop_id` column**, which
 The prior migration's payloads carry it, beside a title-form Protocol:
 
 ```
-sop_id: 45   Protocol: P.FOR-200623-V1_Bacterial-inoculum-batch-preparation-protocol.docx
+sop_id: 45   Protocol: P.ABC-190101-V1_Bacterial-inoculum-batch-preparation-protocol.docx
 ```
 
 And that column was computed by `internal-assays-migration/phase4_sample_export.py::resolve_sop_id`,
@@ -460,8 +460,8 @@ which handles exactly three formats against a `{sops.title: sops.id}` lookup:
 
 ```
 1. URL with integer id   https://fairdata.mit.edu/sops/39   -> 39
-2. URL with UID          .../uid=P.WHI-200519-V1_...pdf/    -> title lookup
-3. Plain UID filename    P.FOR-200623-V1_...docx            -> title lookup
+2. URL with UID          .../uid=P.DEF-190102-V1_...pdf/    -> title lookup
+3. Plain UID filename    P.ABC-190101-V1_...docx            -> title lookup
 ```
 
 Applying that rule verbatim to production:
@@ -1069,7 +1069,7 @@ Additional constraints on stages A-F:
    rollback are load-bearing, not optional.
 5. **Genuinely unregistered batches exist** and Mode 1 will not always find a
    precedent for them. Several ENG batches are 100% unregistered
-   (`260514ENG` 464/464, `260505ENG` 394/394, `260519ENG` 9/9), so both endpoints
+   (`190504ENG` 464/464, `190506ENG` 394/394, `190505ENG` 9/9), so both endpoints
    are dark and the hop lookup returns nothing. These fall to the LLM slice or
    to the PI.
 6. **The `UID_RE` regression will regenerate the gap until production is
@@ -1159,13 +1159,13 @@ Worked example, the NDMA cohort. Full lineage present in the graph, zero assay
 annotation, only the root chemical registered anywhere:
 
 ```
-CHM-230509ENG-1  "NDMA-1"                    [assay 12: Chemical Challenge]
-  ^-- MUS-260519ENG-1        protocol: -     assay: -
-  ^-- MUS-260519ENG-2        protocol: -     assay: -
-        ^-- TIS-260519ENG-4  protocol: Med-Term-Collection-at-Necropsy  assay: -
-        ^-- TIS-260519ENG-5  protocol: Med-Term-Collection-at-Necropsy  assay: -
-              ^-- DNA-260514ENG-214          assay: -
-                    ^-- D.SEQ-260514ENG-214  assay: -
+CHM-190501ENG-1  "NDMA-1"                    [assay 12: Chemical Challenge]
+  ^-- MUS-190505ENG-1        protocol: -     assay: -
+  ^-- MUS-190505ENG-2        protocol: -     assay: -
+        ^-- TIS-190505ENG-4  protocol: Med-Term-Collection-at-Necropsy  assay: -
+        ^-- TIS-190505ENG-5  protocol: Med-Term-Collection-at-Necropsy  assay: -
+              ^-- DNA-190504ENG-214          assay: -
+                    ^-- D.SEQ-190504ENG-214  assay: -
 ```
 
 The TIS edges carry a real protocol title pulled from SEEK's `sops` table, which

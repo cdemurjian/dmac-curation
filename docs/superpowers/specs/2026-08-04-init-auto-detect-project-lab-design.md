@@ -69,7 +69,7 @@ pickers (more typing, less automation).
 {
   "projects": [{"id": 10, "title": "Cancer_Systems_Biology_Consortium(CSBC)", "score": 3}, ...],
   "chosen_project": {"id": 10, "title": "..."},
-  "labs": [{"code": "WHI", "count": 111, "scientists": ["Cameron Flower", "Forest White"], "latest": "260731"}, ...],
+  "labs": [{"code": "WHI", "count": 111, "scientists": ["Cameron Flower", "Forest White"], "latest": "190221"}, ...],
   "pi_guess": "white",
   "export_path": "previous_metadata/project-10-...CSBC.xlsx",
   "evidence": ["path:csbc", "manuscript-author:White", ...],
@@ -81,7 +81,7 @@ pickers (more typing, less automation).
 
 - Pipeline mode, args omitted → run `detect-context`; present one combined
   confirm: *"Project **CSBC (10)**, lab **WHI** (White; 111 samples, latest
-  260731), PI **white** — accept / change?"* One keystroke to accept; override
+  190221), PI **white** — accept / change?"* One keystroke to accept; override
   chooses from the ranked project / lab lists (or free-text a new lab code).
 - `detect-context` pulls the **top-ranked** project's export so the lab list is
   ready for the single confirm. If the curator overrides the **project** at the

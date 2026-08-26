@@ -13,17 +13,17 @@ paths:
 
         **DO NOT USE WHEN:** The user wants to SEARCH or FILTER samples by type, attribute, or text — use `POST advanced_search` instead.
 
-        **ACCEPTS:** A list of sample UIDs (e.g. 'NHP-220630FLY-1-PUB') and/or SEEK IDs (numeric); optional `output_format` (`json` or `excel`).
+        **ACCEPTS:** A list of sample UIDs (e.g. 'NHP-190601FLY-1-PUB') and/or SEEK IDs (numeric); optional `output_format` (`json` or `excel`).
 
         **RETURNS:** JSON grouped by sample type with full metadata, or an Excel workbook. Includes derived (parent/child) samples automatically.
 
         **TRIGGER PHRASES:** export samples, download sample metadata, admin sample retrieval, bulk sample export, sample data dump
 
         **EXAMPLES:**
-        - 'Export all metadata for NHP-220630FLY-1-PUB and its derived samples as JSON'
+        - 'Export all metadata for NHP-190601FLY-1-PUB and its derived samples as JSON'
         - 'Download an Excel spreadsheet with data for samples 12345 and 67890'
         - 'Get sample data for these three monkeys in JSON format'
-        - 'Retrieve full metadata for tissue samples TIS-230324BOO-39-PUB and TIS-230324BOO-40-PUB'
+        - 'Retrieve full metadata for tissue samples TIS-190301BOO-39-PUB and TIS-190301BOO-40-PUB'
       tags:
       - Samples
       requestBody:
@@ -35,13 +35,13 @@ paths:
               JSONOutput(default):
                 value:
                   identifiers:
-                  - NHP-220630FLY-1-PUB
-                  - TIS-230324BOO-39-PUB
+                  - NHP-190601FLY-1-PUB
+                  - TIS-190301BOO-39-PUB
                 summary: JSON output (default)
               ExcelOutputWithMixedIDs:
                 value:
                   identifiers:
-                  - NHP-220630FLY-1-PUB
+                  - NHP-190601FLY-1-PUB
                   - '12345'
                   output_format: excel
                 summary: Excel output with mixed IDs
@@ -937,7 +937,7 @@ paths:
 
         **EXAMPLES:**
         - 'Get the CT scan images for this monkey'
-        - 'Show me the flow cytometry results file for sample NHP-220630FLY-1-PUB'
+        - 'Show me the flow cytometry results file for sample NHP-190601FLY-1-PUB'
         - 'Fetch data file 560'
       parameters:
       - in: path
@@ -1231,8 +1231,8 @@ paths:
         **TRIGGER PHRASES:** sample lineage batch, multiple sample trees, lineage for several samples, bulk lineage
 
         **EXAMPLES:**
-        - 'Show me all samples derived from NHP-220630FLY-1-PUB'
-        - 'Get the full lineage for tissue samples TIS-230324BOO-39-PUB and TIS-230324BOO-40-PUB'
+        - 'Show me all samples derived from NHP-190601FLY-1-PUB'
+        - 'Get the full lineage for tissue samples TIS-190301BOO-39-PUB and TIS-190301BOO-40-PUB'
         - 'Retrieve lineage trees for these three samples with edge attributes'
       parameters:
       - in: query
@@ -1256,13 +1256,13 @@ paths:
               SingleSampleByUID:
                 value:
                   sample_ids:
-                  - NHP-220630FLY-1-PUB
+                  - NHP-190601FLY-1-PUB
                   include_attributes: false
                 summary: Single sample by UID
               MultipleSamplesWithAttributes:
                 value:
                   sample_ids:
-                  - NHP-220630FLY-1-PUB
+                  - NHP-190601FLY-1-PUB
                   - '12345'
                   include_attributes: true
                   timeout: 120.0
@@ -1289,18 +1289,18 @@ paths:
                   value:
                     total_trees: 1
                     trees:
-                    - input_id: NHP-220630FLY-1-PUB
+                    - input_id: NHP-190601FLY-1-PUB
                       resolved_id: '1506'
                       total_nodes: 5
                       total_rels: 4
                       nodes:
                       - id: '1506'
-                        uuid: NHP-220630FLY-1-PUB
+                        uuid: NHP-190601FLY-1-PUB
                         sample_type: NHP
                         color: '#A3D46F'
                         parentIds: []
                       - id: '1525'
-                        uuid: PAV-230522GRI-7-PUB
+                        uuid: PAV-190801GRI-7-PUB
                         sample_type: PAV
                         color: '#A3D46F'
                         parentIds:
@@ -2437,7 +2437,7 @@ paths:
       description: |
         **SUMMARY:** Retrieve the full parent-child sample hierarchy tree for a single sample.
 
-        **USE WHEN:** The user asks for the lineage, family tree, or derivation chain of ONE sample identified by a UID (e.g. NHP-220630FLY-2-PUB) or numeric SEEK ID.
+        **USE WHEN:** The user asks for the lineage, family tree, or derivation chain of ONE sample identified by a UID (e.g. NHP-190601FLY-2-PUB) or numeric SEEK ID.
 
         **DO NOT USE WHEN:** The user wants lineage trees for MULTIPLE samples at once — use `POST entity_tree/lineage` instead.
 
@@ -2448,8 +2448,8 @@ paths:
         **TRIGGER PHRASES:** sample tree, sample lineage, sample hierarchy, derived from, parent samples, child samples
 
         **EXAMPLES:**
-        - 'Show me all samples derived from NHP-220630FLY-2-PUB'
-        - 'What tissue and cell samples came from this patient: PAT-241113DFC-3?'
+        - 'Show me all samples derived from NHP-190601FLY-2-PUB'
+        - 'What tissue and cell samples came from this patient: PAT-190401DFC-3?'
         - 'Get the sample tree for sample 1525'
       parameters:
       - in: path
@@ -2477,13 +2477,13 @@ paths:
                     total_rels: 1
                     nodes:
                     - id: '1525'
-                      uuid: PAV-230522GRI-7-PUB
+                      uuid: PAV-190801GRI-7-PUB
                       sample_type: PAV
                       color: '#A3D46F'
                       parentIds:
                       - '1506'
                     - id: '1506'
-                      uuid: PAT-230522GRI-7-PUB
+                      uuid: PAT-190801GRI-7-PUB
                       sample_type: PAT
                       color: '#A3D46F'
                       parentIds: []
@@ -2492,7 +2492,7 @@ paths:
                       parent_id: '1506'
                       internal_assay_id: '380'
                       internal_assay_title: Patient Visit
-                      protocol_title: P.GRI-230228-V1_2.1-Study-Approval.docx
+                      protocol_title: P.GHI-190103-V1_2.1-Study-Approval.docx
                       protocol_id: '145'
                   summary: Sample tree response
           description: ''
@@ -2772,7 +2772,7 @@ paths:
 
         **EXAMPLES:**
         - 'Register a new tissue sample for the water study'
-        - 'Add a new blood draw sample for a monkey taken during this visit (PAV-220630FLY-3)'
+        - 'Add a new blood draw sample for a monkey taken during this visit (PAV-190601FLY-3)'
         - 'Create a new sample of type TIS'
       parameters:
       - in: query
@@ -2865,8 +2865,8 @@ paths:
         **TRIGGER PHRASES:** get sample, fetch sample, sample details, sample info, show sample, look up sample
 
         **EXAMPLES:**
-        - 'Show me the details of sample NHP-220630FLY-2-PUB'
-        - 'What assays are linked to TIS-230324BOO-39-PUB?'
+        - 'Show me the details of sample NHP-190601FLY-2-PUB'
+        - 'What assays are linked to TIS-190301BOO-39-PUB?'
         - 'Get sample 321'
       parameters:
       - in: query
@@ -2936,8 +2936,8 @@ paths:
         **TRIGGER PHRASES:** update sample, edit sample, modify sample, change sample, patch sample
 
         **EXAMPLES:**
-        - 'Update NHP-220630FLY-1-PUB scientist to John Doe'
-        - 'Change the study name for sample TIS-230324BOO-39-PUB'
+        - 'Update NHP-190601FLY-1-PUB scientist to John Doe'
+        - 'Change the study name for sample TIS-190301BOO-39-PUB'
         - 'Update sample 321 title'
       parameters:
       - in: query
@@ -3010,7 +3010,7 @@ paths:
         **TRIGGER PHRASES:** delete sample, remove sample, destroy sample, drop sample
 
         **EXAMPLES:**
-        - 'Remove sample NHP-220630FLY-1-PUB from the system'
+        - 'Remove sample NHP-190601FLY-1-PUB from the system'
         - 'Delete all records for sample 321'
         - 'Permanently remove this sample'
       parameters:
@@ -3250,7 +3250,7 @@ paths:
         **TRIGGER PHRASES:** child sample types, what types derived, sample type children, derived types, downstream types
 
         **EXAMPLES:**
-        - 'What types of samples were collected from NHP-220630FLY-1-PUB?'
+        - 'What types of samples were collected from NHP-190601FLY-1-PUB?'
         - 'Does this monkey have any imaging data?'
         - 'What kinds of data exist for sample 1506?'
       parameters:
@@ -3967,7 +3967,7 @@ paths:
                   ID
               DownloadBySOPTitle/UID:
                 value:
-                  uid_or_id: P.ESS-251028-V1_NG_8-GEX.docx
+                  uid_or_id: P.JKL-190104-V1_NG_8-GEX.docx
                 summary: Download by SOP title/UID
                 description: Download a SOP's content blob using its NExtSEEK UID
                   (title)
@@ -3987,7 +3987,7 @@ paths:
               BatchDownload(zip):
                 value:
                 - uid_or_id: '142'
-                - uid_or_id: P.ESS-251028-V1_NG_8-GEX.docx
+                - uid_or_id: P.JKL-190104-V1_NG_8-GEX.docx
                 summary: Batch download (zip)
                 description: Download multiple SOPs as a zip archive
       security:
@@ -4032,7 +4032,7 @@ components:
       additionalProperties: false
       properties:
         identifiers:
-          description: List of Sample UIDs (e.g., 'NHP-220630FLY-1-PUB') and/or SEEK
+          description: List of Sample UIDs (e.g., 'NHP-190601FLY-1-PUB') and/or SEEK
             IDs (numeric strings). Numeric strings are treated as SEEK IDs; non-numeric
             strings are treated as sample UIDs.
           items:
@@ -6137,7 +6137,7 @@ components:
       description: Request body for POST /entity_tree/lineage endpoint.
       properties:
         sample_ids:
-          description: 'List of sample identifiers: UIDs (e.g., ''NHP-220630FLY-1-PUB'')
+          description: 'List of sample identifiers: UIDs (e.g., ''NHP-190601FLY-1-PUB'')
             or numeric SEEK IDs'
           items:
             type: string

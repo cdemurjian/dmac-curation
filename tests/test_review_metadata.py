@@ -19,16 +19,16 @@ def test_retrieve_flag_exists():
 
 def test_load_retrieve_uids_reads_one_per_line(tmp_path):
     p = tmp_path / "RETRIEVE.TXT"
-    p.write_text("D.SEQ-260527KAM-1\nD.IMG-260527KAM-2\n\n")
+    p.write_text("D.SEQ-190902KAM-1\nD.IMG-190902KAM-2\n\n")
     assert review.load_retrieve_uids(p) == {
-        "D.SEQ-260527KAM-1", "D.IMG-260527KAM-2"}
+        "D.SEQ-190902KAM-1", "D.IMG-190902KAM-2"}
 
 
 def test_load_retrieve_uids_strips_whitespace_and_blanks(tmp_path):
     p = tmp_path / "RETRIEVE.TXT"
-    p.write_text("  D.SEQ-260527KAM-1  \n\n\n  \nD.IMG-260527KAM-2\n")
+    p.write_text("  D.SEQ-190902KAM-1  \n\n\n  \nD.IMG-190902KAM-2\n")
     assert review.load_retrieve_uids(p) == {
-        "D.SEQ-260527KAM-1", "D.IMG-260527KAM-2"}
+        "D.SEQ-190902KAM-1", "D.IMG-190902KAM-2"}
 
 
 def test_load_retrieve_uids_missing_file_returns_none(tmp_path):
