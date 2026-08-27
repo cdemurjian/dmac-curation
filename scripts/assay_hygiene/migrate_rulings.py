@@ -100,3 +100,25 @@ def migrate(run_dir: Path, assays: pd.DataFrame) -> tuple[list[Ruling], list[dic
             prov.append({"key": key, "source": "mode1", "cohort": str(row.key)})
 
     return out, prov
+
+
+def conflicts(rulings: list[Ruling]) -> list[dict]:
+    """-> one record per key carrying more than one distinct verdict.
+
+    NEVER resolved by majority, recency or source precedence. A pair ruling is
+    coarser than the cohort it was made against, so a disagreement means the
+    operator's judgement rested on something the pair key discards -- the lab,
+    the parent types, or the specific term. Measured on RUN1 over all three
+    ruling files: 5 of 127 keys. Two APPROVE and one REJECT is a conflict, not
+    an APPROVE.
+
+    Three of the five are Mode 2 disagreeing with itself. The other two involve
+    Mode 1, which the plan's original 156/114/3 measurement omitted: one is Mode
+    1 against itself (APPROVE vs WRONG_ASSAY) and one is Mode 1 APPROVE against
+    Mode 2 REJECT -- the only cross-source disagreement in the set.
+    """
+    seen: dict[tuple, set[str]] = {}
+    for r in rulings:
+        seen.setdefault(r.key, set()).add(r.verdict)
+    return [{"key": k, "verdicts": sorted(v)}
+            for k, v in sorted(seen.items()) if len(v) > 1]

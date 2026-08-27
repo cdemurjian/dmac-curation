@@ -33,7 +33,18 @@ Taken from RUN1 on 2026-08-27; re-derive rather than trusting these.
 
 All 111 Mode 2 assay titles resolve to a **unique** internal assay id (0 ambiguous, 0 unresolvable). Of the Mode 2 rows, 100 are lineage (carrying the action in `value`: 70 `ADD_PARENT_TO_ASSAY`, 30 `ADD_CHILD_TO_ASSAY`) and 11 are term rows.
 
-156 ruled rows collapse to **114 distinct pair keys**, of which **3 carry conflicting verdicts**.
+**CORRECTED 2026-08-27 by re-derivation, as this section instructs.** The
+figures below originally read "156 ruled rows collapse to **114 distinct pair
+keys**, of which **3 carry conflicting verdicts**". That measurement silently
+omitted the 44 Mode 1 rows: 111 + 45 = 156, and the table directly above lists
+44 more. Migration reads all three files, exactly as Task 2 specifies.
+
+Measured over all three sources: **200 ruled rows** (mode2 111 + pair 45 +
+mode1 44) collapse to **127 distinct pair keys**, of which **5 carry
+conflicting verdicts**. Excluding mode1 reproduces the old 156 / 114 / 3
+exactly, which is how the omission was identified. Every verdict present is
+inside `VERDICTS` (`APPROVE`, `REJECT`, `WRONG_ASSAY`), so `save` refuses none
+of them for vocabulary.
 
 ---
 

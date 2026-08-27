@@ -90,3 +90,30 @@ def test_a_missing_ruling_file_is_skipped_not_fatal(tmp_path, assays):
     (tmp_path / "RUN9" / "00-rulings").mkdir(parents=True)
     got, _ = M.migrate(tmp_path / "RUN9", assays)
     assert got == []
+
+
+def test_conflicts_reports_a_key_ruled_two_ways(assays):
+    from assay_hygiene.rulings import Ruling
+    key = ("TIS", "74", "ADD_PARENT_TO_ASSAY")
+    found = M.conflicts([Ruling(key, "APPROVE", "2026-08-20", "operator"),
+                         Ruling(key, "REJECT", "2026-08-20", "operator")])
+    assert len(found) == 1
+    assert sorted(found[0]["verdicts"]) == ["APPROVE", "REJECT"]
+    assert found[0]["key"] == key
+
+
+def test_conflicts_is_empty_when_every_key_agrees(assays):
+    from assay_hygiene.rulings import Ruling
+    key = ("TIS", "74", "ADD_PARENT_TO_ASSAY")
+    assert M.conflicts([Ruling(key, "APPROVE", "2026-08-20", "operator"),
+                        Ruling(key, "APPROVE", "2026-08-21", "operator")]) == []
+
+
+def test_a_conflict_is_never_resolved_by_majority(assays):
+    """Two APPROVE and one REJECT is still a conflict, not an APPROVE."""
+    from assay_hygiene.rulings import Ruling
+    key = ("TIS", "74", "ADD_PARENT_TO_ASSAY")
+    found = M.conflicts([Ruling(key, "APPROVE", "2026-08-20", "operator"),
+                         Ruling(key, "APPROVE", "2026-08-20", "operator"),
+                         Ruling(key, "REJECT", "2026-08-20", "operator")])
+    assert len(found) == 1

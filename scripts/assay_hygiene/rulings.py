@@ -17,11 +17,16 @@ unit the reachability gate decides on, which is why ~150 pair questions settled
 97% of a 99,449-row population when 251 cohort rulings could only estimate it.
 
 WHAT THE KEY COSTS, stated because it is real: a pair ruling is COARSER than
-the cohort it was made against. Measured on RUN1, 156 ruled rows collapse to 114
-keys and 3 of those carry conflicting verdicts -- the operator approved one
-cohort and rejected another sharing the same triple, because his judgement
-rested on something the triple discards. `save` refuses to resolve that. A
-conflict is escalated, never averaged.
+the cohort it was made against. Measured on RUN1 over all three ruling files,
+200 ruled rows collapse to 127 keys and 5 of those carry conflicting verdicts --
+the operator approved one cohort and rejected another sharing the same triple,
+because his judgement rested on something the triple discards. `save` refuses to
+resolve that. A conflict is escalated, never averaged.
+
+(An earlier figure of 156 rows / 114 keys / 3 conflicts circulated in the plan
+and the handoff. It omitted the 44 Mode 1 rows -- 111 + 45 = 156 -- and
+excluding Mode 1 reproduces it exactly. 5 of 127 keys is the true cost, not
+3 of 114.)
 
 PROVENANCE IS NOT STORED HERE. Cohort strings carry lab codes and at least one
 protocol filename containing a person's name; they live in a gitignored sidecar
