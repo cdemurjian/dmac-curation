@@ -1916,6 +1916,15 @@ def main(extract_dir: str = "assay-hygiene/extract",
     from ._writeguard import assert_writable
     assert_writable(out, ("findings.csv",))
 
+    missing = [f for f in ("claims.parquet", "vocabulary.csv")
+               if not (out / f).exists()]
+    if missing:
+        print(f"ERROR: {missing} not found under {out}. This stage reads what "
+              f"`run_evidence` writes; run it first:\n"
+              f"  PYTHONPATH=scripts uv run --with pandas --with pyarrow \\\n"
+              f"      python -m assay_hygiene.run_evidence {extract_dir} {out}")
+        return 2
+
     samples = pd.read_parquet(d / "samples.parquet")
     membership = pd.read_parquet(d / "membership.parquet")
     assays = pd.read_parquet(d / "assays.parquet")

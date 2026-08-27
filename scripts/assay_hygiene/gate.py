@@ -944,6 +944,15 @@ def main(extract_dir: str = "assay-hygiene/extract",
     d, out = Path(extract_dir), Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
+    missing = [f for f in ("claims.parquet", "vocabulary.csv")
+               if not (out / f).exists()]
+    if missing:
+        print(f"ERROR: {missing} not found under {out}. This stage reads what "
+              f"`run_evidence` writes; run it first:\n"
+              f"  PYTHONPATH=scripts uv run --with pandas --with pyarrow \\\n"
+              f"      python -m assay_hygiene.run_evidence {extract_dir} {out}")
+        return 2
+
     membership = pd.read_parquet(d / "membership.parquet")
     assays = pd.read_parquet(d / "assays.parquet")
     nodes = pd.read_parquet(d / "nodes.parquet")
