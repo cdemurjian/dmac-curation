@@ -2,6 +2,214 @@
 
 All notable changes to dmac-curation will be documented in this file.
 
+## 0.5.0 - 2026-08-27
+
+A fifth mode. `assay` is house-scoped assay hygiene — one production extract, all
+projects, no PI — and it is the first thing in this plugin that writes to production.
+Alongside it: `/curate-init` learned to guess the project, the lab and the PI;
+`/curate-build` gained a UID-stamp collision guard; and `schema` mode gained two
+external grounding sources.
+
+### Added
+
+- **`assay` mode - 8 commands, `skills/curation/ASSAY.md`, 39 modules under
+  `scripts/assay_hygiene/`.** It finds NExtSEEK samples that should be registered
+  against an internal assay and are not, puts every proposal in front of a human, and
+  writes the approved ones to production. The order is `/curate-assay-init` →
+  `-vocabulary` → `-detect` → `-review` → `-resolve` → `-write`, with `-status` and
+  `-backup` safe at any point. **House-scoped, not project-scoped:** one extract, all
+  projects, no lockfile, no PI. 40 test modules cover it.
+- **Numbered immutable runs.** `/curate-assay-init` creates `assets/RUN<n>/` with eight
+  tiers and chmods `00-rulings` through `06-findings` read-only **at creation**, not at
+  the end - a tier that is writable for the duration of a run is a tier the run can
+  destroy, and the artifacts most worth protecting are written first. State is
+  `assets/assay-run.json`; a second `init` refuses while one is open, because two
+  concurrent write phases assign `MAX(id)+1` primary keys with no lock.
+- **A durable ruling store that outlives the runs** - `assets/rulings/pairs.tsv`, keyed
+  on `(sample_type, internal_assay_id, action)`. RUN1 filed verdicts under
+  `lab|sample_type|parent_types|assay_title|field|value`; four of those six fields move
+  with the extract, so a new extract matched almost none of them and **261 rulings
+  became worthless without a single judgement having changed**. The pair key survives
+  all four. It is also *coarser* than the cohort it was ruled against: measured on
+  RUN1, 200 ruled rows collapse to 127 keys and 5 of those carry conflicting verdicts.
+  **A conflict is escalated, never averaged** - `rulings.save` raises rather than
+  picking a winner, and `/curate-assay-init` reports conflicting keys instead of
+  merging them.
+- **`/curate-assay-write`, behind eight refusals** (`scripts/assay_hygiene/preflight.py`).
+  Every one is a live failure mode of `/seek/sampleupload/`, not a hypothesis: a Current
+  pair of two ints is the sole combination that reaches `deleteOneRecord`; an
+  unparseable New pair drops the registration and reports success; a blank UID raises
+  mid-run on a path with no transaction, leaving a committed prefix; a sheet named
+  `UPDATE` hijacks dispatch into the metadata-update path; a row absent from the
+  gate-checked manifest was never project-checked; no rollback handle means `MAX(id)`
+  was never captured and the run cannot be undone; a backup without both non-zero size
+  and a verified trailer is not a backup (a `mysqldump` once exited 0 having written 0
+  bytes); and a chunk above 2,000 rows meets gunicorn's 1200 s SIGKILL. Rows go up in
+  2,000-row chunks, each reconciled against a `COUNT(*)` - `chunker.reconcile` refuses
+  an over-count as well as a short write.
+- **A hard project gate on SEEK assay ids** (`scripts/assay_hygiene/resolve_targets.py`).
+  SEEK assay ids are per-project: the same internal assay is a different `assay_id` in
+  every project that runs it, and a registration landing on the wrong one puts the
+  sample into a project it does not belong to, which nothing undoes from outside. The
+  2026-08-26 audit found **578 of 26,188 rows** in exactly that state - 159 repairable,
+  419 not. `resolve` now emits a manifest gate-checked at build time, and
+  `assert_subset` is what `write` uses to prove the submitted sheet never grew a row the
+  gate did not see. An excluded row is an authorised registration with no correct
+  target, and is reported as such rather than silently dropped.
+- **Backups that are read back before they are believed.** `store_backup.back_up`
+  re-opens the tarball it just wrote and refuses unless `pairs.tsv` is inside.
+  `/curate-assay-review` backs up on every ingest; `/curate-assay-backup` does it on
+  demand. `/curate-assay-init` refuses to open a run at all when the store is missing,
+  because **nothing regenerates a human ruling** - not compute, not a re-run.
+- **`/curate-init` auto-detects project, lab and PI.** `scripts/detect_context.py` ranks
+  projects by token overlap with your inputs, aggregates UIDs per lab code across a
+  project export, boosts the lab whose author surname matches, then guesses the PI.
+  Surfaced as `nextseek_api.py detect-context` and confirmed with one tap. The ranking
+  logic is network-free so it is unit-testable offline.
+- **`nextseek_api.py pull-db`** - download a project's full DB export into
+  `previous_metadata/` and print sheet and row counts. This is the fresh pull the stamp
+  guard requires.
+- **`scripts/stamp_guard.py` - the UID-stamp collision guard.** Minting from N=1 into a
+  `<YYMMDD><LAB>` stamp another curation batch already owns **silently overwrites that
+  study on upload** (two consecutive-day collisions in one lab, 2026-07). `preflight()`
+  refuses a build
+  unless a DB pull under 24 hours old is present and the intended stamp is unused, and
+  names the nearest free stamp when it refuses. `/curate-qa` carries the matching net: a
+  new UID already in the master baseline is a HARD_REJECT. Both carry environment-only
+  escape hatches - `STAMP_GUARD_OVERRIDE=1` and `QA_ALLOW_DB_UPDATES=1` - which leave no
+  trace on the command line.
+- **`.env` provisioning from `$DMAC_ENV_FILE`.** `/curate-init` copies the file that
+  variable points at to `./.env` and `chmod 600`s the copy; it never reads the values.
+  Keep the filled credentials file outside every git repo and export the variable from
+  your shell profile.
+- **`schema` mode grounds attribute proposals in OBI and CEDAR.** BioPortal can say
+  which *values* a field may take but not which *fields* a sample type should carry -
+  its REST API exposes only a class's annotation properties, never the OWL restrictions
+  describing an assay's inputs and outputs. Two sources now fill that gap and **neither
+  mints a field**: `terms.clade_neighbors` walks a matched class's parents and children
+  (OBI splits `cell viability assay` by detection chemistry - Annexin V, ATP
+  bioluminescence, resorufin - which D.VIA does not capture), and
+  `templates.template_fields` reads one pinned CEDAR template as a **checklist**. The
+  shared library cannot be selected by assay name, so `common assay template` is pinned
+  by `@id` and diffed against the type. Nothing is vendored; both degrade to an empty
+  section that states its reason when `BIOPORTAL_API_KEY` / `CEDAR_API_KEY` is absent.
+- **`tests/test_identifier_exposure.py`** - a ratchet on the identifier-shaped strings
+  this **public** repository exposes, beside the existing credential guard. It goes red
+  when the count grows *and* when it shrinks, so a cleanup tightens the baseline rather
+  than leaving it stale. The two holes it started with each hid a real identifier: case
+  (four protocol titles were written lowercase and an `[A-Z]{3}` pattern cannot see
+  them) and binaries (`git grep -I` skips them by design, and `tests/fixtures/sample.xlsx`
+  carried three UIDs inside its zipped sheet XML).
+
+### Changed
+
+- **The plugin has five modes, not four.** `skills/curation/SKILL.md`'s mode table now
+  lists all 26 commands across `pipeline` / `fdh` / `schema` / `report` / `assay`, and
+  `/curate-assay-vocabulary` moved from the `schema` row to the `assay` row.
+- **The canonical description names `assay` and carries an activation cue for it.** The
+  string is byte-identical across `.claude-plugin/plugin.json`,
+  `.claude-plugin/marketplace.json`, `skills/curation/SKILL.md` frontmatter and
+  `tests/test_identity_sync.py`, and skill activation matches on it - so until now
+  nothing in the activation surface mentioned assay hygiene, and `assay` is house-scoped,
+  so not one of the four path cues fired for any of its work. `assets/assay-run.json` and
+  "assay hygiene" are now cues, and a new test asserts every mode has one.
+- **The documentation was audited against the code and rewritten where it disagreed.**
+  55 confirmed drift findings across `README.md`, all five reference docs, both
+  manifests and `docs/`; the full audit, with per-file evidence, is preserved at
+  `docs/audit/2026-08-27-docs-audit/`. Three documents asserted the plugin *cannot* do
+  something it demonstrably does - see the first three Fixed entries below.
+- **CEDAR is no longer wholly out of scope.** 0.3.0 recorded why CEDAR *templates* are
+  not adopted as an artifact model; that reasoning stands and nothing emits a CEDAR
+  template. What changed is that a pinned CEDAR template is now *read*, over the live
+  API, as a field checklist in `schema` mode.
+- **The test suite now reports what it did not measure.** `tests/conftest.py` prints a
+  banner naming every test skipped for a missing extract. Those fixtures carry real
+  sample identifiers and this repository is public, so a fresh clone and CI always skip
+  them - and a `1196 passed / 16 skipped` baseline was read as healthy for days while 21
+  tests silently skipped. **A green suite is not evidence the assay pipeline was
+  measured.**
+- **Dependencies are declared once, in `pyproject.toml` plus a tracked `uv.lock`.** The
+  bounds in `pyproject.toml` are floors - the same ones the PEP 723 headers already
+  declared - and `uv.lock` is the reproducibility guarantee, which is why it is
+  deliberately committed. `pyproject.toml`'s version had drifted two releases behind
+  without a test noticing; it is now asserted equal to `plugin.json`.
+- **`.gitignore` gained seven exclusion classes**, each with the incident that caused it
+  written above it: `assay-hygiene/` and the prefix glob `assay-hygiene-*/`; `assets/`;
+  unanchored `*rulings*.tsv` and `*verdicts*.csv`; `.claude/`; and
+  `scripts/fdh/generated/*.py`. Read the comments before editing it - they are the
+  incident record, not decoration.
+
+### Fixed
+
+- **`README.md` claimed the plugin never writes to NExtSEEK.** Both "What this is not"
+  promises were false: `/curate-sampletype apply` edits a live sample type and
+  `/curate-assay-write` writes registrations to production. The README already said so
+  in its own schema-mode table, and contradicted itself four sections later. Both write
+  paths and their guards are now named where the denial used to be.
+- **`SCHEMA.md` listed "writing to NExtSEEK" as a non-goal** while being the doc
+  `commands/curate-sampletype.md` orders the operator to read *first*, before the one
+  command in the mode that writes to production. It now carries the full guard chain.
+- **`FDH.md` promised a host override that the uploader does not honour.** The
+  `FDH_BASE_URL` / `--base-url` bullet covered both modules; `scripts/fdh/submit.py`
+  hardcodes `https://fairdomhub.org/` and takes neither, so every `/fdh-upload` run
+  writes to production. The bullet is now split per module.
+- **Mode 2's lineage lane never met the reachability gate.**
+  `gate.type_registration_index` calls a (sample type, assay) pair absent from it
+  incredible whatever the term's support, and the gate has always blocked a metadata
+  claim on such a pair - but a lineage neighbour carries no claim, so nothing ever put
+  the lineage lane in front of that rule. Measured on the 2026-08-21 extract, **99,449
+  of 167,454 emitted Mode 2 rows - 59.4% - proposed a (type, assay) pair the house has
+  never once made**, and every one reached the operator with a blank `gate`. `Evidence`
+  gains a `reachable` boolean derived from the same index the gate already holds.
+  **Nothing was deleted**: the rows are reclassified into their own step and still
+  emitted, and the before/after `findings.csv` differ only in `classification` and
+  `gate`, on exactly those 99,449 rows.
+- **Internal assay 143 was named for the wrong GPT** - "Alanine Aminotransferase
+  (ALT/GPT) Activity Assay", while SEEK assay 26 that it maps is the gpt delta mutation
+  assay. Found by two independent agent readings during Mode 2 calibration and confirmed
+  against the extract.
+- **The write protection that four files claimed existed was never applied.** Resolved
+  through the symlink tree, 27 of 33 artifacts were clobberable by a run left on default
+  paths. `/curate-assay-init` now performs the chmod in code, and
+  `_writeguard.assert_writable` refuses to write through a symlink into a preserved run.
+- **A missing prerequisite is named instead of raising a bare traceback**, and the
+  under-reporting in the unmeasured-work banner itself was closed.
+- **Every real sample and protocol identifier is out of the tracked tree.** Each was
+  *replaced*, not deleted - the surrounding assertions and prose need a well-formed
+  identifier - by moving its `<YYMMDD><LAB>` batch stamp into a reserved synthetic band,
+  `19MMDD`, which no uuid in the extract carries for any lab. Keep new fixtures in that
+  band.
+
+### Known issues
+
+- **`/curate-status` has no `assay` branch.** `scripts/status.py` builds exactly four
+  mode keys, and `commands/curate-status.md` still says "all four dmac-curation modes".
+  The mode carries its own `/curate-assay-status` instead.
+- **Carry-forward carries nothing.** `carryforward.split` sorts every cohort three ways -
+  already ruled, ruled in a narrower context, never seen - but nothing derives
+  `ruled_width`, so callers pass `{}`, every matched pair lands in *widened*, and
+  `/curate-assay-detect` re-asks everything. The split is real; the carry-forward is not
+  the finished feature. Root cause is the provenance sidecar that `rulings.py` and
+  `carryforward.py` both describe and nothing writes.
+- **Three artifacts in the assay workflow have no producer.** `ingest.ingest` refuses a
+  sheet without a literal `cohort_key` column and no review surface emits one;
+  `/curate-assay-resolve` reads `approved-rows.csv`, which nothing writes; and nothing
+  builds the `UPDATE_ASSAY` sheet `/curate-assay-write` submits. Until those close,
+  review → resolve → write is driven by hand.
+- **Two documented flags do not exist.** `curate-assay-write.md` says "It writes nothing
+  without `--confirm`", and `init_run.py`'s refusal message names
+  `curate-assay-init --migrate-from`. There is no CLI in the assay mode at all - every
+  command is `python -c` / `python -m` snippets and the production write is a manual
+  submission - so there is no flag to pass.
+- **The assay commands do not follow hard rule 6.** They invoke
+  `PYTHONPATH=scripts uv run --with pandas --with pyarrow python -m assay_hygiene.<module>`
+  rather than `uv run --script`, because the PEP 723 headers on those modules are inert
+  under `-m` and `-c`, which is why the dependencies are passed explicitly. Rule 6 now
+  documents both forms rather than prescribing one that does not work.
+- **A lost machine is a lost campaign.** The ruling store is gitignored and its only
+  protection is a tarball on the same machine - the accepted cost of keeping identifiers
+  out of a public repository. `git clean -xdf` lists `assets/` for removal.
+
 ## 0.4.0 - 2026-07-31
 
 Server-side validation, a human-readable review artifact, and a working route for
