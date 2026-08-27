@@ -26,7 +26,7 @@ Drop these into the empty subdirectories before running `/curate-inventory`:
 2. `/curate-sample-tree` -> `SAMPLE_TREE.md` + `sample_tree.json` + `SAMPLE_TREE.html`
 3. `/curate-questions add` (as gaps surface) -> `QUESTIONS_FOR_PI.md`
 4. `/curate-build <arm>` per arm -> `assay_sheets/4sheet_originals/`
-5. `/curate-consolidate` -> `assay_sheets/Arm{X}.xlsx` + `Arm{X}_review.xlsx`
+5. `/curate-consolidate` -> `assay_sheets/Arm{X}-upload.xlsx` + `Arm{X}_review.xlsx`
 6. `/curate-resolve-assays --project-id N` -> `context/assay_ids_cache.json` (then curate `context/assay_synonyms.json`)
 7. `/curate-qa` -> CLEAN/SOFT_FLAG/HARD_REJECT report (local, offline)
 8. `/curate-qc` -> server-side validation against live NExtSEEK (last gate before upload)
@@ -69,7 +69,7 @@ Build a repository submission artifact from metadata you already have:
   and a completeness report
 - Same for `SRA` and `PRIDE`
 
-The input can be UIDs, a NExtSEEK workbook, a curated `Arm{X}.xlsx`, or an
+The input can be UIDs, a NExtSEEK workbook, a curated `Arm{X}-upload.xlsx`, or an
 arbitrary xlsx/csv.
 
 {% endif -%}
