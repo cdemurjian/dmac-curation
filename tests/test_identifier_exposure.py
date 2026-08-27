@@ -90,7 +90,12 @@ STAMP_RE = re.compile(r"[0-9]{6}[A-Z]{2,5}")
 # uids, and every one of these is now synthetic. The REALITY tiers below are
 # not ratchets -- they assert zero.
 PROTOCOL_OCCURRENCES = 26          # case-tolerant; the case-sensitive count is 21
-UID_PATTERN_OCCURRENCES = 440      # all synthetic
+# 440 -> 445 on 2026-08-27: the assay-hygiene mode-commands plan carries five
+# occurrences of one synthetic example uid in its preflight and workflow test
+# code. Its date component is in the reserved 19MMDD band, which is provably
+# absent from production, and the REALITY tier below confirms none of the five
+# resolves to a real sample.
+UID_PATTERN_OCCURRENCES = 445      # all synthetic
 # 439 -> 440 on 2026-08-27: the prerequisites plan under docs/superpowers/plans/
 # cites one 19MMDD-band uid as the example new fixtures must follow. Verified
 # absent from all 177,393 production uids, and no 19xx-band uid is real for any
