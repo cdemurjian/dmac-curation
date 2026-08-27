@@ -1,6 +1,6 @@
 ---
 name: dmac-curation
-description: Curator's workbench for NExtSEEK / FairDomHub metadata. Human-in-the-loop, PI-facing. Modes are pipeline (14 commands, 12 phases from inventory through sample tree, build, consolidate, QA, server-side QC, deposit, retrieve, to email PI), fdh (FairDomHub upload and direct API), schema (sample type authoring and controlled vocabulary), report (GEO / SRA / PRIDE submission artifacts). Activate when working in a directory containing files/, manuscript/, previous_metadata/, or any .dmac-curation.json lockfile, or when the user mentions NExtSEEK, FairDomHub, curation, sample types, or a GEO/SRA/PRIDE submission.
+description: Curator's workbench for NExtSEEK / FairDomHub metadata. Human-in-the-loop, PI-facing. Modes are pipeline (14 commands, 12 phases from inventory through sample tree, build, consolidate, QA, server-side QC, deposit, retrieve, to email PI), fdh (FairDomHub upload and direct API), schema (sample type authoring and controlled vocabulary), report (GEO / SRA / PRIDE submission artifacts), assay (house-scoped assay hygiene - 8 commands that find unregistered sample-assay pairs, put every proposal in front of a human, and write the approved ones to production). Activate when working in a directory containing files/, manuscript/, previous_metadata/, assets/assay-run.json, or any .dmac-curation.json lockfile, or when the user mentions NExtSEEK, FairDomHub, curation, sample types, assay hygiene, assay registration, or a GEO/SRA/PRIDE submission.
 ---
 
 # DMAC Curation
@@ -14,9 +14,13 @@ PI-facing throughout.
 
 - Current working directory contains `.dmac-curation.json` (the project lockfile)
 - Or cwd contains the curation input layout: `files/`, `manuscript/`, `previous_metadata/`
+- Or cwd contains `assets/assay-run.json` — the `assay` mode's run lockfile. This mode
+  is house-scoped and runs from the plugin checkout, so none of the cues above fire
+  for it
 - Or the user invokes any `/curate-*` or `/fdh-*` slash command
 - Or the user mentions NExtSEEK / FairDomHub / FDH / "curate metadata" /
-  a sample type / a GEO, SRA or PRIDE submission
+  a sample type / assay hygiene / assay registration /
+  a GEO, SRA or PRIDE submission
 
 ## Modes
 
@@ -35,12 +39,13 @@ is nothing to declare in `plugin.json`.
 
 Load a mode's reference doc when you enter that mode, not before. For each
 command's exact behavior, the `commands/*.md` files are authoritative.
-`/curate-status` reports per mode.
+`/curate-status` reports on the `pipeline`, `fdh`, `schema` and `report` modes.
+`assay` is house-scoped and has its own reporter, `/curate-assay-status`.
 
 ### `pipeline` - the curation pipeline
 
 12 phases driven by 14 commands. This is where most work happens, but it is one
-mode among four. Deep per-phase reference: `PHASES.md`.
+mode among five. Deep per-phase reference: `PHASES.md`.
 
 ### `fdh` - FairDomHub
 
@@ -63,6 +68,31 @@ to NExtSEEK. Reference: `SCHEMA.md`.
 and PRIDE artifacts from UIDs, a NExtSEEK workbook, a curated upload sheet, or
 arbitrary tabular data. Reference: `REPORTS.md`.
 
+### `assay` - assay hygiene
+
+House-scoped, not project-scoped: one extract, all projects, no PI. Finds
+samples that should be registered against an internal assay and are not, puts
+every proposal in front of a human, and writes the approved ones to production.
+Runs are numbered and immutable at `assets/RUN<n>/`; the run lockfile is
+`assets/assay-run.json` and exactly one run may be open at a time, because two
+concurrent write phases can silently overwrite each other's rows. Judgement
+lives in the ruling store at `assets/rulings/`, outside any run.
+
+Three things this mode can do that no other mode can:
+
+- **`/curate-assay-write` is the only command in the plugin that touches
+  production.** It sits behind eight preflight refusals. Capture the `MAX(id)`
+  rollback handle first; the submission itself is made by hand, so nothing
+  enforces that preflight ran.
+- **Nothing regenerates a human ruling.** The store is gitignored and its only
+  protection is a tarball on one machine; `git clean -xdf` would list `assets/`
+  for removal. Run `/curate-assay-backup` after any session that ruled a lot.
+- **SEEK assay ids are per-project.** A registration landing on another
+  project's assay puts the sample into a project it does not belong to, and
+  nothing undoes that.
+
+Reference: `ASSAY.md`.
+
 ## Hard rules (never violate)
 
 1. **Q&A before UIDs.** If the PI hasn't confirmed experimental scope, draft `EMAIL_TO_PI.md` skeleton (or `QUESTIONS_FOR_PI.md`) before minting UIDs. Where ambiguity exists, ask.
@@ -70,9 +100,9 @@ arbitrary tabular data. Reference: `REPORTS.md`.
 3. **Check for manual edits before regenerating.** The user may have hand-edited a sheet (e.g., dropped columns). Diff first, surface differences, ask whether to preserve.
 4. **Schema lies; workbook tells truth.** Before consulting `context/sampletypes_db.json` for parent rules or required columns, sample existing PI rows in `previous_metadata/`. Workbook precedent wins.
 5. **Re-mine email/manuscript before re-asking the PI.** Grep `email_convo.md`, `manuscript/`, and `QUESTIONS_FOR_PI.md` (resolved section) before adding a new question.
-6. **Use `uv`, not bare `python3`.** All scripts have PEP 723 inline-deps. Invoke via `uv run --script <plugin>/scripts/X.py`.
+6. **Use `uv`, not bare `python3`.** Two invocation forms, and they are not interchangeable. Standalone scripts under `scripts/` carry PEP 723 inline-deps — run them as `uv run --script <plugin>/scripts/X.py`. `scripts/assay_hygiene/` is a **package**, not a script directory: its modules import each other relatively, so `uv run --script` on one fails with `ImportError: attempted relative import with no known parent package`. Drive it as `PYTHONPATH=scripts uv run --with pandas --with pyarrow python -c "from assay_hygiene.<mod> import <fn>; ..."`, exactly as every `/curate-assay-*` command does. `scripts/schema/` is a library too — no `main()`, no `argparse` anywhere in it — so import it, do not run it.
 7. **Pre-assign UIDs.** Format `<TYPE>-YYMMDD<LAB>-N`. Never auto-gen. Never blank. Date stamp is curation date, not experiment date.
-8. **Harvest before you placeholder; for published work, flag don't placeholder.** For an **in-prep** study, use `*** PLACEHOLDER: <description> ***` for unknown values (greppable; blanks vanish). For a **published or submitted** study the metadata almost always exists — run the [Published-paper harvest](#published-paper-harvest) before writing any value, and if it is genuinely absent from all four sources, leave the cell **blank** and log the gap in `QUESTIONS_FOR_PI.md`. Never a placeholder in that case.
+8. **Harvest before you placeholder; for published work, flag don't placeholder.** For an **in-prep** study, use `*** PLACEHOLDER: <description> ***` for unknown values (greppable; blanks vanish). For a **published or submitted** study the metadata almost always exists — run the [Published-paper harvest](#published-paper-harvest) before writing any value, and if it is genuinely absent from all five sources, leave the cell **blank** and log the gap in `QUESTIONS_FOR_PI.md`. Never a placeholder in that case.
 
 ## Published-paper harvest
 
@@ -109,7 +139,7 @@ five sources in order and stop at the first real hit:
 Then:
 
 - **Found** → use the real value.
-- **Genuinely absent from all four** → leave the cell **blank** and add a
+- **Genuinely absent from all five** → leave the cell **blank** and add a
   name-pattern-anchored question to `QUESTIONS_FOR_PI.md`. Do **not** write a
   `*** PLACEHOLDER ***`. QA surfaces the blank; the PI fills it.
 
@@ -142,7 +172,8 @@ marker, and a blank there fails silently.
 - "upload to FairDomHub" / "FDH upload" → `/fdh-upload` (interactive `submit.py`)
 - "access the FDH API" / "find/delete/patch … on FDH" → `/fdh-api` reuse-or-generate loop
 - "bolster X" / "what should we collect for X" / "define a sample type" → `schema` mode (`/curate-sampletype`)
-- "unresolved terms" / "which assay does this metadata value mean" / "the assay vocabulary" → `schema` mode (`/curate-assay-vocabulary`), the assay-hygiene stage B2 judgment step
+- "unresolved terms" / "which assay does this metadata value mean" / "the assay vocabulary" → `assay` mode (`/curate-assay-vocabulary`), stage B2 — needs an open run
+- "assay hygiene" / "register these samples against an assay" / "which run is open" / "rule the cohorts" → `assay` mode (`/curate-assay-status` to orient, `/curate-assay-init` to open a run)
 - "turn this into a GEO submission" / "build the SRA sheet" / "PRIDE report" → `report` mode (`/curate-report`)
 - "the mapping" → `report` mode's `<FORMAT>.mapping.json`, the reviewable spec the LLM writes once
 - "what mode am I in" → `/curate-status`
