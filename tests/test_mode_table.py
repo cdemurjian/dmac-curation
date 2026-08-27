@@ -15,6 +15,7 @@ EXPECTED_MODES = {
     "fdh": "FDH.md",
     "schema": "SCHEMA.md",
     "report": "REPORTS.md",
+    "assay": "ASSAY.md",
 }
 
 
@@ -52,7 +53,7 @@ def test_mode_table_lists_exactly_the_reference_docs():
     )
 
 
-def test_mode_table_has_the_four_modes():
+def test_mode_table_has_every_mode():
     assert set(mode_table_rows()) == set(EXPECTED_MODES)
 
 

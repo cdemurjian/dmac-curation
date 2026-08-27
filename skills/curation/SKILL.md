@@ -29,8 +29,9 @@ is nothing to declare in `plugin.json`.
 |---|---|---|---|
 | `pipeline` | `/curate-init`, `/curate-inventory`, `/curate-sample-tree`, `/curate-questions`, `/curate-build`, `/curate-consolidate`, `/curate-resolve-assays`, `/curate-qa`, `/curate-qc`, `/curate-deposit`, `/curate-retrieve`, `/curate-validate`, `/curate-email`, `/curate-status` | `PHASES.md` | project - needs a lockfile and scaffold |
 | `fdh` | `/fdh-upload`, `/fdh-api` | `FDH.md` | credentials only - no project needed |
-| `schema` | `/curate-sampletype`, `/curate-assay-vocabulary` | `SCHEMA.md` | cwd - writes where you are, no project needed |
+| `schema` | `/curate-sampletype` | `SCHEMA.md` | cwd - writes where you are, no project needed |
 | `report` | `/curate-report` | `REPORTS.md` | input - reads a lockfile if present, never requires one |
+| `assay` | `/curate-assay-init`, `/curate-assay-vocabulary`, `/curate-assay-detect`, `/curate-assay-review`, `/curate-assay-resolve`, `/curate-assay-write`, `/curate-assay-status`, `/curate-assay-backup` | `ASSAY.md` | house - one extract, all projects, no PI; run lockfile at assets/ |
 
 Load a mode's reference doc when you enter that mode, not before. For each
 command's exact behavior, the `commands/*.md` files are authoritative.
