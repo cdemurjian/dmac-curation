@@ -406,7 +406,7 @@ external grounding sources.
   guard requires.
 - **`scripts/stamp_guard.py` - the UID-stamp collision guard.** Minting from N=1 into a
   `<YYMMDD><LAB>` stamp another curation batch already owns **silently overwrites that
-  study on upload** (the 260730WHI / 260729WHI incidents). `preflight()` refuses a build
+  study on upload** (the [REAL STAMP REDACTED] / [REAL STAMP REDACTED] incidents). `preflight()` refuses a build
   unless a DB pull under 24 hours old is present and the intended stamp is unused, and
   names the nearest free stamp when it refuses. `/curate-qa` carries the matching net: a
   new UID already in the master baseline is a HARD_REJECT. Both carry environment-only
