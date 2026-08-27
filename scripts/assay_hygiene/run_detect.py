@@ -1084,6 +1084,8 @@ def main(extract_dir: str = "assay-hygiene/extract",
     in the artifact cannot disagree.
     """
     d, out = Path(extract_dir), Path(out_dir)
+    from ._writeguard import assert_writable
+    assert_writable(out, ARTIFACTS)
     out.mkdir(parents=True, exist_ok=True)
 
     print("=== the vocabulary gate ===")

@@ -885,6 +885,11 @@ def unresolved_sample_count(meta: dict[int, dict],
 def main(extract_dir: str = "assay-hygiene/extract",
          out_dir: str = "assay-hygiene") -> int:
     d, out = Path(extract_dir), Path(out_dir)
+    from ._writeguard import assert_writable
+    assert_writable(out, ("vocabulary.csv", "claims.parquet", "precedent.csv",
+                          "vocabulary-unresolved.csv", "vocabulary-curator.csv",
+                          "vocabulary-defects.csv", "mode3-disposition.csv",
+                          "evidence-report.md"))
     out.mkdir(parents=True, exist_ok=True)
 
     edges = pd.read_parquet(d / "edges.parquet")

@@ -1913,6 +1913,8 @@ def main(extract_dir: str = "assay-hygiene/extract",
     from . import vocabulary as V
 
     d, out = Path(extract_dir), Path(out_dir)
+    from ._writeguard import assert_writable
+    assert_writable(out, ("findings.csv",))
 
     samples = pd.read_parquet(d / "samples.parquet")
     membership = pd.read_parquet(d / "membership.parquet")

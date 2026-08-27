@@ -907,7 +907,14 @@ def _stage_c_sources() -> dict[str, str]:
     silently on an unguarded one.
     """
     EARLIER = {"_schema", "gate", "lineage", "audit", "precedent",
-               "compatibility", "vocabulary", "claims", "extract"}
+               "compatibility", "vocabulary", "claims", "extract",
+               # `_writeguard` is neither stage C nor an earlier stage: it is a
+               # cross-cutting refusal shared by `run_evidence`, `classify` and
+               # `run_detect`, and it opens nothing and writes nothing. Scanning
+               # it here would assert stage C's read/write invariants against a
+               # module that has no reads or writes to assert them about. The
+               # package-wide scan above still covers it for the write path.
+               "_writeguard"}
     src = (PACKAGE / "classify.py").read_text()
     named = set(re.findall(r"^\s*from \. import (\w+)", src, re.M))
     named |= set(re.findall(r"^\s*from \.(\w+) import", src, re.M))
