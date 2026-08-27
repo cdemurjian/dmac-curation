@@ -12,9 +12,17 @@ is a warning nobody reads.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
+from .protect_run import protect
 from .rulings import PAIRS_NAME
+
+TIERS = ("00-rulings", "01-extract", "02-agent-runs", "03-stage0-applied",
+         "04-artifacts", "05-review", "06-findings", "07-process")
+PROTECTED = TIERS[:-1]
+
+_RUN_DIR = re.compile(r"^RUN(\d+)$")
 
 
 class MissingRulingStore(RuntimeError):
@@ -35,3 +43,28 @@ def require_store(store: Path, backups: Path) -> None:
         f"  tar -xzf {backups}/<newest>.tar.gz -C {store.parent}\n"
         f"If this genuinely IS the first run, create the store by migrating an "
         f"existing run: `curate-assay-init --migrate-from assets/RUN1`.")
+
+
+def next_run_number(runs_root: Path) -> int:
+    """-> one past the highest RUN<n> present. A fresh tree starts at 1."""
+    runs_root = Path(runs_root)
+    if not runs_root.is_dir():
+        return 1
+    found = [int(m.group(1)) for m in
+             (_RUN_DIR.match(p.name) for p in runs_root.iterdir() if p.is_dir())
+             if m]
+    return max(found, default=0) + 1
+
+
+def create_run(runs_root: Path, run: int) -> Path:
+    """Make RUN<n> with every tier, then protect all but `07-process`.
+
+    PROTECTION IS APPLIED AT CREATION, not at the end of a run. A tier that is
+    writable for the duration of the run is a tier the run can destroy, and the
+    artifacts most worth protecting are written early.
+    """
+    base = Path(runs_root) / f"RUN{run}"
+    for tier in TIERS:
+        (base / tier).mkdir(parents=True, exist_ok=True)
+    protect(base, PROTECTED)
+    return base
