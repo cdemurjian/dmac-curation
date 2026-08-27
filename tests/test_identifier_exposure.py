@@ -91,10 +91,11 @@ STAMP_RE = re.compile(r"[0-9]{6}[A-Z]{2,5}")
 # not ratchets -- they assert zero.
 PROTOCOL_OCCURRENCES = 26          # case-tolerant; the case-sensitive count is 21
 UID_PATTERN_OCCURRENCES = 440      # all synthetic
-# 439 -> 440 on 2026-08-27: docs/superpowers/plans/2026-08-27-assay-hygiene-
-# prerequisites.md cites `TIS-190101ENG-901` as the example of the reserved
-# 19MMDD synthetic band. Verified absent from all 177,393 production uids,
-# and no 19xx-band uid is real for any lab.
+# 439 -> 440 on 2026-08-27: the prerequisites plan under docs/superpowers/plans/
+# cites one 19MMDD-band uid as the example new fixtures must follow. Verified
+# absent from all 177,393 production uids, and no 19xx-band uid is real for any
+# lab. The literal is NOT repeated here -- writing it would itself bump the
+# count, which is how this comment reached 441 on its first draft.
 
 
 def _tracked_matches(pattern: re.Pattern) -> list[tuple[str, str]]:
