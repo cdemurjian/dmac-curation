@@ -1,0 +1,23 @@
+[project]
+name = "dmac-curation"
+version = "0.3.0"
+requires-python = ">=3.11"
+# Floors are what the PEP-723 headers already declared; uv.lock records what
+# was actually resolved. The pipeline is verified deterministic on pandas 3,
+# so the lock is the reproducibility guarantee, not these bounds.
+dependencies = [
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+    "openpyxl>=3.1",
+    "jinja2>=3.1",
+    "requests>=2.31",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "smbprotocol>=1.10",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "numpy>=1.26"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -46,7 +46,10 @@ dist/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-uv.lock
+# uv.lock is deliberately TRACKED: it is the reproducibility guarantee the
+# PEP-723 headers' `pandas>=2.0` floors cannot give, and
+# tests/test_dependency_pinning.py asserts its presence -- ignored, that test
+# is red on every fresh clone and on CI. It carries public PyPI metadata only.
 
 # ============================================================
 # Editors / OS
