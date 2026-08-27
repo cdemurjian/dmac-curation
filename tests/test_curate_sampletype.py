@@ -155,3 +155,139 @@ def test_proposed_record_is_a_proposal_not_an_edit(tmp_path):
     """It must be diffable against the catalog, never written over it."""
     sr.write_proposed_record(tmp_path, "D.VIA", RECORD)
     assert not (REPO / "context" / "D.VIA.proposed.json").exists()
+
+
+# --- external clade evidence ------------------------------------------------
+
+NEIGHBORS = [
+    {"relation": "parent", "label": "cytometry assay",
+     "definition": "An assay that counts and/or measures characteristics of cells."},
+    {"relation": "child", "label": "cell viability assay using Annexin V staining",
+     "definition": "A cell viability assay that uses Annexin V staining."},
+    {"relation": "child", "label": "cell viability assay based on detection of resorufin",
+     "definition": ""},
+]
+
+
+def _render_with_clade(external_clade):
+    return sr.render_review(
+        "D.VIA", record=RECORD,
+        current_fields={"required": [], "standard": [], "possible": []},
+        proposals=[], reuse_decisions=[], ontology={},
+        open_questions=[], dictionary_entries=[],
+        external_clade=external_clade,
+    )
+
+
+def test_external_clade_is_a_required_section():
+    assert "## External clade evidence" in sr.REQUIRED_SECTIONS
+
+
+def test_external_clade_feeds_the_proposals_so_it_precedes_them():
+    text = _render()
+    assert text.index("## Current state") \
+        < text.index("## External clade evidence") \
+        < text.index("## Proposed additions")
+
+
+def test_external_clade_renders_each_neighbour_with_relation_and_definition():
+    text = _render_with_clade({
+        "matched": "cell viability assay", "source": "OBI",
+        "neighbors": NEIGHBORS, "reason": ""})
+    assert "cell viability assay" in text
+    assert "OBI" in text
+    assert "cytometry assay" in text
+    assert "parent" in text and "child" in text
+    assert "Annexin V staining" in text
+
+
+def test_external_clade_states_why_it_is_empty_rather_than_going_silent():
+    """Silence cannot distinguish 'checked, found nothing' from 'never checked'."""
+    text = _render_with_clade({
+        "matched": "", "source": "", "neighbors": [],
+        "reason": "no BIOPORTAL_API_KEY"})
+    assert "no BIOPORTAL_API_KEY" in text
+
+
+def test_external_clade_defaults_to_not_consulted():
+    text = _render_with_clade(None)
+    section = text.split("## External clade evidence")[1].split("##")[0]
+    assert "not consulted" in section.lower()
+
+
+def test_external_clade_never_presents_a_neighbour_as_a_field():
+    """Evidence a curator reads. Nothing here mints a field name."""
+    text = _render_with_clade({
+        "matched": "cell viability assay", "source": "OBI",
+        "neighbors": NEIGHBORS, "reason": ""})
+    section = text.split("## External clade evidence")[1].split("## Proposed")[0]
+    assert "evidence" in section.lower()
+    assert "propos" not in section.lower().replace("## proposed", "")
+
+
+# --- reference template checklist -------------------------------------------
+
+CHECKLIST = {
+    "template": "common assay template",
+    "covered": 3, "total": 28,
+    "missing": [
+        {"name": "detection instrument", "branches": ["BAO"], "required": False,
+         "description": "The names of equipment used for measurement/readout.",
+         "reuse": "closest existing: `Instrument` (16 usages)"},
+        {"name": "assay footprint", "branches": ["BAO"], "required": False,
+         "description": "Physical format such as plate density.", "reuse": ""},
+    ],
+    "reason": "",
+}
+
+
+def _render_with_checklist(checklist):
+    return sr.render_review(
+        "D.VIA", record=RECORD,
+        current_fields={"required": [], "standard": [], "possible": []},
+        proposals=[], reuse_decisions=[], ontology={},
+        open_questions=[], dictionary_entries=[],
+        template_checklist=checklist,
+    )
+
+
+def test_template_checklist_is_a_required_section():
+    assert "## Reference template checklist" in sr.REQUIRED_SECTIONS
+
+
+def test_template_checklist_follows_the_clade_evidence_and_precedes_proposals():
+    text = _render()
+    assert text.index("## External clade evidence") \
+        < text.index("## Reference template checklist") \
+        < text.index("## Proposed additions")
+
+
+def test_template_checklist_reports_coverage_against_the_reference():
+    text = _render_with_checklist(CHECKLIST)
+    assert "common assay template" in text
+    assert "3" in text and "28" in text
+
+
+def test_template_checklist_renders_each_uncovered_field_with_its_description():
+    text = _render_with_checklist(CHECKLIST)
+    assert "detection instrument" in text
+    assert "equipment used for measurement" in text.lower()
+    assert "BAO" in text
+
+
+def test_template_checklist_shows_the_reuse_verdict_where_there_is_one():
+    text = _render_with_checklist(CHECKLIST)
+    assert "`Instrument`" in text
+
+
+def test_template_checklist_states_why_it_is_empty_rather_than_going_silent():
+    text = _render_with_checklist(
+        {"template": "", "covered": 0, "total": 0, "missing": [],
+         "reason": "no CEDAR_API_KEY"})
+    assert "no CEDAR_API_KEY" in text
+
+
+def test_template_checklist_defaults_to_not_consulted():
+    text = _render_with_checklist(None)
+    section = text.split("## Reference template checklist")[1].split("##")[0]
+    assert "not consulted" in section.lower()
