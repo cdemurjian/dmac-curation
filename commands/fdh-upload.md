@@ -4,7 +4,7 @@ description: Launch the interactive FairDomHub study-upload tool (Module 1)
 
 The user wants to upload a study to FairDomHub (fairdomhub.org) using the interactive
 submission tool `submit.py`. This is a standalone track — it does NOT consume the
-13-phase NExtSEEK artifacts.
+NExtSEEK curation pipeline's artifacts.
 
 ## Prereqs (verify before handing off)
 

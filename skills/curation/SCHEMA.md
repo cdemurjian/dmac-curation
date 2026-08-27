@@ -9,7 +9,7 @@ Answer "what are we collecting?" for a NExtSEEK sample type. Given a type - say
 `D.VIA` - produce resources a human reviews and then applies by hand.
 
 The problem it attacks: of **1059 distinct field names across 101 sample types,
-856 are used by exactly one type**, and none of the 1059 carries a description,
+857 are used by exactly one type**, and none of the 1059 carries a description,
 datatype or vocabulary anywhere. There is no way for an author to answer "does a
 field for this already exist?", so new near-duplicates get minted by default.
 
@@ -17,6 +17,10 @@ field for this already exist?", so new near-duplicates get minted by default.
 
 **cwd.** Reads the plugin's `context/` read-only; writes everything into the
 current working directory under `schema/`. No lockfile, no scaffold, no project.
+
+The single exception is `/curate-sampletype apply`, which writes to a **live
+NExtSEEK server** and defaults to production. See
+[Applying: the one live-write path](#applying-the-one-live-write-path).
 
 ## Scope: ontology grounding, not CEDAR templates
 
@@ -55,7 +59,13 @@ Three further mismatches, any one of which would need resolving first:
 | `scripts/schema/dictionary.py` | observed-value mining, the lazy cwd-only field dictionary |
 | `scripts/schema/ontology.py` | controlled-value proposals with sources, the `<TYPE>.ontology.json` artifact |
 | `scripts/schema/terms.py` | BioPortal lookup; suggests, never binds; degrades with no key |
-| `scripts/schema/review.py` | renders `<TYPE>.review.md`, the deliverable |
+| `scripts/schema/templates.py` | CEDAR reference-template checklist — the only source that names *fields*; the only consumer of `CEDAR_API_KEY`; degrades to an empty section without one |
+| `scripts/schema/review.py` | renders `<TYPE>.review.md` (the deliverable) and `<TYPE>.proposed.json` (a catalog-shaped record, for diffing) |
+
+**None of these is a CLI.** There is no `main()`, no `argparse` and no
+`if __name__` anywhere in `scripts/schema/`, so SKILL.md hard rule 6
+(`uv run --script …`) does not apply here. The contract is
+`sys.path.insert(0, "<PLUGIN>/scripts")` then `from schema import field_index`.
 
 ## The reuse check
 
@@ -150,8 +160,13 @@ artifact the "does a field for this already exist?" problem needs.
 name - `viability`, `flow cytometry`, `sequencing` and `metabolomics` all return
 zero hits - so templates are pinned by `@id` and diffed against the type.
 Quality varies enormously and only well-specified templates are worth pinning:
-`common assay template` carries 28 fields, 27 described and 22 BAO-bound, while
-the Pistoia Alliance template carries 7 with no descriptions and no bindings.
+`REFERENCE_TEMPLATES` (`scripts/schema/templates.py:52-55`) holds exactly one,
+`common assay template`, while the Pistoia Alliance template carries 7 fields
+with no descriptions and no bindings and is deliberately left out. **Field counts
+are not quoted here on purpose:** the pinned template is a third-party
+`bibo:draft` at v0.0.1, fetched live and never vendored, so any number goes stale
+without warning. Run `template_fields(REFERENCE_TEMPLATES["common assay
+template"])` and report what actually comes back.
 
 **Elements nest, and a flat reader is silently wrong.** `_ui.order` at the top
 level of ATACseq Metadata lists ONE property - a `TemplateElement` holding
@@ -215,16 +230,84 @@ comes from Tags, observed values and sibling types.
 
 ## Non-goals
 
-- Writing to NExtSEEK, or editing `sampletypes_db.json` in place.
+- Writing to NExtSEEK *from the proposal path*, or editing `sampletypes_db.json`
+  in place. The one exception is the explicit `apply` verb — see
+  [Applying: the one live-write path](#applying-the-one-live-write-path).
 - Emitting CEDAR templates (see tree vs graph).
 - Migrating the 101 existing sample types.
 - Renaming or splitting field names shared across types.
 - A shared, accumulating field dictionary (deliberately deferred).
 
+## Applying: the one live-write path
+
+Everything above produces artifacts a human applies by hand. `/curate-sampletype
+apply <TYPE> --add <FIELD>` is the one exception: it adds an attribute to a live
+sample type through `scripts/sampletype_attr.py`, normally as the handoff from
+`/curate-qc` after the server rejected a field that genuinely ought to exist.
+`commands/curate-sampletype.md` is the authority; this is what a reader of
+SCHEMA.md needs to know before they get there.
+
+**Why a bespoke tool.** `PATCH /nextseek_api/sample_types/{id}/` is a 1:1
+pass-through to SEEK, and SEEK's `allow_new_attribute?` refuses any sample type
+that already has samples — nearly all of them — surfacing through NExtSEEK's
+proxy as a generic `502 "Invalid upstream response"`. `sampletype_attr.py`
+instead drives NExtSEEK's own native editor (`GET /seek/attribute/save/` → Django
+ORM → `sample_attributes`) and calls `updateSampleType` to reconcile existing
+samples' `json_metadata`.
+
+**This is a GLOBAL, SHARED-SCHEMA WRITE.** Sample types are not project-scoped:
+adding `Notes` to `A.TITR` changes that type for every project and every existing
+`A.TITR` record across NExtSEEK.
+
+**The guards, exactly.** The ORM path bypasses Rails, and therefore bypasses every
+SEEK model validation. Four things stand in:
+
+1. `sampletype_attr.py::_validate` (`scripts/sampletype_attr.py:180-206`)
+   re-implements the three validations that matter —
+   `validate_attribute_title_unique`, `validate_attribute_accessor_names_unique`,
+   `validate_one_title_attribute_present`. These are the ONLY protection on this
+   path; the `/seek/samples/attributes/` web page offers none of them.
+2. **Dry run is the default.** `add`, `remove` and `selftest` print the exact
+   record and send nothing unless `--apply` is passed.
+3. **Production needs a second flag.** `_confirm_production`
+   (`scripts/sampletype_attr.py:290-317`) refuses `--apply` against
+   `nextseek.mit.edu` (`PRODUCTION_HOSTS`, `:63`) unless `--yes-production` is
+   given too. `--yes-production` is stripped from `argv` before parsing, so it may
+   appear anywhere on the command line.
+4. **Rehearse on dev.** `--base-url https://nextseek-dev.mit.edu` (or
+   `NEXTSEEK_BASE_URL`) targets dev, where the same types exist in the same shape.
+   `DEFAULT_BASE_URL` is production (`:62`).
+
+```bash
+uv run --script <PLUGIN>/scripts/sampletype_attr.py list <TYPE>
+uv run --script <PLUGIN>/scripts/sampletype_attr.py add <TYPE> --title <FIELD> --type Text
+uv run --script <PLUGIN>/scripts/sampletype_attr.py --base-url https://nextseek-dev.mit.edu \
+    add <TYPE> --title <FIELD> --type Text --apply
+uv run --script <PLUGIN>/scripts/sampletype_attr.py \
+    add <TYPE> --title <FIELD> --type Text --apply --yes-production
+```
+
+**Two things that will bite.** A change is invisible to `/curate-qc` and to batch
+upload until the NExtSEEK app workers restart —
+`prefetch_sample_type_attributes` caches sample_type_id → attribute titles in a
+module-level dict with no TTL and no invalidation on write, so the web page shows
+your attribute while validation still denies it. And the ORM path skips the Rails
+callbacks that trigger Solr reindexing, so a new attribute may not be searchable
+in SEEK until a reindex (unverified).
+
+**When NOT to apply.** If the server rejected a field because *we* got it wrong —
+invented it, mis-cased it, or copied a typo out of `sampletypes_db.json` — fix the
+build script instead. Patching a shared schema to accommodate our own error
+pollutes a shared vocabulary.
+
 ## Open question
 
-**What "apply" concretely means.** Application is manual and the mode only
-produces artifacts. Not settled: whether a human applying a proposed sample type
-record means editing NExtSEEK's admin UI, running a SQL update, or opening a PR
-against a schema repo. Confirm with the NExtSEEK admin before telling a curator
-to edit anything. Until then, `<TYPE>.review.md` says exactly that.
+**What "apply" means beyond adding an attribute.** Adding an attribute to an
+existing type is settled, tooled and verified end to end (`Notes` on `A.TITR`,
+dev then production, 2026-07-31). Still unsettled: how a human applies a *whole
+proposed sample type record* — NExtSEEK's admin UI, a SQL update, or a PR against
+a schema repo. Confirm with the NExtSEEK admin before telling a curator to create
+a type; `<TYPE>.review.md` says exactly that. `sampletype_attr.py` is itself a
+declared stopgap — superuser-only, a GET with JSON in query params — expected to
+be superseded by a proper `nextseek_api` REST write endpoint wrapping
+`DBtable_sampleattribute` + `DBtable_sample.updateSampleType`.

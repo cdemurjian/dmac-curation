@@ -113,8 +113,10 @@ every error and re-validate. Do not proceed with errors outstanding.
 
 Study title, summary and experimental design. Report mode is inherently a
 published/submitted path, so run the Published-paper harvest (SKILL.md) before
-degrading anything: read the manuscript **Methods**, **Supplemental Methods**,
-and **Data Availability statement**, plus the **master NExtSEEK sheet**
+degrading anything — all **five** sources: the manuscript **Methods**,
+**Supplemental Methods** and **Data Availability statement**, then **the named
+deposit itself** (fetch it and enumerate its files — it is ground truth for the
+data tier this artifact is about), then the **master NExtSEEK sheet**
 (`previous_metadata/*.xlsx`). Only after that harvest comes up empty does a
 field degrade — and here that means a placeholder in the artifact plus a
 `<FORMAT>.completeness.md` entry (unlike pipeline build, a blank required GEO/SRA

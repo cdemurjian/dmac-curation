@@ -2,8 +2,12 @@
 description: Show toolkit state per mode (any mode, any phase)
 ---
 
-The user wants to know the state of this working directory across all four
-dmac-curation modes.
+The user wants to know the state of this working directory across the four
+project-shaped dmac-curation modes: `pipeline`, `fdh`, `schema` and `report`.
+
+The fifth mode, `assay`, is house-scoped and is **not** reported here —
+`scripts/status.py` has no `assay` branch. Use `/curate-assay-status`, which reads
+the run lockfile at `assets/assay-run.json`.
 
 ## Steps
 
