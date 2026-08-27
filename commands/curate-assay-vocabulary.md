@@ -2,6 +2,14 @@
 description: Map unresolved metadata terms onto internal assays (assay hygiene, stage B2)
 ---
 
+This is **stage B2 of the assay-hygiene mode**. It is house-scoped: one
+extract, all projects, no PI. Run `curate-assay-init` first — this command
+needs an open run, and every path below is relative to it. Set `RUN` once:
+
+```bash
+RUN=assets/RUN2      # this run's directory, never the default path
+```
+
 The user wants the unresolved tail of the assay vocabulary settled.
 
 Every common metadata term was already mapped from curator-labelled edges and
@@ -9,22 +17,31 @@ carries a support count. What is left are terms no labelled edge anchors. Your
 job is to propose a mapping for the ones you can justify, and to leave the rest
 alone.
 
-Measured on the 2026-08-14 extract: **266 unresolved terms over 14,753 distinct
-samples**, 9.0% of 163,393. By field: Protocol 103, Type 83, Instrument 24,
-Software 23, DataType 11, SlideStain 8, Stimulation 7, Channels 6, Assay 1.
-Re-measure rather than quoting those; they move with the extract.
+The size of the unresolved tail moves with the extract, so it is not quoted
+here. Quoting a figure and then telling the reader to re-measure it is how the
+wrong number gets copied forward -- this file previously carried 2026-08-14
+counts under exactly that instruction. Measure yours before starting:
+
+```bash
+PYTHONPATH=scripts uv run --with pandas --with pyarrow python -c "
+import pandas as pd
+u = pd.read_csv('$RUN/04-artifacts/vocabulary-unresolved.csv')
+print(f'{len(u):,} unresolved terms')
+print(u.groupby('source_field').size().sort_values(ascending=False).to_string())
+"
+```
 
 ## Prereqs
 
 - Run everything below from the directory holding `scripts/` and
   `assay-hygiene/`. Unlike the pipeline-mode commands this stage is not
   project-scoped; every path here is relative to that one root.
-- `assay-hygiene/vocabulary-unresolved.csv` and `assay-hygiene/vocabulary.csv`
+- `$RUN/04-artifacts/vocabulary-unresolved.csv` and `$RUN/04-artifacts/vocabulary.csv`
   exist. If either is missing or stale, regenerate both with:
 
   ```bash
   PYTHONPATH=scripts uv run --with pandas --with pyarrow \
-    python -m assay_hygiene.run_evidence
+    python -m assay_hygiene.run_evidence $RUN/01-extract $RUN/04-artifacts
   ```
 
   `PYTHONPATH=scripts` is not optional. Without it the package is not importable
@@ -35,7 +52,7 @@ Re-measure rather than quoting those; they move with the extract.
   unresolved queue, the precedent table, the claims, the Mode 3 flags and
   `evidence-report.md` in one read-only pass. Run it again after you write your
   proposals to see them merged.
-- `assay-hygiene/extract/` holds `assays.parquet` (137 internal assays),
+- `$RUN/01-extract/` holds `assays.parquet` (137 internal assays),
   `membership.parquet`, `samples.parquet` and `nodes.parquet`.
 
 One thing to not waste time on: `sops.parquet` is `(sop_id, title)` and nothing
@@ -52,11 +69,15 @@ actually **registered** in.
 
 ```bash
 PYTHONPATH=scripts uv run --with pandas --with pyarrow \
-  python -m assay_hygiene.vocabulary_evidence
+  python -m assay_hygiene.vocabulary_evidence $RUN/01-extract $RUN/04-artifacts
 ```
 
-That writes `assay-hygiene/vocabulary-evidence.csv` and prints a summary. On the
-2026-08-14 extract:
+That writes `$RUN/04-artifacts/vocabulary-evidence.csv` and prints a summary.
+
+The block below is a WORKED EXAMPLE from the 2026-08-14 extract, kept because
+the shape of the answer is what matters here and the ratios are what you learn
+to read. **These are not your run's numbers.** Compare against your own output,
+never against these:
 
 ```
 266 unresolved terms
@@ -242,7 +263,7 @@ honest short file is the deliverable, a padded long one is not.
 
 ## Output
 
-Write `assay-hygiene/vocabulary-proposed.csv` with exactly these columns:
+Write `$RUN/04-artifacts/vocabulary-proposed.csv` with exactly these columns:
 
     source_field,raw_value,internal_assay_id,internal_assay_title,support,n_samples,purity,provenance
 
