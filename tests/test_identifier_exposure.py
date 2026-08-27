@@ -90,7 +90,11 @@ STAMP_RE = re.compile(r"[0-9]{6}[A-Z]{2,5}")
 # uids, and every one of these is now synthetic. The REALITY tiers below are
 # not ratchets -- they assert zero.
 PROTOCOL_OCCURRENCES = 26          # case-tolerant; the case-sensitive count is 21
-UID_PATTERN_OCCURRENCES = 439      # all synthetic
+UID_PATTERN_OCCURRENCES = 440      # all synthetic
+# 439 -> 440 on 2026-08-27: docs/superpowers/plans/2026-08-27-assay-hygiene-
+# prerequisites.md cites `TIS-190101ENG-901` as the example of the reserved
+# 19MMDD synthetic band. Verified absent from all 177,393 production uids,
+# and no 19xx-band uid is real for any lab.
 
 
 def _tracked_matches(pattern: re.Pattern) -> list[tuple[str, str]]:
