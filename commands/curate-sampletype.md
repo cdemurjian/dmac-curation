@@ -177,8 +177,13 @@ Patching the schema to accommodate our own error pollutes a shared vocabulary.
      `scripts/schema/dictionary.py` `observe_values()`. Real values beat
      guessed ones (SKILL.md hard rule 4).
    - **external clade evidence** via `scripts/schema/terms.py`: resolve the
-     producing assay with `search_terms(..., ontologies=("OBI",))`, then
-     `clade_neighbors(hit)` for that class's parents and children. Where an
+     producing assay with `resolve_class(assay, ontologies=("OBI",))` - NOT
+     `search_terms(...)[0]`, which returns BioPortal's lexical ranking and put
+     `Short Read Sequencing` on `linked-read sequencing assay`, a 10x-specific
+     technique, while `sequencing assay` sat at rank five. `resolve_class`
+     returns a `ClassMatch` carrying `confidence`; **a `weak` confidence must be
+     rendered as weak and nothing may rest on it.** Then `clade_neighbors(m.hit)`
+     for that class's parents and children. Where an
      ontology splits one class into several, the axis it splits on is often a
      field this type lacks - OBI divides `cell viability assay` by detection
      chemistry (Annexin V, ATP bioluminescence, resorufin), which is a field
@@ -186,8 +191,12 @@ Patching the schema to accommodate our own error pollutes a shared vocabulary.
    - **the reference template checklist** via `scripts/schema/templates.py`:
      `template_fields(REFERENCE_TEMPLATES["common assay template"])` returns 28
      fields, 27 described and 22 bound to a BioAssay Ontology branch. Diff them
-     against this type and run each uncovered one through
-     `rank_candidates()` - the house may already collect it under another name.
+     against this type and partition them with `coverage(fields, resolver)`,
+     where the resolver runs `rank_candidates()` and hands back the top
+     `Candidate.match_pass`. **Never report an exact-name coverage count**: it
+     put D.SEQ, a type carrying 84 fields, at "0 of 28", because the reference
+     writes prose names (`detection instrument`) and NExtSEEK writes compact
+     ones (`Sequencer`), so the two conventions almost never collide.
      **Always carry `Candidate.match_pass` into the verdict, and never render a
      `semantic` hit as though it settled anything.** That pass matches on shared
      word stems, so `bioassay type` returns `Checksum_PrimaryType` (63 usages)

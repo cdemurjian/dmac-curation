@@ -202,3 +202,53 @@ def test_a_twice_nested_field_records_its_full_element_path(monkeypatch):
     out = tp.template_fields(TEMPLATE_ID, http=FakeHTTP(DEEP_TEMPLATE))
     assert [f.name for f in out] == ["depth_2_field"]
     assert out[0].path == "outer.inner"
+
+
+# --- coverage ---------------------------------------------------------------
+#
+# `covered: 0 of 28` was reported for D.SEQ, which carries 84 fields. Exact-name
+# coverage between CEDAR prose names (`detection instrument`) and NExtSEEK
+# compact ones (`Sequencer`) can essentially never match, so the count was a
+# naming-convention artifact that read as a finding. Coverage is decided by the
+# reuse check's STRONG passes instead.
+
+FIELDS = [
+    tp.TemplateField(name="detection instrument"),
+    tp.TemplateField(name="assay design method"),
+    tp.TemplateField(name="bioassay type"),
+    tp.TemplateField(name="threshold"),
+]
+
+
+def _resolver(mapping):
+    return lambda name: mapping.get(name)
+
+
+def test_coverage_counts_only_strong_reuse_matches():
+    strong, weak, uncovered = tp.coverage(FIELDS, _resolver({
+        "detection instrument": "normalized",
+        "assay design method": "exact",
+        "bioassay type": "semantic",
+    }))
+    assert [f.name for f in strong] == ["detection instrument", "assay design method"]
+
+
+def test_coverage_separates_weak_matches_from_real_ones():
+    strong, weak, uncovered = tp.coverage(FIELDS, _resolver({"bioassay type": "semantic"}))
+    assert [f.name for f in weak] == ["bioassay type"]
+
+
+def test_coverage_reports_fields_with_no_candidate_at_all():
+    strong, weak, uncovered = tp.coverage(FIELDS, _resolver({}))
+    assert len(uncovered) == 4
+
+
+def test_coverage_counts_a_synonym_as_strong():
+    strong, _, _ = tp.coverage(FIELDS, _resolver({"threshold": "synonym"}))
+    assert [f.name for f in strong] == ["threshold"]
+
+
+def test_coverage_partitions_every_field_exactly_once():
+    strong, weak, uncovered = tp.coverage(FIELDS, _resolver({
+        "detection instrument": "exact", "bioassay type": "semantic"}))
+    assert len(strong) + len(weak) + len(uncovered) == len(FIELDS)

@@ -59,6 +59,14 @@ class CladeNeighbor:
     relation: str = ""   # parent | child
 
 
+@dataclass
+class ClassMatch:
+    """A resolved ontology class, and how much to trust the resolution."""
+
+    hit: TermHit
+    confidence: str      # exact | normalized | weak
+
+
 def _default_http(url: str, headers: dict | None = None, timeout: int | None = None):
     req = urllib.request.Request(url, headers=headers or {})
     with urllib.request.urlopen(req, timeout=timeout or _TIMEOUT_SECONDS) as resp:
@@ -131,6 +139,43 @@ def search_terms(query: str, *, ontologies=None, api_key: str | None = None,
         return hits
     except Exception:  # noqa: BLE001 - a lookup or parse failure must never break a run
         return []
+
+
+def _normalise_label(text: str) -> str:
+    """Fold case, spacing and punctuation for label comparison."""
+    return "".join(ch for ch in text.casefold() if ch.isalnum())
+
+
+def resolve_class(query: str, *, ontologies=None, api_key: str | None = None,
+                  limit: int = 10, http=None) -> ClassMatch | None:
+    """The class a query names, with the confidence to treat it at.
+
+    `search_terms` returns BioPortal's LEXICAL ranking, and taking hit[0] as
+    "the match" is how `Short Read Sequencing` resolved to `linked-read
+    sequencing assay` - a 10x-specific technique - while `sequencing assay` sat
+    at rank five. Nothing here guesses better than BioPortal does. What it does
+    is refuse to present a guess as a match: an exact or normalised label match
+    is worth building on, and anything else comes back flagged `weak` so the
+    review can say so instead of asserting `Matched X`.
+
+    Returns None when nothing came back at all, including with no API key.
+    """
+    hits = search_terms(query, ontologies=ontologies, api_key=api_key,
+                        limit=limit, http=http)
+    if not hits:
+        return None
+
+    target = query.casefold().strip()
+    for hit in hits:
+        if hit.label.casefold().strip() == target:
+            return ClassMatch(hit=hit, confidence="exact")
+
+    normalised = _normalise_label(query)
+    for hit in hits:
+        if _normalise_label(hit.label) == normalised:
+            return ClassMatch(hit=hit, confidence="normalized")
+
+    return ClassMatch(hit=hits[0], confidence="weak")
 
 
 def clade_neighbors(hit: TermHit, *, api_key: str | None = None,

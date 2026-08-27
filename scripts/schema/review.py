@@ -98,8 +98,17 @@ def render_review(sampletype: str, *, record: dict, current_fields: dict,
         lines.append("")
     else:
         matched, source = clade.get("matched") or "", clade.get("source") or ""
-        lines.append(f"Matched `{matched}` in **{source}**."
-                     if matched else "Matched an external class.")
+        confidence = clade.get("confidence") or ""
+        if not matched:
+            lines.append("Matched an external class.")
+        elif confidence == "weak":
+            lines.append(
+                f"Resolved to `{matched}` in **{source}** - but this is a WEAK "
+                "match. No class carries the queried name, so this is BioPortal's "
+                "top lexical hit and may be the wrong class entirely. Verify it "
+                "before resting anything on what follows.")
+        else:
+            lines.append(f"Matched `{matched}` in **{source}**.")
         lines.append("")
         for n in neighbors:
             lines.append(f"- **{n.get('relation', '')}** - {n.get('label', '')}")
@@ -124,9 +133,17 @@ def render_review(sampletype: str, *, record: dict, current_fields: dict,
         lines.append("Not consulted this run.")
         lines.append("")
     else:
-        lines.append(f"`{checklist.get('template', '')}` declares "
-                     f"{checklist.get('total', 0)} fields; this type covers "
-                     f"{checklist.get('covered', 0)}.")
+        n_strong, n_weak = checklist.get("strong", 0), checklist.get("weak", 0)
+        lines.append(
+            f"`{checklist.get('template', '')}` declares "
+            f"{checklist.get('total', 0)} fields. Of those, {n_strong} "
+            f"{'has' if n_strong == 1 else 'have'} a strong existing match in the "
+            f"catalog and {n_weak} {'has' if n_weak == 1 else 'have'} only a weak "
+            "one. "
+            "Coverage is the reuse check's verdict, not an exact-name diff: the "
+            "reference writes prose names (`detection instrument`) and NExtSEEK "
+            "writes compact ones (`Sequencer`), so the two conventions almost "
+            "never collide and a name-level count means nothing.")
         lines.append("")
         if not missing:
             lines.append("Every field in the reference is already covered.")
