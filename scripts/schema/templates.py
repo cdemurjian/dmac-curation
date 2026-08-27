@@ -68,6 +68,37 @@ class TemplateField:
     path: str = ""      # dotted element path; "" for a top-level field
 
 
+# Reuse-check passes strong enough to call a reference field "already covered".
+# The semantic pass matches on shared word stems and is not one of them.
+STRONG_PASSES = ("exact", "normalized", "synonym")
+
+
+def coverage(fields, resolver):
+    """Partition reference fields by how well this house already covers them.
+
+    Exact-NAME coverage is meaningless here and reporting it was actively
+    misleading: it put D.SEQ, a type carrying 84 fields, at "0 of 28". CEDAR
+    writes prose names (`detection instrument`), NExtSEEK writes compact ones
+    (`Sequencer`), so the two conventions essentially never collide. Coverage is
+    the reuse check's verdict instead.
+
+    `resolver` maps a field name to a `Candidate.match_pass` or None, so this
+    stays free of any dependency on the catalog.
+
+    Returns (strong, weak, uncovered); every field lands in exactly one.
+    """
+    strong, weak, uncovered = [], [], []
+    for f in fields:
+        match_pass = resolver(f.name)
+        if match_pass in STRONG_PASSES:
+            strong.append(f)
+        elif match_pass:
+            weak.append(f)
+        else:
+            uncovered.append(f)
+    return strong, weak, uncovered
+
+
 def _default_http(url: str, headers: dict | None = None, timeout: int | None = None):
     req = urllib.request.Request(url, headers=headers or {})
     with urllib.request.urlopen(req, timeout=timeout or _TIMEOUT_SECONDS) as resp:

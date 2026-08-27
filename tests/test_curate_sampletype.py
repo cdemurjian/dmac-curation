@@ -229,7 +229,7 @@ def test_external_clade_never_presents_a_neighbour_as_a_field():
 
 CHECKLIST = {
     "template": "common assay template",
-    "covered": 3, "total": 28,
+    "strong": 3, "weak": 9, "total": 28,
     "missing": [
         {"name": "detection instrument", "branches": ["BAO"], "required": False,
          "description": "The names of equipment used for measurement/readout.",
@@ -265,7 +265,7 @@ def test_template_checklist_follows_the_clade_evidence_and_precedes_proposals():
 def test_template_checklist_reports_coverage_against_the_reference():
     text = _render_with_checklist(CHECKLIST)
     assert "common assay template" in text
-    assert "3" in text and "28" in text
+    assert "28" in text
 
 
 def test_template_checklist_renders_each_uncovered_field_with_its_description():
@@ -291,3 +291,29 @@ def test_template_checklist_defaults_to_not_consulted():
     text = _render_with_checklist(None)
     section = text.split("## Reference template checklist")[1].split("##")[0]
     assert "not consulted" in section.lower()
+
+
+def test_template_checklist_never_reports_a_bare_covered_count():
+    """`covered: 0 of 28` put a type carrying 84 fields at zero. It read as a
+    finding when it was a naming-convention artifact."""
+    text = _render_with_checklist(CHECKLIST)
+    section = text.split("## Reference template checklist")[1].split("## Proposed")[0]
+    assert "covers 3" not in section
+    assert "strong" in section.lower() and "weak" in section.lower()
+
+
+def test_external_clade_marks_a_weak_resolution_as_weak():
+    """`Short Read Sequencing` resolves to a 10x technique. Never assert a match."""
+    text = _render_with_clade({
+        "matched": "linked-read sequencing assay", "source": "OBI",
+        "confidence": "weak", "neighbors": NEIGHBORS, "reason": ""})
+    section = text.split("## External clade evidence")[1].split("## Reference")[0]
+    assert "weak" in section.lower()
+
+
+def test_external_clade_does_not_hedge_an_exact_resolution():
+    text = _render_with_clade({
+        "matched": "cell viability assay", "source": "OBI",
+        "confidence": "exact", "neighbors": NEIGHBORS, "reason": ""})
+    section = text.split("## External clade evidence")[1].split("## Reference")[0]
+    assert "weak" not in section.lower()

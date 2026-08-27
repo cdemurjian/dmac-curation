@@ -160,9 +160,21 @@ records the dotted element path; `_ui.order` is also what excludes the JSON-LD
 scaffolding (`@context`, `schema:name`, `pav:createdOn`) that shares `properties`
 with the real fields.
 
+**Resolution is confidence-tagged.** `resolve_class` prefers an exact or
+normalised label match over BioPortal's lexical ranking and flags everything else
+`weak`. It does not guess better than BioPortal; it refuses to present a guess as
+a match. `Short Read Sequencing` has no OBI class of that name, so it resolves
+weakly to `linked-read sequencing assay` and the review says so rather than
+asserting a match.
+
 **Coverage is decided by the existing reuse check**, not by new matching logic.
 Each uncovered field goes through `field_index.rank_candidates()`, so the
 curator sees the same ranked-candidates output they already read elsewhere.
+
+`coverage()` partitions the reference fields into strong / weak / uncovered by
+that verdict. An exact-NAME count is never reported: it placed D.SEQ, which
+carries 84 fields, at "0 of 28", because CEDAR writes prose names and NExtSEEK
+writes compact ones and the two conventions almost never collide.
 
 Carry `Candidate.match_pass` into what the review renders. The semantic pass
 matches on shared word stems and will happily return `Checksum_PrimaryType` for

@@ -294,3 +294,70 @@ def test_clade_neighbors_ignores_a_payload_that_is_neither_shape(monkeypatch):
     monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
     http = RoutedHTTP([("/children", "not json"), ("/parents", 42)])
     assert st.clade_neighbors(CLASS_HIT, http=http) == []
+
+
+# --- class resolution -------------------------------------------------------
+#
+# search_terms returns BioPortal's LEXICAL ranking. Taking hit[0] as "the match"
+# is how `Short Read Sequencing` resolved to `linked-read sequencing assay` - a
+# 10x-specific technique - while `sequencing assay` sat at rank 5. The fix is
+# not to guess better; it is to stop presenting a guess as a match.
+
+RANKED_RESPONSE = {
+    "collection": [
+        {"@id": "http://purl.obolibrary.org/obo/OBI_0003412",
+         "prefLabel": "linked-read sequencing assay",
+         "links": {"ontology": "http://data.bioontology.org/ontologies/OBI"},
+         "definition": []},
+        {"@id": "http://purl.obolibrary.org/obo/OBI_0600047",
+         "prefLabel": "sequencing assay",
+         "links": {"ontology": "http://data.bioontology.org/ontologies/OBI"},
+         "definition": []},
+    ]
+}
+
+EXACT_RESPONSE = {
+    "collection": [
+        {"@id": "http://purl.obolibrary.org/obo/OBI_0003412",
+         "prefLabel": "linked-read sequencing assay",
+         "links": {"ontology": "http://data.bioontology.org/ontologies/OBI"},
+         "definition": []},
+        {"@id": "http://purl.obolibrary.org/obo/OBI_0003583",
+         "prefLabel": "cell viability assay",
+         "links": {"ontology": "http://data.bioontology.org/ontologies/OBI"},
+         "definition": []},
+    ]
+}
+
+
+def test_resolve_returns_none_without_a_key(monkeypatch):
+    monkeypatch.delenv(st.BIOPORTAL_ENV_VAR, raising=False)
+    assert st.resolve_class("cell viability assay") is None
+
+
+def test_resolve_prefers_an_exact_label_over_bioportals_top_hit(monkeypatch):
+    """BioPortal ranks linked-read first; the exact label is what we want."""
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    m = st.resolve_class("Cell Viability Assay", http=FakeHTTP(EXACT_RESPONSE))
+    assert m.hit.label == "cell viability assay"
+    assert m.confidence == "exact"
+
+
+def test_resolve_flags_a_lexical_top_hit_as_weak(monkeypatch):
+    """No OBI class is named `Short Read Sequencing`. Say so, do not pretend."""
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    m = st.resolve_class("Short Read Sequencing", http=FakeHTTP(RANKED_RESPONSE))
+    assert m.hit.label == "linked-read sequencing assay"
+    assert m.confidence == "weak"
+
+
+def test_resolve_matches_ignoring_case_and_separators(monkeypatch):
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    m = st.resolve_class("cell-viability assay", http=FakeHTTP(EXACT_RESPONSE))
+    assert m.confidence == "normalized"
+    assert m.hit.label == "cell viability assay"
+
+
+def test_resolve_returns_none_when_nothing_comes_back(monkeypatch):
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    assert st.resolve_class("nonsense", http=FakeHTTP({"collection": []})) is None
