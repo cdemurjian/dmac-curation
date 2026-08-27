@@ -1,7 +1,9 @@
 # Assay hygiene as a curation mode — design
 
-**Status:** design, approved 2026-08-27, all open questions closed. Not implemented.
-**Supersedes:** nothing. **Absorbs:** `commands/curate-assay-vocabulary.md`.
+**Status:** design approved 2026-08-27; **SHIPPED the same day** in `d1f4d14`…`833e9be`.
+The status line below is preserved as written; see `docs/README.md` for what is current.
+**Supersedes:** nothing. **Absorbs:** `commands/curate-assay-vocabulary.md` — absorbed
+*into the mode*, not deleted; the command file is live.
 
 ## Why this exists
 

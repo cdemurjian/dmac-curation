@@ -1,7 +1,9 @@
 # Auto-detect project + lab code in `curate-init` — Design
 
 **Date:** 2026-08-04
-**Status:** Approved (design), pending implementation plan
+**Status:** Approved (design). **IMPLEMENTED** 2026-08-04 — see
+`docs/superpowers/plans/2026-08-04-init-auto-detect.md`, `scripts/detect_context.py`
+and `nextseek_api.py detect-context`.
 **Component:** `dmac-curation` plugin — `scripts/nextseek_api.py` + `commands/curate-init.md`
 
 ## Goal

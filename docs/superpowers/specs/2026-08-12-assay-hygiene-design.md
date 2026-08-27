@@ -1,8 +1,12 @@
 # Assay Hygiene: complete the lineage graph, then backfill and audit assay membership
 
 **Date:** 2026-08-12, rewritten 2026-08-13
-**Status:** design approved, stage 0 not implemented, stages A-F partially built (Task 1 only)
-**Scope:** scripts under `scripts/assay_hygiene/`. Not a plugin mode yet.
+**Status:** design approved 2026-08-12/13. **SUPERSEDED.** Stage 0 shipped
+(`scripts/assay_hygiene/stage0.py`), stages A–F were redesigned as three modes on
+2026-08-14, and assay hygiene is now a plugin mode. Read
+`docs/superpowers/specs/2026-08-27-assay-hygiene-mode-design.md` and
+`skills/curation/ASSAY.md` for what is current.
+**Scope:** scripts under `scripts/assay_hygiene/`.
 
 ## Revision note
 
