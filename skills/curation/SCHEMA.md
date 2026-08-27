@@ -162,11 +162,13 @@ zero hits - so templates are pinned by `@id` and diffed against the type.
 Quality varies enormously and only well-specified templates are worth pinning:
 `REFERENCE_TEMPLATES` (`scripts/schema/templates.py:52-55`) holds exactly one,
 `common assay template`, while the Pistoia Alliance template carries 7 fields
-with no descriptions and no bindings and is deliberately left out. **Field counts
-are not quoted here on purpose:** the pinned template is a third-party
-`bibo:draft` at v0.0.1, fetched live and never vendored, so any number goes stale
-without warning. Run `template_fields(REFERENCE_TEMPLATES["common assay
-template"])` and report what actually comes back.
+with no descriptions and no bindings and is deliberately left out. **No field
+count is quoted here, on purpose:** the pinned template is a third-party
+`bibo:draft` at v0.0.1, fetched live and never vendored, so any number written
+down goes stale without warning. Read the checklist by calling
+`template_fields(REFERENCE_TEMPLATES["common assay template"])`; report the
+fields themselves, never a tally of them, and see `coverage()` below for why a
+count is the wrong thing to hand a curator in the first place.
 
 **Elements nest, and a flat reader is silently wrong.** `_ui.order` at the top
 level of ATACseq Metadata lists ONE property - a `TemplateElement` holding
