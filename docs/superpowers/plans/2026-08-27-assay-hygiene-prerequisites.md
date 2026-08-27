@@ -13,7 +13,25 @@
 ## Global Constraints
 
 - **This repository is PUBLIC.** Never write a real sample uid, protocol identifier, or `<YYMMDD><LAB>` batch stamp into a tracked file. `tests/test_identifier_exposure.py` enforces this and will fail the build. Synthetic uids must use the reserved `19MMDD` date band (e.g. `TIS-190101ENG-901`), which is provably absent from production.
-- **Suite baseline is 1,347 passed / 9 skipped / 4 xfailed, exit 0.** The 4 xfails are intentional deliverables. Never "fix" an xfail to make it pass.
+- **Suite baseline depends on where you run it. Measure yours before Task 1 and use that number.**
+  - Main checkout: **1,347 passed / 9 skipped / 4 xfailed**
+  - Worktree `.claude/worktrees/prereqs`: **1,345 passed / 11 skipped / 4 xfailed**
+
+  The 2-test difference is `tests/test_no_plaintext_secrets.py`, which skips
+  without a `working/` directory — gitignored, so absent from a fresh worktree.
+  It is unrelated to this plan. What matters is that **no `_real_extract_` test
+  skips in either place**: every extract-backed measurement runs, and the
+  skipped-work banner stays silent. If it fires, stop — the extract is not
+  reachable and nothing below is being measured.
+
+  A worktree also needs two hand-copied fixtures that `.gitignore` refuses
+  (`*rulings*.tsv` at any depth): copy `tests/fixtures/mode1-rulings.tsv` and
+  `mode2-rulings.tsv` from the main checkout, or 9 tests skip and the
+  intentional xfail silently becomes a skip.
+
+  Expected counts below are written against the **worktree** baseline of 1,345.
+  Add 2 if running in the main checkout.
+- The 4 xfails are intentional deliverables. Never "fix" an xfail to make it pass.
 - **Never write to `assets/RUN1/`.** Tiers `00`–`03` are read-only on disk; `04`–`07` are not, and that is exactly the defect Task 1 fixes.
 - **`assay-hygiene/` is a symlink tree into `assets/RUN1/`**, not a directory of real files.
 - Commit after every task. Do not push.
@@ -198,7 +216,7 @@ Expected: `SymlinkWriteRefused` naming `assay-hygiene/findings.csv -> ../assets/
 
 Run: `uv run --no-project --with pytest --with pandas --with pyarrow --with numpy --with openpyxl --with jinja2 --with pyyaml --with requests --with python-dotenv --with smbprotocol python -m pytest tests/ -q`
 
-Expected: `1352 passed, 9 skipped, 4 xfailed` (baseline 1,347 + 5 new). If any previously-passing test now errors with `SymlinkWriteRefused`, that test was writing through the symlink tree — fix the test to use `tmp_path`, do not weaken the guard.
+Expected: `1350 passed, 11 skipped, 4 xfailed` (baseline 1,347 + 5 new). If any previously-passing test now errors with `SymlinkWriteRefused`, that test was writing through the symlink tree — fix the test to use `tmp_path`, do not weaken the guard.
 
 - [ ] **Step 8: Commit**
 
@@ -389,7 +407,7 @@ Expected: a non-zero change count, then `still unprotected: []`.
 
 Run: `uv run --no-project --with pytest --with pandas --with pyarrow --with numpy --with openpyxl --with jinja2 --with pyyaml --with requests --with python-dotenv --with smbprotocol python -m pytest tests/ -q`
 
-Expected: `1357 passed, 9 skipped, 4 xfailed`. If a test now fails with `PermissionError` under `assets/RUN1/`, it was writing into a preserved tier — that is the defect being fixed, so redirect the test to `tmp_path`.
+Expected: `1355 passed, 11 skipped, 4 xfailed`. If a test now fails with `PermissionError` under `assets/RUN1/`, it was writing into a preserved tier — that is the defect being fixed, so redirect the test to `tmp_path`.
 
 - [ ] **Step 8: Commit**
 
@@ -506,7 +524,7 @@ PYTHONPATH=scripts uv run --with pandas --with pyarrow \
 
 Run: `uv run --no-project --with pytest --with pandas --with pyarrow --with numpy --with openpyxl --with jinja2 --with pyyaml --with requests --with python-dotenv --with smbprotocol python -m pytest tests/ -q`
 
-Expected: `1359 passed, 9 skipped, 4 xfailed`
+Expected: `1357 passed, 11 skipped, 4 xfailed`
 
 - [ ] **Step 7: Commit**
 
@@ -633,7 +651,7 @@ Expected: the `MEASUREMENTS THAT DID NOT RUN` banner names the probe. Before thi
 
 Run: `uv run --no-project --with pytest --with pandas --with pyarrow --with numpy --with openpyxl --with jinja2 --with pyyaml --with requests --with python-dotenv --with smbprotocol python -m pytest tests/ -q`
 
-Expected: `1363 passed, 9 skipped, 4 xfailed`
+Expected: `1361 passed, 11 skipped, 4 xfailed`
 
 - [ ] **Step 7: Commit**
 
@@ -748,7 +766,7 @@ Expected: `4 passed`
 
 Run: `uv run --group dev python -m pytest tests/ -q`
 
-Expected: `1367 passed, 9 skipped, 4 xfailed`. If the locked resolution changes any count, stop and report the difference rather than adjusting a test — a count that moves with a dependency version is a finding.
+Expected: `1365 passed, 11 skipped, 4 xfailed`. If the locked resolution changes any count, stop and report the difference rather than adjusting a test — a count that moves with a dependency version is a finding.
 
 - [ ] **Step 6: Commit**
 
@@ -773,4 +791,4 @@ what the headers already said."
 
 **Type consistency.** `assert_writable(out, names)` and `SymlinkWriteRefused` are used in Task 1 exactly as defined. `protect(run_dir, tiers)` / `verify(run_dir, tiers)` are used in Task 2 exactly as defined. `_MEASUREMENT_CONVENTION` stays a plain string in Task 4, matching the existing substring call site — no call-site change is implied anywhere.
 
-**Expected suite counts** rise 1,347 → 1,352 → 1,357 → 1,359 → 1,363 → 1,367 across the five tasks. An executor seeing a different number should stop rather than adjust.
+**Expected suite counts** rise 1,345 → 1,350 → 1,355 → 1,357 → 1,361 → 1,365 across the five tasks, against the worktree baseline (add 2 in the main checkout). An executor seeing a different number should stop rather than adjust.
