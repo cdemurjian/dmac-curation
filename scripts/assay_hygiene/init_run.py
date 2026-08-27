@@ -15,8 +15,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pandas as pd
+
+from .migrate_rulings import conflicts, migrate
 from .protect_run import protect
-from .rulings import PAIRS_NAME
+from .rulings import PAIRS_NAME, save
 
 TIERS = ("00-rulings", "01-extract", "02-agent-runs", "03-stage0-applied",
          "04-artifacts", "05-review", "06-findings", "07-process")
@@ -68,3 +71,22 @@ def create_run(runs_root: Path, run: int) -> Path:
         (base / tier).mkdir(parents=True, exist_ok=True)
     protect(base, PROTECTED)
     return base
+
+
+def migrate_into_store(run_dir: Path, assays: pd.DataFrame,
+                       store: Path) -> dict:
+    """Move a completed run's judgement into the durable store.
+
+    CONFLICTING KEYS ARE EXCLUDED, NOT RESOLVED. Measured on RUN1, 200 ruled
+    rows collapse to 127 pair keys and 5 disagree. `rulings.save` refuses the
+    whole batch if a conflict reaches it, so they are filtered here and
+    returned for the operator to rule directly. Writing one of the two verdicts
+    -- by recency, by majority, by source precedence -- silently overwrites a
+    human decision with a guess.
+    """
+    found, prov = migrate(run_dir, assays)
+    clashing = conflicts(found)
+    blocked = {record["key"] for record in clashing}
+    clean = [r for r in found if r.key not in blocked]
+    written = save(store, clean) if clean else 0
+    return {"written": written, "conflicts": clashing, "provenance": prov}

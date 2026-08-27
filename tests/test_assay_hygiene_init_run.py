@@ -67,3 +67,59 @@ def test_a_created_run_is_protected_except_the_process_tier(tmp_path):
     run = I.create_run(tmp_path, 2)
     assert verify(run, I.PROTECTED) == []
     assert verify(run, ["07-process"]) == [run / "07-process"]
+
+
+def _assays():
+    return pd.DataFrame({
+        "assay_id": [1, 2],
+        "internal_assay_id": [74.0, 130.0],
+        "internal_assay_title": ["Tissue Collection", "Mass Spectrometry"],
+    })
+
+
+def _run_with(tmp_path, rows):
+    run = tmp_path / "RUN1" / "00-rulings"
+    run.mkdir(parents=True)
+    (run / "mode2-rulings-2026-08-20.tsv").write_text(
+        "lab\tsample_type\tparent_types\tassay\tfield\tvalue\truling\tnote\n"
+        + rows)
+    return tmp_path / "RUN1"
+
+
+APPROVE_ROW = ("ENG\tTIS\tPAV\tTissue Collection\t(lineage)\t"
+               "ADD_PARENT_TO_ASSAY\tAPPROVE\t\n")
+REJECT_ROW = ("OTH\tTIS\tXXX\tTissue Collection\t(lineage)\t"
+              "ADD_PARENT_TO_ASSAY\tREJECT\t\n")
+OTHER_ROW = ("ENG\tMUS\tPAV\tMass Spectrometry\t(lineage)\t"
+             "ADD_CHILD_TO_ASSAY\tAPPROVE\t\n")
+
+
+def test_a_clean_migration_writes_every_key(tmp_path):
+    run = _run_with(tmp_path, APPROVE_ROW)
+    got = I.migrate_into_store(run, _assays(), tmp_path / "rulings")
+    assert got["written"] == 1
+    assert got["conflicts"] == []
+
+
+def test_a_conflicting_key_is_EXCLUDED_and_reported(tmp_path):
+    """The store must not contain a key the operator ruled two ways."""
+    run = _run_with(tmp_path, APPROVE_ROW + REJECT_ROW)
+    got = I.migrate_into_store(run, _assays(), tmp_path / "rulings")
+    assert got["written"] == 0, "a conflicting key must not be written"
+    assert len(got["conflicts"]) == 1
+    assert got["conflicts"][0]["key"] == ("TIS", "74", "ADD_PARENT_TO_ASSAY")
+
+
+def test_a_conflict_does_not_block_the_keys_that_agree(tmp_path):
+    run = _run_with(tmp_path, APPROVE_ROW + REJECT_ROW + OTHER_ROW)
+    got = I.migrate_into_store(run, _assays(), tmp_path / "rulings")
+    assert got["written"] == 1, "the agreeing key must still land"
+    assert len(got["conflicts"]) == 1
+
+
+def test_the_written_store_reads_back_through_rulings_load(tmp_path):
+    from assay_hygiene.rulings import load
+    run = _run_with(tmp_path, APPROVE_ROW)
+    I.migrate_into_store(run, _assays(), tmp_path / "rulings")
+    store = load(tmp_path / "rulings")
+    assert store[("TIS", "74", "ADD_PARENT_TO_ASSAY")].verdict == "APPROVE"
