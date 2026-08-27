@@ -1,6 +1,6 @@
 # Assay hygiene as a curation mode — design
 
-**Status:** design, approved in outline 2026-08-27. Not implemented.
+**Status:** design, approved 2026-08-27, all open questions closed. Not implemented.
 **Supersedes:** nothing. **Absorbs:** `commands/curate-assay-vocabulary.md`.
 
 ## Why this exists
@@ -256,14 +256,57 @@ pairs. The 1,012 agent verdicts migrate the same way but stay marked as agent
 judgement — they were measured at ~80% agreement with the operator and a ~5%
 false-approve floor consensus did not reduce.
 
-## 9. Open questions
+## 9. Decisions taken 2026-08-27
 
-- **Review surface format.** RUN1 used a mix of TSV, CSV and HTML. Unresolved
-  whether `review` serves a local page or emits files.
-- **Where `assets/rulings/` lives** if the working tree is ever cloned fresh.
-  It is gitignored by design, so a new clone has no judgement until a backup is
-  restored. The restore path is undesigned.
-- **Whether `direction` should ever be non-zero.** RUN1 wrote `0` throughout
-  (house neutral). Production is 60/40 between 0 and 1, and the registration
-  rows carry a per-row `action` that maps plausibly onto SEEK's
-  none/incoming/outgoing convention. Deferred deliberately.
+### Review surfaces: HTML to read, CSV to rule
+
+`review` emits two artifacts per surface. An HTML page carries the context a
+cell cannot hold — the neighbour's own registrations, the precedent table, the
+gate outcome and its reason. A flat CSV carries one row per cohort with a blank
+verdict column, which the operator edits and hands back via
+`--ingest <file>`. Judgement therefore lives in a diffable, greppable file that
+a later reader can audit.
+
+**The ingest join must be code, and must be tested.** This is the one place
+RUN1 was hand-assembled, and it is where a mistake registers rows nobody
+approved. Its required properties:
+
+- every ingested row matches exactly one cohort, or the ingest **refuses**;
+  a partial match is never resolved by a rule
+- a verdict outside the vocabulary refuses rather than defaults
+- ingesting the same file twice is a no-op, not a duplicate ruling
+- the CSV's cohort key is the one `review_mode2.build_blocks` emitted, never
+  reconstructed locally — a second definition of the key is one edit away from
+  disagreeing with the first
+
+### Ruling recovery: documented restore, and `init` refuses to proceed silently
+
+The auto-backup tarball is the recovery path. `curate-assay-init` checks for a
+ruling store and, finding none, stops with the restore command and a statement
+of what is at stake — that no amount of compute regenerates a human ruling.
+The point is to make the existing backup load-bearing rather than decorative.
+
+This accepts a real limit: backups live on the same machine, so a lost machine
+is a lost curation campaign. That is the cost of keeping identifiers out of a
+public repository, and it is recorded here rather than smoothed over.
+
+### `direction` is always 0
+
+Every registration writes `direction = 0`, and the reasoning is recorded so a
+future reader does not reopen it by accident:
+
+- `0` is `ASSAY_ASSETS_DEFAULT` (`seek/dbtable_assay_assets.py:26`) and SEEK's
+  neutral "no direction"
+- **nothing in `seek/` ever reads the column** — every membership query ignores
+  it
+- our registrations assert *membership*. The lineage direction is already
+  recorded in the graph by stage 0; asserting it again here would be a second
+  copy of a fact, free to disagree with the first
+- it matches the rows already written on 2026-08-27
+
+The discarded alternative, for the record: the registration rows carry an
+`action` (`ADD_PARENT_TO_ASSAY` / `ADD_CHILD_TO_ASSAY` / `ADD_TO_ASSAY`) that
+maps plausibly onto SEEK's none/incoming/outgoing convention. Adopting it would
+take `direction = 2` from 31 rows across all of production to roughly 2,900,
+and nobody has confirmed what SEEK's UI does with the value. Not a change to
+make on inference.
