@@ -14,6 +14,14 @@ AN UNKNOWN RULED WIDTH IS TREATED AS WIDENED, NOT CARRIED. Absence of evidence
 that the ruling covered these rows is not evidence that it did, and the cost of
 the two mistakes is not symmetric: a needless re-confirmation costs the
 operator a line, an unearned carry-forward writes to production.
+
+NOTHING DERIVES `ruled_width` YET. It is the number of rows the ORIGINAL ruling
+was made against, which lives in the provenance sidecar rather than in the pair
+store, and no code assembles it today. Callers therefore pass `{}`, every
+matched pair lands in WIDENED, and the practical effect is that carry-forward
+carries nothing and re-asks everything. That is the safe direction and it is
+deliberate -- but it is not the finished feature, and a reader should not
+mistake a working split for a working carry-forward.
 """
 from __future__ import annotations
 

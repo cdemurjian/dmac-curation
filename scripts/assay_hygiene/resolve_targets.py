@@ -29,6 +29,7 @@ from .rulings import normalise_id
 TARGET_COLUMN = "write_target_seek_assay_id"
 NO_PROJECT = "sample belongs to no project"
 NO_CANDIDATE = "no assay with that internal id in the sample's project"
+AMBIGUOUS = "internal assay exists in more than one of the sample's projects"
 
 
 class CrossProjectTarget(ValueError):
@@ -55,13 +56,24 @@ def resolve(rows: pd.DataFrame, assays: pd.DataFrame,
                             "internal_assay_id": internal,
                             "reason": NO_PROJECT})
             continue
-        target = next((by_project[(internal, int(p))] for p in owned
-                       if (internal, int(p)) in by_project), None)
-        if target is None:
+        # EVERY candidate, not the first. A sample can belong to several
+        # projects and the internal assay can exist in more than one of them,
+        # in which case `next()` picked whichever came first in project_ids --
+        # an unrecoverable write decided by list order. Ambiguity is excluded
+        # and reported, exactly like the other two exclusions.
+        candidates = {by_project[(internal, int(p))] for p in owned
+                      if (internal, int(p)) in by_project}
+        if not candidates:
             dropped.append({"sample_id": sample_id,
                             "internal_assay_id": internal,
                             "reason": NO_CANDIDATE})
             continue
+        if len(candidates) > 1:
+            dropped.append({"sample_id": sample_id,
+                            "internal_assay_id": internal,
+                            "reason": AMBIGUOUS})
+            continue
+        target = candidates.pop()
         kept.append({"sample_id": sample_id, "internal_assay_id": internal,
                      TARGET_COLUMN: target, "project_ok": True})
 

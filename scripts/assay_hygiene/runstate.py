@@ -70,11 +70,23 @@ def create(root: Path, run: int, extract_sha: str) -> dict:
 
 
 def update(root: Path, **fields) -> dict:
-    """Merge `fields` into the open run. Refuses when none is open."""
+    """Merge `fields` into the open run. Refuses when none is open.
+
+    NESTED DICTS MERGE ONE LEVEL rather than being replaced. `write` carries
+    three independent facts -- chunks_done, rollback_id, backup_verified --
+    recorded at three different moments by three different steps. A plain
+    `dict.update` lets `update(root, write={"rollback_id": n})` silently drop
+    the other two, and the one most often dropped is backup_verified, whose
+    absence preflight reads as "no backup at all".
+    """
     current = read(root)
     if not current or not current.get("open"):
         raise RunLocked("no run is open; `curate-assay-init` opens one.")
-    current.update(fields)
+    for key, value in fields.items():
+        if isinstance(value, dict) and isinstance(current.get(key), dict):
+            current[key] = {**current[key], **value}
+        else:
+            current[key] = value
     return _write(root, current)
 
 

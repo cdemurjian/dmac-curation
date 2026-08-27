@@ -64,6 +64,13 @@ from assay_hygiene.rulings import load
 store = load(Path('assets/rulings'))
 cohorts = []      # build from this run's detect output
 widths  = {}      # pair key -> rows the ruling was made against
+#
+# NOTHING DERIVES widths YET. It is the row count the ORIGINAL ruling was made
+# against, which lives in the provenance sidecar rather than in the pair store,
+# and no code assembles it today. With {} every matched pair lands in WIDENED
+# and is re-confirmed -- safe, and deliberate, but it means carry-forward
+# currently carries NOTHING. Do not report it to the operator as a working
+# carry-forward until a width producer exists.
 got = split(cohorts, store, widths)
 for bucket in (CARRIED, WIDENED, UNSEEN):
     print(f'{bucket:32} {len(got[bucket]):>6,}')

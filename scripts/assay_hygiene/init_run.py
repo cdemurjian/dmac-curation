@@ -19,7 +19,7 @@ import pandas as pd
 
 from .migrate_rulings import conflicts, migrate
 from .protect_run import protect
-from .rulings import PAIRS_NAME, save
+from .rulings import PAIRS_NAME, load, save
 
 TIERS = ("00-rulings", "01-extract", "02-agent-runs", "03-stage0-applied",
          "04-artifacts", "05-review", "06-findings", "07-process")
@@ -84,9 +84,26 @@ def migrate_into_store(run_dir: Path, assays: pd.DataFrame,
     -- by recency, by majority, by source precedence -- silently overwrites a
     human decision with a guess.
     """
+    existing = load(store)
     found, prov = migrate(run_dir, assays)
     clashing = conflicts(found)
     blocked = {record["key"] for record in clashing}
     clean = [r for r in found if r.key not in blocked]
-    written = save(store, clean) if clean else 0
-    return {"written": written, "conflicts": clashing, "provenance": prov}
+
+    # MERGED WITH WHAT THE STORE ALREADY HOLDS, never written over it. `save`
+    # rewrites pairs.tsv wholesale, so passing only this run's rulings deletes
+    # every ruling the store held that this run does not re-derive -- including
+    # the operator's resolutions of earlier conflicts, which by construction
+    # are NOT in any run's files. That is silent, exit-0 data loss on the one
+    # thing nothing regenerates.
+    #
+    # Merging is safe rather than lossy: a migrated verdict that agrees with a
+    # stored one collapses, and one that DISAGREES raises ConflictingRulings
+    # out of `save` -- which is the existing escalation path, not a new one.
+    # Resolving such a collision here, by recency or by source, is exactly what
+    # the design forbids.
+    merged = list(existing.values()) + clean
+    total = save(store, merged) if merged else 0
+    return {"written": len({r.key for r in clean}), "store_total": total,
+            "store_before": len(existing),
+            "conflicts": clashing, "provenance": prov}

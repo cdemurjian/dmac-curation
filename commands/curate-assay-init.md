@@ -35,11 +35,19 @@ from pathlib import Path
 from assay_hygiene.init_run import migrate_into_store
 a = pd.read_parquet('assets/RUN1/01-extract/assays.parquet')
 got = migrate_into_store(Path('assets/RUN1'), a, Path('assets/rulings'))
-print('written  :', got['written'])
-print('conflicts:', len(got['conflicts']))
+print('store before:', got['store_before'])
+print('keys added  :', got['written'])
+print('store total :', got['store_total'])
+print('conflicts   :', len(got['conflicts']))
 for c in got['conflicts']: print('  ', c['key'], c['verdicts'])
 "
 ```
+
+Migration **merges into** the store; it does not replace it. If `store_before`
+is non-zero you are adding to existing judgement, and anything already there
+that this run does not re-derive -- the operator's resolutions of earlier
+conflicts, above all -- is preserved. If a migrated verdict contradicts one
+already stored, `save` raises `ConflictingRulings` rather than picking a side.
 
 **Conflicting keys are excluded and reported, never resolved.** A key ruled two
 ways means the operator's judgement rested on something the pair key discards —
