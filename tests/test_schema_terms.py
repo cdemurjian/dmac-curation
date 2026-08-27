@@ -160,3 +160,137 @@ def test_module_documents_the_ncbitaxon_strain_trap():
     src = (REPO / "scripts" / "schema" / "terms.py").read_text()
     assert "NCBITaxon" in src
     assert "C57BL/6J" in src
+
+
+# --- clade neighbours -------------------------------------------------------
+#
+# The reuse check already mines siblings from the INTERNAL catalog. This walks
+# the same shape over a curated external ontology, where the distinguishing
+# axis between sibling classes is itself evidence for a missing field: OBI
+# splits `cell viability assay` by detection chemistry, which is exactly the
+# field D.VIA lacks.
+
+CLASS_HIT = st.TermHit(
+    iri="http://purl.obolibrary.org/obo/OBI_0003583",
+    label="cell viability assay",
+    source="OBI",
+    definition="A cytometry assay which measures the number of living cells.",
+)
+
+CHILDREN_RESPONSE = {
+    "collection": [
+        {"@id": "http://purl.obolibrary.org/obo/OBI_0003584",
+         "prefLabel": "cell viability assay using Annexin V staining",
+         "definition": ["A cell viability assay that uses Annexin V staining."]},
+        {"@id": "http://purl.obolibrary.org/obo/OBI_0003757",
+         "prefLabel": "cell viability assay based on detection of resorufin",
+         "definition": []},
+    ]
+}
+
+# /children is paginated under "collection"; /parents is a BARE LIST.
+# Verified against data.bioontology.org - a fake that smooths this over hides
+# the only shape bug this function can have.
+PARENTS_RESPONSE = [
+    {"@id": "http://purl.obolibrary.org/obo/OBI_0001977",
+     "prefLabel": "cytometry assay",
+     "definition": ["An assay that measures characteristics of cells."]},
+]
+
+
+class RoutedHTTP:
+    """Fake getter answering by URL fragment. A clade walk makes several calls."""
+
+    def __init__(self, routes):
+        self.routes = routes
+        self.calls = []
+
+    def __call__(self, url, headers=None, timeout=None):
+        self.calls.append(url)
+        for fragment, payload in self.routes:
+            if fragment in url:
+                if isinstance(payload, Exception):
+                    raise payload
+                return payload
+        raise AssertionError(f"unrouted URL: {url}")
+
+
+def _routed():
+    return RoutedHTTP([("/children", CHILDREN_RESPONSE),
+                       ("/parents", PARENTS_RESPONSE)])
+
+
+def test_clade_neighbors_returns_empty_without_a_key(monkeypatch):
+    monkeypatch.delenv(st.BIOPORTAL_ENV_VAR, raising=False)
+    assert st.clade_neighbors(CLASS_HIT) == []
+
+
+def test_clade_neighbors_without_a_key_does_not_call_the_network(monkeypatch):
+    monkeypatch.delenv(st.BIOPORTAL_ENV_VAR, raising=False)
+    http = _routed()
+    assert st.clade_neighbors(CLASS_HIT, http=http) == []
+    assert http.calls == []
+
+
+def test_clade_neighbors_returns_children_with_their_definitions(monkeypatch):
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    out = st.clade_neighbors(CLASS_HIT, http=_routed())
+    children = [n for n in out if n.relation == "child"]
+    assert [c.label for c in children] == [
+        "cell viability assay using Annexin V staining",
+        "cell viability assay based on detection of resorufin",
+    ]
+    assert "Annexin V staining" in children[0].definition
+    assert children[1].definition == ""
+
+
+def test_clade_neighbors_labels_the_parent_relation(monkeypatch):
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    out = st.clade_neighbors(CLASS_HIT, http=_routed())
+    parents = [n for n in out if n.relation == "parent"]
+    assert [p.label for p in parents] == ["cytometry assay"]
+    assert parents[0].iri == "http://purl.obolibrary.org/obo/OBI_0001977"
+
+
+def test_clade_neighbors_requests_the_matched_class_of_its_ontology(monkeypatch):
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    http = _routed()
+    st.clade_neighbors(CLASS_HIT, http=http)
+    assert all("/ontologies/OBI/classes/" in url for url in http.calls)
+    # The class IRI must be percent-encoded into the path, not appended raw.
+    assert all("http%3A%2F%2Fpurl.obolibrary.org" in url for url in http.calls)
+
+
+def test_clade_neighbors_caps_the_result_at_limit(monkeypatch):
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    out = st.clade_neighbors(CLASS_HIT, limit=2, http=_routed())
+    assert len(out) == 2
+
+
+def test_clade_neighbors_survives_a_failing_call(monkeypatch):
+    """One dead endpoint must not lose the neighbours the other one returned."""
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    http = RoutedHTTP([("/children", CHILDREN_RESPONSE),
+                       ("/parents", RuntimeError("boom"))])
+    out = st.clade_neighbors(CLASS_HIT, http=http)
+    assert [n.relation for n in out] == ["child", "child"]
+
+
+def test_clade_neighbors_ignores_entries_with_no_id(monkeypatch):
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    http = RoutedHTTP([("/children", {"collection": [{"prefLabel": "junk"}]}),
+                       ("/parents", {"collection": []})])
+    assert st.clade_neighbors(CLASS_HIT, http=http) == []
+
+
+def test_clade_neighbors_reads_both_bioportal_collection_shapes(monkeypatch):
+    """/children paginates under "collection"; /parents returns a bare list."""
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    out = st.clade_neighbors(CLASS_HIT, http=_routed())
+    assert [n.relation for n in out] == ["parent", "child", "child"]
+
+
+def test_clade_neighbors_ignores_a_payload_that_is_neither_shape(monkeypatch):
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    http = RoutedHTTP([("/children", "not json"), ("/parents", 42)])
+    assert st.clade_neighbors(CLASS_HIT, http=http) == []

@@ -107,6 +107,76 @@ so it would be accepted and silently discarded - worse than rejection.
 bundled 2026-05-27. Confirm with the NExtSEEK API owner that flat still lacks
 ontology support.
 
+## External clade evidence
+
+`terms.clade_neighbors(hit)` walks a matched class's parents and children in an
+external ontology and hands the labels **with their definitions** to the review.
+
+The reuse check already mines siblings from the internal catalog, where the
+prior is one house's precedent. This mines the same shape from a curated
+ontology. The payoff is not the terms - it is the *axis*: OBI splits `cell
+viability assay` into Annexin V staining, ATP bioluminescence, resorufin
+detection and cell death, so detection chemistry is a real field D.VIA lacks.
+Definitions are carried because the label alone is usually too terse to judge.
+
+**It suggests an axis, never a field.** Nothing extracts a field name from an
+ontology label; inferring the axis is the curator's work. `## External clade
+evidence` in the review renders the neighbours and stops there.
+
+The section is always rendered, and when empty it says why - no key, or no
+class matched. Silence cannot distinguish "checked, found nothing" from "never
+checked", and this document exists to be judged.
+
+Two wire-shape facts, both already handled: BioPortal's `/children` paginates
+its results under a `collection` key while `/parents` returns a **bare JSON
+array**, and a class fetched through the REST API exposes only *annotation*
+properties - definition, editor, curation status, `subClassOf`. The logical
+axioms (`has_specified_input`, `has_specified_output`) live in OWL restrictions
+and are **not** reachable this way. BioPortal cannot tell you what fields an
+assay has; that is why this mines clade structure instead.
+
+## The reference template checklist
+
+`templates.template_fields(id)` reads a pinned CEDAR template and returns every
+field it declares, with description, ontology branch and required flag.
+
+This is the **only** source in the mode that names fields rather than values.
+BioPortal cannot: its REST API exposes a class's annotation properties and
+nothing else, so the OWL restrictions describing an assay's inputs and outputs
+are unreachable. CEDAR templates are literally field lists, which is exactly the
+artifact the "does a field for this already exist?" problem needs.
+
+**A checklist, not a lookup.** The shared library cannot be selected by assay
+name - `viability`, `flow cytometry`, `sequencing` and `metabolomics` all return
+zero hits - so templates are pinned by `@id` and diffed against the type.
+Quality varies enormously and only well-specified templates are worth pinning:
+`common assay template` carries 28 fields, 27 described and 22 BAO-bound, while
+the Pistoia Alliance template carries 7 with no descriptions and no bindings.
+
+**Elements nest, and a flat reader is silently wrong.** `_ui.order` at the top
+level of ATACseq Metadata lists ONE property - a `TemplateElement` holding
+fourteen fields. RNA-Seq Metadata reports 1 and carries 21. `_walk` recurses and
+records the dotted element path; `_ui.order` is also what excludes the JSON-LD
+scaffolding (`@context`, `schema:name`, `pav:createdOn`) that shares `properties`
+with the real fields.
+
+**Coverage is decided by the existing reuse check**, not by new matching logic.
+Each uncovered field goes through `field_index.rank_candidates()`, so the
+curator sees the same ranked-candidates output they already read elsewhere.
+
+Carry `Candidate.match_pass` into what the review renders. The semantic pass
+matches on shared word stems and will happily return `Checksum_PrimaryType` for
+`bioassay type` on the strength of "type" alone; presented bare as "closest
+existing" that reads as a ruling rather than the weak hint it is. This is the
+same trap as the `Strain` -> `NCBITaxon_10090` binding: plausible enough to pass
+unreviewed.
+
+The pinned templates are third-party, `isOpen: false`, and shared rather than
+public - `common assay template` is `bibo:draft` at v0.0.1. They are read at
+runtime and never vendored, so upstream change shows up as a changed checklist
+instead of silently stale shipped state. An owner revoking access degrades to an
+empty section that states its reason.
+
 ## The field dictionary
 
 **Lazy and cwd-only.** No pre-built dictionary ships, and none is generated for

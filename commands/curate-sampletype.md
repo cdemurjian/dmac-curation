@@ -176,10 +176,40 @@ Patching the schema to accommodate our own error pollutes a shared vocabulary.
    - real observed values from any `previous_metadata/*.xlsx` in cwd, via
      `scripts/schema/dictionary.py` `observe_values()`. Real values beat
      guessed ones (SKILL.md hard rule 4).
+   - **external clade evidence** via `scripts/schema/terms.py`: resolve the
+     producing assay with `search_terms(..., ontologies=("OBI",))`, then
+     `clade_neighbors(hit)` for that class's parents and children. Where an
+     ontology splits one class into several, the axis it splits on is often a
+     field this type lacks - OBI divides `cell viability assay` by detection
+     chemistry (Annexin V, ATP bioluminescence, resorufin), which is a field
+     D.VIA does not have. Degrades to nothing without `BIOPORTAL_API_KEY`.
+   - **the reference template checklist** via `scripts/schema/templates.py`:
+     `template_fields(REFERENCE_TEMPLATES["common assay template"])` returns 28
+     fields, 27 described and 22 bound to a BioAssay Ontology branch. Diff them
+     against this type and run each uncovered one through
+     `rank_candidates()` - the house may already collect it under another name.
+     **Always carry `Candidate.match_pass` into the verdict, and never render a
+     `semantic` hit as though it settled anything.** That pass matches on shared
+     word stems, so `bioassay type` returns `Checksum_PrimaryType` (63 usages)
+     purely on "type". Shown bare it reads as a ruling; shown as
+     "semantic match, weak" it reads as what it is. An `exact` or `normalized`
+     hit is worth acting on; a `semantic` one is worth a glance.
+     This is the only source that names FIELDS rather than values; BioPortal
+     structurally cannot (see SCHEMA.md). Degrades to nothing without
+     `CEDAR_API_KEY`.
 
 3. **Identify gaps.** What does this assay actually produce that the record does
    not capture? For a viability assay: readout type, instrument, timepoint, dose,
    units, replicate, controls.
+
+   The external clade from step 2 is evidence here, not an answer. Read the
+   sibling definitions and name the axis they differ on yourself; nothing
+   extracts a field name from an ontology label, and the review says so.
+
+   The template checklist is the sharper instrument: it names concrete fields
+   with descriptions and vocabularies. Treat each as a question for the
+   curator - does this house collect it, under another name, or not at all? -
+   never as an instruction to add it.
 
 4. **Run the reuse check before minting any new name.** For each candidate,
    `rank_candidates(name, index, clade=..., assay=..., catalog=...)`. Show the

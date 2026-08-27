@@ -25,6 +25,8 @@ OUTPUT_SUBDIR = "schema"
 
 REQUIRED_SECTIONS = (
     "## Current state",
+    "## External clade evidence",
+    "## Reference template checklist",
     "## Proposed additions",
     "## Reuse decisions",
     "## Controlled vocabularies proposed",
@@ -36,7 +38,9 @@ REQUIRED_SECTIONS = (
 def render_review(sampletype: str, *, record: dict, current_fields: dict,
                   proposals: list[dict], reuse_decisions: list[dict],
                   ontology: dict, open_questions: list[str],
-                  dictionary_entries: list[str]) -> str:
+                  dictionary_entries: list[str],
+                  external_clade: dict | None = None,
+                  template_checklist: dict | None = None) -> str:
     """Build the review markdown.
 
     Args:
@@ -48,6 +52,10 @@ def render_review(sampletype: str, *, record: dict, current_fields: dict,
       ontology:           {field: [ProposedValue]} from schema.ontology.
       open_questions:     things that could not be resolved, and why.
       dictionary_entries: field names this run wrote to field_dictionary.json.
+      external_clade:     {"matched", "source", "neighbors", "reason"} from
+                          schema.terms.clade_neighbors, or None if not consulted.
+      template_checklist: {"template", "covered", "total", "missing", "reason"}
+                          from schema.templates, or None if not consulted.
     """
     req = current_fields.get("required", [])
     std = current_fields.get("standard", [])
@@ -73,6 +81,69 @@ def render_review(sampletype: str, *, record: dict, current_fields: dict,
     for label, fields in (("Required", req), ("Standard", std), ("Possible", pos)):
         lines.append(f"- **{label}:** {', '.join(fields) if fields else '(none)'}")
     lines.append("")
+
+    lines.append("## External clade evidence")
+    lines.append("")
+    lines.append("Evidence only - read, not applied. Where an external ontology "
+                 "splits one class into several, the axis it splits on is often "
+                 "a field this type is missing. Judging that axis is the "
+                 "curator's, never the tool's.")
+    lines.append("")
+    clade = external_clade or {}
+    neighbors = clade.get("neighbors") or []
+    if not neighbors:
+        reason = clade.get("reason") or ""
+        lines.append(f"Nothing returned - {reason}." if reason
+                     else "Not consulted this run.")
+        lines.append("")
+    else:
+        matched, source = clade.get("matched") or "", clade.get("source") or ""
+        lines.append(f"Matched `{matched}` in **{source}**."
+                     if matched else "Matched an external class.")
+        lines.append("")
+        for n in neighbors:
+            lines.append(f"- **{n.get('relation', '')}** - {n.get('label', '')}")
+            if n.get("definition"):
+                lines.append(f"  - {n['definition']}")
+        lines.append("")
+
+    lines.append("## Reference template checklist")
+    lines.append("")
+    lines.append("A well-specified reference record for this kind of work, diffed "
+                 "against this type. A field listed here is a question - does "
+                 "this house collect it, under some other name, or not at all? - "
+                 "and not an instruction.")
+    lines.append("")
+    checklist = template_checklist or {}
+    missing = checklist.get("missing") or []
+    reason = checklist.get("reason") or ""
+    if reason:
+        lines.append(f"Nothing returned - {reason}.")
+        lines.append("")
+    elif not checklist:
+        lines.append("Not consulted this run.")
+        lines.append("")
+    else:
+        lines.append(f"`{checklist.get('template', '')}` declares "
+                     f"{checklist.get('total', 0)} fields; this type covers "
+                     f"{checklist.get('covered', 0)}.")
+        lines.append("")
+        if not missing:
+            lines.append("Every field in the reference is already covered.")
+            lines.append("")
+        for m in missing:
+            bits = []
+            if m.get("branches"):
+                bits.append("vocabulary: " + ", ".join(m["branches"]))
+            if m.get("required"):
+                bits.append("required in the reference")
+            suffix = f" ({'; '.join(bits)})" if bits else ""
+            lines.append(f"- **{m.get('name', '')}**{suffix}")
+            if m.get("description"):
+                lines.append(f"  - {m['description']}")
+            if m.get("reuse"):
+                lines.append(f"  - reuse check: {m['reuse']}")
+        lines.append("")
 
     lines.append("## Proposed additions")
     lines.append("")
