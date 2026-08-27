@@ -17,13 +17,15 @@ CANONICAL_DESCRIPTION = (
     "Curator's workbench for NExtSEEK / FairDomHub metadata. Human-in-the-loop, "
     "PI-facing. Modes are pipeline (14 commands, 12 phases from inventory through "
     "sample tree, build, consolidate, QA, server-side QC, deposit, retrieve, to "
-    "email PI), fdh "
-    "(FairDomHub upload and direct API), schema (sample type authoring and "
-    "controlled vocabulary), report (GEO / SRA / PRIDE submission artifacts). "
-    "Activate when working in a directory containing files/, manuscript/, "
-    "previous_metadata/, or any .dmac-curation.json lockfile, or when the user "
-    "mentions NExtSEEK, FairDomHub, curation, sample types, or a GEO/SRA/PRIDE "
-    "submission."
+    "email PI), fdh (FairDomHub upload and direct API), schema (sample type "
+    "authoring and controlled vocabulary), report (GEO / SRA / PRIDE submission "
+    "artifacts), assay (house-scoped assay hygiene - 8 commands that find "
+    "unregistered sample-assay pairs, put every proposal in front of a human, and "
+    "write the approved ones to production). Activate when working in a directory "
+    "containing files/, manuscript/, previous_metadata/, assets/assay-run.json, or "
+    "any .dmac-curation.json lockfile, or when the user mentions NExtSEEK, "
+    "FairDomHub, curation, sample types, assay hygiene, assay registration, or a "
+    "GEO/SRA/PRIDE submission."
 )
 
 
@@ -94,12 +96,24 @@ def test_versions_agree_across_plugin_marketplace_and_lockfile():
 
 
 def test_version_is_the_toolkit_release():
-    assert _plugin_json()["version"] == "0.4.0"
+    assert _plugin_json()["version"] == "0.5.0"
 
 
 def test_description_names_every_mode():
-    for mode in ("pipeline", "fdh", "schema", "report"):
+    for mode in ("pipeline", "fdh", "schema", "report", "assay"):
         assert mode in CANONICAL_DESCRIPTION, f"{mode} missing from description"
+
+
+def test_description_carries_an_activation_cue_for_every_mode():
+    """A mode nobody can trigger is a mode nobody has.
+
+    `assay` is house-scoped -- no files/, no manuscript/, no .dmac-curation.json --
+    so the four path cues that fire for the other modes fire for none of its work.
+    It needs a cue of its own, or the mode is invisible to skill activation.
+    """
+    for cue in ("files/", "manuscript/", "previous_metadata/",
+                ".dmac-curation.json", "assets/assay-run.json", "assay hygiene"):
+        assert cue in CANONICAL_DESCRIPTION, f"activation cue {cue!r} missing"
 
 
 def test_description_does_not_claim_thirteen_phases():
@@ -111,5 +125,5 @@ def test_curate_init_does_not_hardcode_a_stale_version():
     """curate-init.md:46-59 hardcoded 0.1.0 while plugin.json said 0.2.0."""
     doc = (REPO / "commands" / "curate-init.md").read_text()
     for stale in ('"plugin_version": "0.1.0"', '"plugin_version": "0.2.0"',
-                  '"plugin_version": "0.3.0"'):
+                  '"plugin_version": "0.3.0"', '"plugin_version": "0.4.0"'):
         assert stale not in doc, f"init must read the version, not restate {stale}"

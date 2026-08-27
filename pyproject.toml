@@ -1,6 +1,6 @@
 [project]
 name = "dmac-curation"
-version = "0.3.0"
+version = "0.5.0"
 requires-python = ">=3.11"
 # Floors are what the PEP-723 headers already declared; uv.lock records what
 # was actually resolved. The pipeline is verified deterministic on pandas 3,
