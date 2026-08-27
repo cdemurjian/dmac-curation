@@ -124,7 +124,12 @@ def curation_project(tmp_path):
 # is that it is SILENT. This makes it loud without making it fail, so CI stays
 # green for the right reason and a human reading the tail of a local run cannot
 # mistake "did not measure" for "measured and found nothing".
-_MEASUREMENT_CONVENTION = "_real_extract_"
+# Matches `real_extract` ANYWHERE in a nodeid. The earlier `_real_extract_`
+# required delimiting underscores on both sides and so could not see the two
+# tests ending `..._on_the_real_extract`, nor any `skipif` that does not follow
+# the naming convention -- 13 of 40 skips on a fresh clone. A guard whose job
+# is to report unmeasured work must not itself under-report.
+_MEASUREMENT_CONVENTION = "real_extract"
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
