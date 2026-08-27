@@ -55,7 +55,7 @@ Parse `$ARGUMENTS`: optional `<arm>` (letter or short name). If omitted, list ar
   a deliberate, eyes-open re-upload into an existing stamp — never as a way to
   silence a real collision.
 - Follow precedent over schema (sample existing PI rows in `previous_metadata/` before writing new ones — schema lies, workbook tells truth).
-- Unknown values: for an **in-prep** study use `*** PLACEHOLDER: ... ***` markers, never blanks (greppable). For a **published/submitted** study, harvest the four sources first (SKILL.md); if a value is genuinely absent, leave it blank and add a name-pattern-anchored question to `QUESTIONS_FOR_PI.md` — no placeholder.
+- Unknown values: for an **in-prep** study use `*** PLACEHOLDER: ... ***` markers, never blanks (greppable). For a **published/submitted** study, harvest the five sources first (SKILL.md), including the named deposit itself; if a value is genuinely absent, leave it blank and add a name-pattern-anchored question to `QUESTIONS_FOR_PI.md` — no placeholder.
 - Pre-assigned UIDs (no auto-gen). Format `<TYPE>-YYMMDD<LAB>-N`.
 - Don't include parent-tier records that already exist — `/curate-retrieve` auto-pulls them.
 - If the arm has new sample types not in `sampletypes_db.json` (e.g., `D.REF`), write to `assay_sheets/pending_schema/` and note in `QUESTIONS_FOR_PI.md`.

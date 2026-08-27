@@ -6,27 +6,38 @@ For each phase: inputs, outputs, scripts invoked, error modes, edge cases.
 
 ## Phase table
 
-14 commands drive 12 phases. Phase 9 is split into 9a (`/curate-qa`, local) and
-9b (`/curate-qc`, server-side); phases 4 and 8 were retired as numbers (see
-"Retired phases"); the surviving numbers are deliberately **not** renumbered,
-because every scaffolded project's `CLAUDE.md` bakes in the order,
-`/curate-status` maps artifacts by number, and curators speak in phase numbers.
+14 pipeline-mode commands drive 12 phases. (The plugin ships 26 commands across five
+modes — `pipeline`, `fdh`, `schema`, `report`, `assay`. **This file covers `pipeline`
+only**; see `SKILL.md` for the roster and `FDH.md` / `SCHEMA.md` / `REPORTS.md` /
+`ASSAY.md` for the rest.)
 
-The 11 pipeline phases run inventory (1) through email (13):
+Phase 9 is split into 9a (`/curate-qa`, local) and 9b (`/curate-qc`, server-side); phases
+4 and 8 were retired as numbers (see "Retired phases"); the surviving numbers are
+deliberately **not** renumbered, because every scaffolded project's `CLAUDE.md` bakes in
+the order, `/curate-status` maps artifacts by number, and curators speak in phase numbers.
+
+The pipeline runs inventory (1) through email (13) — 11 numbers, 12 phases, because 9
+splits:
 
 | # | Phase | Command | Artifact |
 |---|---|---|---|
 | 1 | Inventory | `/curate-inventory` | `FILE_INDEX.md` |
-| 2 | Sample tree | `/curate-sample-tree` | `SAMPLE_TREE.md` |
+| 2 | Sample tree | `/curate-sample-tree` | `SAMPLE_TREE.md` + `sample_tree.json` + `SAMPLE_TREE.html` |
 | 3 | Questions | `/curate-questions [add\|list\|resolve]` | `QUESTIONS_FOR_PI.md` |
 | 5 | Build | `/curate-build [<arm>]` | `assay_sheets/4sheet_originals/*.xlsx` + `scripts/build_<arm>.py` |
-| 6 | Consolidate | `/curate-consolidate` | `assay_sheets/Arm{X}-upload.xlsx` (flat format) |
+| 6 | Consolidate | `/curate-consolidate` | `assay_sheets/Arm{X}-upload.xlsx` (flat) + `assay_sheets/Arm{X}_review.xlsx` |
 | 7 | Resolve assays | `/curate-resolve-assays --project-id N` | `context/assay_ids_cache.json` + `context/assay_synonyms.json` |
-| 9 | QA | `/curate-qa` | console disposition report |
+| 9a | QA (local) | `/curate-qa` | console disposition report |
+| 9b | QC (server-side) | `/curate-qc` | console report + `context/live_sampletype_attributes.json` — the last gate before upload |
 | 10 | Deposit | `/curate-deposit <geo\|zenodo\|omero>` | external uploads + `Link_PrimaryData` backfilled |
 | 11 | Retrieve | `/curate-retrieve` | `RETRIEVE.TXT` |
 | 12 | Validate | `/curate-validate <metadata.xlsx>` | console diff report |
 | 13 | Email | `/curate-email` | `EMAIL_TO_PI.md` |
+
+`/curate-status` is the fourteenth command and belongs to no phase (see "Phase any").
+Note that `/curate-status` does **not** report 9b: `scripts/status.py:25-38` maps
+artifacts for phases 1, 2, 3, 5, 6, 7, 9, 10, 11, 12, 13 only, so "the last gate ran" is
+not recoverable from status output — confirm it from the validator's own report.
 
 ---
 
@@ -63,7 +74,7 @@ An arm is what flows through the whole back half:
 | 2 | one ASCII tree per arm in `SAMPLE_TREE.md` |
 | 4 | one task per arm, optionally `blockedBy` other arms |
 | 5 | one `scripts/build_<arm>.py` + a set of `assay_sheets/4sheet_originals/<arm>_<sampletype>.xlsx` |
-| 6 | one flat `assay_sheets/Arm{X}-upload.xlsx` |
+| 6 | one flat `assay_sheets/Arm{X}-upload.xlsx` + its `Arm{X}_review.xlsx` twin |
 | 7, 9, 12 | iterated over as `Arm*-upload.xlsx` |
 
 Arms are labelled by letter (`A`, `B`, `C`, …) and are the argument to `/curate-build <arm>`.
@@ -123,7 +134,7 @@ overwrites what exists.
 **Action:**
 1. Walk `files/` (record `tree -L 2` output + total size).
 2. List `manuscript/` (extract docx text if present via zipfile + xml.etree).
-3. Inspect every `previous_metadata/*.xlsx` via `scripts/inspect_workbook.py`.
+3. Inspect every `previous_metadata/*.xlsx` via `uv run --script <PLUGIN>/scripts/inspect_workbook.py <path>`.
 4. Read `email_convo.md` if present.
 5. Identify the PI's existing rows in the master xlsx (filter by Scientist column or per-row Notes).
 6. Render `templates/FILE_INDEX.md.j2` → `./FILE_INDEX.md`.
@@ -153,7 +164,10 @@ overwrites what exists.
 8. Write `./sample_tree.json` — one node per sample type (with `count` = rows to create), one edge
    per parent→child assay connection, carrying manuscript quotes and rationale. Omit `clade`; it is
    derived from the assay's `Parent Clade Type` / `Child Clade Type`.
-9. Run `scripts/build_sample_tree_html.py` → `./SAMPLE_TREE.html`, the interactive review view.
+9. Run `uv run --script <PLUGIN>/scripts/build_sample_tree_html.py [--strict]` → `./SAMPLE_TREE.html`,
+   the interactive review view. Both `--input` and `--output` default to cwd-relative paths
+   (`build_sample_tree_html.py:368-369`), so run it from the project root; `--strict` (`:373`)
+   turns a clade warning into exit 1.
 
 **Outputs:** `SAMPLE_TREE.md` (narrative, edited by hand), `sample_tree.json` (source of truth for
 the graph), `SAMPLE_TREE.html` (build artifact — regenerate, never edit). All three describe one
@@ -196,7 +210,9 @@ numbered.
 
 **Command:** `/curate-build [<arm>]`
 
-**Inputs:** `SAMPLE_TREE.md`, `previous_metadata/*.xlsx` (master), `manuscript/`, `.dmac-curation.json` (lab + pi)
+**Inputs:** `SAMPLE_TREE.md`, `previous_metadata/*.xlsx` (master — **must be a fresh DB
+pull, under 24 h old**; grab one with `uv run --script <PLUGIN>/scripts/nextseek_api.py
+pull-db --project-id N`), `manuscript/`, `.dmac-curation.json` (lab + pi)
 
 **Output:** `assay_sheets/4sheet_originals/<arm>_<sampletype>.xlsx`, one per sample
 type, plus the generated `./scripts/build_<arm>.py` that produced them.
@@ -241,20 +257,35 @@ passed it, so the mechanism existed and nothing populated it.
 1. Identify arm. If not supplied, list arms from `SAMPLE_TREE.md` and `AskUserQuestion`.
 2. Read sample types and counts for the arm.
 3. Read master to identify existing parent UIDs. Workbook precedent beats the schema (hard rule 4).
-4. Gather field values. For a **published/submitted** study run the Published-paper harvest (SKILL.md): check the manuscript **Methods**, **Supplemental Methods**, and **Data Availability statement**, plus the **master NExtSEEK sheet** (`previous_metadata/*.xlsx`), for instrument, platform, protocol, and manifest details before deciding any value is missing. A value genuinely absent from all four is left blank and logged to `QUESTIONS_FOR_PI.md`, never placeholdered.
+4. Gather field values. For a **published/submitted** study run the Published-paper harvest (SKILL.md), all **five** sources in order: the manuscript **Methods**, **Supplemental Methods**, and **Data Availability statement**, then **the named deposit itself** (fetch it and enumerate its files — it is ground truth for the data tier), then the **master NExtSEEK sheet** (`previous_metadata/*.xlsx`). A value genuinely absent from all five is left blank and logged to `QUESTIONS_FOR_PI.md`, never placeholdered.
 5. Generate `./scripts/build_<arm>.py`:
    - PEP 723 inline deps (openpyxl)
    - `sys.path.insert(0, "<PLUGIN_PATH>/scripts")`
    - `from _common import mint_uid, write_4sheet_xlsx, schema_column_order, placeholder`
+   - **`from stamp_guard import preflight`, called BEFORE any UID is minted:**
+     `preflight([<sample types this arm mints>], LAB, DATE, project_root=".")`
+     (`scripts/stamp_guard.py:169`). This is the root-cause guard against UID-stamp
+     collisions: it refuses an absent or >24 h old DB pull (`require_fresh_db_pull`,
+     `:68`) and refuses to mint into a `<DATE><LAB>` stamp that already carries rows
+     for these sample types, naming the nearest free stamp (`guard_stamp`, `:134`).
+     Never delete the call to make a build run.
    - Per-project constants come from `./scripts/_project_constants.py` (copy `<PLUGIN>/scripts/_project_constants.py.example`), never from `_common`
-   - Mint UIDs `<TYPE>-YYMMDD<LAB>-N`
+   - Mint UIDs `<TYPE>-YYMMDD<LAB>-N` from N=1 — safe **only** because preflight proved
+     the stamp free. When several arms share one stamp, offset N per arm (arm A `1..k`,
+     arm B `k+1..`); never restart at 1.
    - Write one 4-sheet xlsx (`Instructions / Samples / Assay / Ontology`) per sample type into `assay_sheets/4sheet_originals/`
 6. Run the script. Report row counts.
 7. Suggest the next arm, or `/curate-consolidate`.
 
 **Edge cases:**
 - Missing manifest data, **in-prep study**: use `placeholder("<what is missing>")`, never a blank.
-- Missing manifest data, **published/submitted study**: run the Published-paper harvest first (SKILL.md). If still absent, leave blank and add a question to `QUESTIONS_FOR_PI.md` — no placeholder.
+- Missing manifest data, **published/submitted study**: run the Published-paper harvest first (SKILL.md) — all five sources, including the named deposit. If still absent, leave blank and add a question to `QUESTIONS_FOR_PI.md` — no placeholder.
+- Stale or missing DB pull: `preflight` raises before anything is minted. Re-pull with
+  `nextseek_api.py pull-db --project-id N`; do not lower `max_age_hours`.
+- Stamp collision: `preflight` raises with a suggested free stamp — re-mint under it.
+  `STAMP_GUARD_OVERRIDE=1` downgrades the refusal to a printed warning
+  (`scripts/stamp_guard.py:163`) and exists only for a deliberate, eyes-open re-upload
+  into an existing stamp, never to silence a real collision.
 - Sample type new to the schema: write to `assay_sheets/pending_schema/`.
 - Mid-arm scope ambiguity: stop, add to `QUESTIONS_FOR_PI.md`, propose to the user.
 
@@ -264,11 +295,46 @@ passed it, so the mechanism existed and nothing populated it.
 
 **Command:** `/curate-consolidate`
 
+**Phases 6 and 7 are a loop, not a line.** Phase 7 needs Phase 6's output (it diffs the
+cached titles against the `assay_titles` column of `assay_sheets/Arm*.xlsx`) and Phase 6
+needs Phase 7's output (`context/assay_ids_cache.json` + `context/assay_synonyms.json` are
+what populate `assay_ids`). Run 6 → 7 → 6. The second consolidation is not optional if
+`assay_ids` came out blank the first time.
+
 **Inputs:** `assay_sheets/4sheet_originals/*.xlsx`, optional `context/assay_ids_cache.json` + `context/assay_synonyms.json`
 
-**Output:** `assay_sheets/Arm{X}-upload.xlsx`, flat format, one per arm. The
-`-upload` suffix is what `/curate-retrieve` and `/curate-deposit` read, so the
-sheet does not need renaming between here and Phase 11.
+**Output:** `assay_sheets/Arm{X}-upload.xlsx`, flat format, one per arm — plus the
+`Arm{X}_review.xlsx` twin described below.
+
+The `-upload` suffix is what `/curate-retrieve` (`build_retrieve.py:31-39`),
+`/curate-validate` (`review_metadata_vs_uploads.py:89`) and `/curate-deposit zenodo`
+(`apply_zenodo_links.py:64-73`) read, so no rename is needed for those.
+
+**`/curate-deposit geo` is the exception.** `apply_geo_accessions.py:248-250` opens three
+hardcoded per-sample-type filenames in `--sheets-dir` (default `assay_sheets/`):
+`D.SEQ-upload-new.xlsx`, `A.GEX-upload-new.xlsx`, `A.SPTX-upload-new.xlsx`. An arm-named
+sheet is invisible to it — it prints `WARNING: … not found — skipping`, patches nothing,
+and still exits 0. Before Phase 10, split the GEO-bearing types into
+`<TYPE>-upload-new.xlsx` working copies (hard rule 2: copy, never rename in place), or
+point `--sheets-dir` at a directory that holds them.
+
+### The review twin
+
+`consolidate_to_flat.py:492` writes `assay_sheets/Arm{X}_review.xlsx` for every arm,
+unconditionally — one sheet per sample type, every field in its own column. The flat file
+packs each sample into a single `json_metadata` blob, correct for upload and unreadable
+for a human, so the twin is what a curator actually reads before submitting
+(`consolidate_to_flat.py:44-49`); the flat file's own README sheet says exactly that
+(`:332-336`). It is never uploaded.
+
+The underscore in its name is load-bearing: it keeps the twin out of every
+consolidated-output glob — `qa_flat_sheets.py`'s `--upload` default (`:420-430`), report
+mode's curated-sheet adapter (`scripts/report/adapters.py:203`), and
+`is_consolidated_output` (`consolidate_to_flat.py:355-372`), which is why a re-run deletes
+the upload sheet but not the twin.
+
+So Phase 5 is not the only review artifact. Phase 5 reviews **what was built**, per sample
+type; Phase 6's twin reviews **what will be uploaded**, per arm.
 
 ### Flat cannot carry controlled vocabulary
 
@@ -302,13 +368,16 @@ Confirm with the NExtSEEK API owner that flat still lacks ontology support
 before designing anything new around it.
 
 **Action:**
-1. Invoke `scripts/consolidate_to_flat.py --assay-sheets assay_sheets`.
+1. Invoke `uv run --script <PLUGIN>/scripts/consolidate_to_flat.py --assay-sheets assay_sheets [--all-in-one NAME]`.
 2. Archive 4-sheet originals into `4sheet_originals/` if not already there.
-3. Per arm, produce a flat xlsx with a `Samples` sheet (`uid, sampletype, name, parent, notes_summary, assay_titles, assay_ids, json_metadata`) and a `README` sheet.
+3. Per arm, produce a flat xlsx with a `Samples` sheet (`uid, sampletype, name, parent,
+   notes_summary, assay_titles, assay_ids, json_metadata`) and a `README` sheet, plus the
+   `Arm{X}_review.xlsx` twin.
 4. Report per-arm row counts and assay-ID resolution coverage.
 
 **Edge cases:**
-- Cache or synonyms missing: leave `assay_ids` blank, suggest `/curate-resolve-assays`.
+- Cache or synonyms missing: `assay_ids` is left blank. Run `/curate-resolve-assays
+  --project-id N`, **then re-run this phase** — nothing patches the column afterwards.
 - Pending-schema sample types: write to `assay_sheets/pending_schema/Arm<X>.xlsx`.
 - Re-run: prior consolidated outputs (`Arm{X}-upload.xlsx` and legacy `Arm{X}.xlsx`) in the target dir are deleted first, so a stale arm file cannot survive. A `-upload-new.xlsx` working copy is **never** deleted — it holds curator hand-edits and GEO/Zenodo backfill (hard rule 2). The deletion is scoped to the resolved project's assay-sheets dir and refuses to run inside the plugin checkout.
 
@@ -321,11 +390,15 @@ before designing anything new around it.
 **Inputs:** `.env` with `NEXTSEEK_USERNAME` + `NEXTSEEK_PASSWORD`, project ID
 
 **Action:**
-1. Invoke `scripts/nextseek_api.py fetch-assays --project-id N`.
+1. Invoke `uv run --script <PLUGIN>/scripts/nextseek_api.py fetch-assays --project-id N`.
 2. Write `context/assay_ids_cache.json` in cwd.
 3. Diff cached assay titles vs cited titles in build scripts.
 4. For unresolved titles, prompt user to curate `context/assay_synonyms.json` (LLM-judgment layer, per yufei-gemm-2 design).
 5. Update `.dmac-curation.json` lockfile with `nextseek_project_id`.
+6. **Suggest re-running `/curate-consolidate`.** `assay_ids` is resolved only while a flat
+   sheet is being written (`consolidate_to_flat.py:136-151`); nothing backfills the column
+   into an existing `Arm{X}-upload.xlsx`. A cache or synonym written now has no effect
+   until Phase 6 runs again.
 
 **Edge cases:**
 - Auth fail (401): re-prompt for `.env` values, don't log
@@ -354,15 +427,33 @@ projects.
 
 **Command:** `/curate-qa`
 
-**Inputs:** `assay_sheets/Arm*.xlsx`, master xlsx for parent resolvability
+**Inputs:** `assay_sheets/Arm{X}-upload.xlsx`, one arm at a time; and a **fresh** master DB
+pull passed as `--master-baseline`
 
 **Action:**
-1. Invoke `scripts/qa_flat_sheets.py`.
+1. Invoke, per arm:
+   ```
+   uv run --script <PLUGIN>/scripts/qa_flat_sheets.py \
+       --upload assay_sheets/Arm{X}-upload.xlsx \
+       --master-baseline previous_metadata/<master>.xlsx \
+       [--expected-counts <sampletype>=<n>,...]
+   ```
+   `--upload` is not optional on a multi-arm project: omitted, the script looks for the
+   *single* underscore-free `.xlsx` under `assay_sheets/` and exits 2 listing what it found
+   (`qa_flat_sheets.py:420-430`). **Always pass `--master-baseline`, against a pull taken
+   just now** — it is what powers the UID-vs-DB collision net below; without it the net
+   cannot run and QA will pass a sheet that overwrites another study on upload.
 2. Per row: classify CLEAN / SOFT_FLAG / HARD_REJECT (the command interprets the script's raw [BLOCKER]/[INFO] findings into these disposition labels).
 3. Report counts + per-row dispositions.
 4. Surface specific gaps (missing File_PrimaryData, dangling parents, malformed json_metadata, surprise placeholder markers).
 
 **Edge cases:**
+- UID already present in the master baseline: HARD_REJECT. On upload that row UPDATES
+  (overwrites) the existing record instead of inserting — the stamp collision Phase 5's
+  `preflight` exists to prevent, caught here as the second net (`qa_flat_sheets.py:165-170`,
+  `:317-334`). Re-mint under a free stamp. For a deliberate update or restore, and only
+  then, re-run with `QA_ALLOW_DB_UPDATES=1`, which downgrades it to
+  `INFO — updates acknowledged`.
 - File_PrimaryData blank: HARD_REJECT (per skill rule 8 — required)
 - Link_PrimaryData / Checksum_PrimaryData blank: SOFT_FLAG (not enforced)
 - Parent UID not in new sheets or master: HARD_REJECT (dangling)
@@ -378,7 +469,7 @@ projects.
 **Inputs:** `assay_sheets/<name>.xlsx` (consolidated flat), `.env` credentials, project id
 
 **Action:**
-1. `scripts/nextseek_api.py validate --project-id N --checks structure,dag,name_check --dump-dir <scratch> <file>`
+1. `uv run --script <PLUGIN>/scripts/nextseek_api.py validate --project-id N --checks structure,dag,name_check --dump-dir <scratch> <file>`
 2. If invalid, parse the DUMP (the console truncates at 20 of potentially hundreds).
 3. Group `VALIDATION_ATTRIBUTE_NAME` errors by sample type. Decide per field whether it is
    our error (invented / mis-cased / a typo copied from `sampletypes_db.json`) or a genuine
@@ -414,21 +505,28 @@ Routes by first arg:
 ### `/curate-deposit geo [--type bulk|spatial]`
 
 - **The build is delegated to `report` mode.** Run `/curate-report GEO <input>`; Phase 10 keeps only the genuinely pipeline-specific parts — external upload and accession backfill. This route was a **dead end** before the delegation: nothing produced the input it named and no GEO template xlsx shipped with the plugin, so delegating to report mode was closer to a free fix than a rewrite, and it avoids maintaining two divergent GEO build paths — the exact divergence the toolkit spec warns about elsewhere. Ordering is deliberate: GEO deposit happens **before** NExtSEEK upload because accessions must be backfilled into the sheets first, which is why report mode's curated-sheet adapter reads `assay_sheets/Arm{X}-upload.xlsx` locally with no API call.
-- Drives `scripts/upload_geo_ncftp.sh` for upload.
-- After GEO acceptance (manual confirmation): `scripts/apply_geo_accessions.py` patches D.SEQ/A.GEX/A.SPTX with GSM and series URLs. Bulk and spatial are separate GEO submissions with separate series accessions, so the script takes a flag pair per submission. See `commands/curate-deposit.md` for the full invocation and roster format.
+- Upload with `bash <PLUGIN>/scripts/upload_geo_ncftp.sh [bulk|spatial]` — the one executable in `scripts/`. Its positional arguments are **job names**, not paths (`upload_geo_ncftp.sh:116-134`); the local source dirs are hardcoded (`GEO/bulk_rna/GEO`, `GEO/spatial`), and a bare invocation runs both jobs. Needs `NCFTP_HOST/USER/PASS/REMOTE_BASE` in `.env`. No dry run — invoking it starts the transfer.
+- After GEO acceptance (manual confirmation): `uv run --script <PLUGIN>/scripts/apply_geo_accessions.py --gse-bulk GSE###### --gsm-csv <roster> [--gse-sptx GSE###### --sptx-gsm-csv <roster>] [--write]` patches D.SEQ/A.GEX/A.SPTX with GSM and series URLs. Bulk and spatial are separate GEO submissions with separate series accessions, so the script takes a flag pair per submission. See `commands/curate-deposit.md` for the full invocation and roster format.
+  The script reads `D.SEQ-upload-new.xlsx`, `A.GEX-upload-new.xlsx` and
+  `A.SPTX-upload-new.xlsx` from `--sheets-dir` (default `assay_sheets/`) and skips, with a
+  warning and exit 0, any it cannot find — check the patched-row counts, not the exit code.
 
 ### `/curate-deposit zenodo [--record-id N]`
 
-- Drives `scripts/stage_zenodo.py` to preview, then (after user confirms) re-runs it with `--write`. This **moves** curated non-image files into per-bucket folders `files/Figure {N}/Figure{N}_{SampleType}/`. The script creates no archives.
+- Drives `uv run --script <PLUGIN>/scripts/stage_zenodo.py` to preview, then (after user confirms) re-runs it with `--write`. This **moves** curated non-image files into per-bucket folders `files/Figure {N}/Figure{N}_{SampleType}/`. The script creates no archives.
 - **Manual step, unautomated:** the user creates one archive per bucket folder and drops the `.zip` files into `Zenodo_upload/`. No script in this plugin does the zipping.
 - User uploads those zips to Zenodo manually via web UI.
-- After upload: `scripts/apply_zenodo_links.py --write --record-id N` reads each zip's namelist from `Zenodo_upload/` (or `--zip-dir`) and patches `Link_PrimaryData` by filename.
+- After upload: `uv run --script <PLUGIN>/scripts/apply_zenodo_links.py --write --record-id N` reads each zip's namelist from `Zenodo_upload/` (or `--zip-dir`) and patches `Link_PrimaryData` by filename.
 
 ### `/curate-deposit omero [--project-id N]`
 
 - User uploads images manually via OMERO Insight.
-- `scripts/omero_pull.py all --project N` → `omero_images.csv`.
-- `scripts/apply_omero_ids.py --write` patches D.IMG `Link_PrimaryData`.
+- `uv run --script <PLUGIN>/scripts/omero_pull.py all --project N` → `omero_images.csv`.
+- `uv run --script <PLUGIN>/scripts/apply_omero_ids.py assay_sheets/D.IMG-upload-new.xlsx
+  [--omero-csv omero_images.csv] --write` patches D.IMG `Link_PrimaryData` by filename
+  match. The workbook is a **required positional argument** (`apply_omero_ids.py:73`) — the
+  script discovers nothing and does not use `_config`, so both paths resolve against the
+  cwd. Dry-run by default; `--write` saves and leaves a `.bak`.
 
 **Edge cases:**
 - GEO literal validation failures: re-prompt user with corrected literals
@@ -446,13 +544,18 @@ Routes by first arg:
 **Inputs:** `assay_sheets/*-upload-new.xlsx` (preferred), else `*-upload.xlsx` — the latter is what `/curate-consolidate` now writes directly, so no rename step is needed.
 
 **Action:**
-1. Invoke `scripts/build_retrieve.py`.
+1. Invoke `uv run --script <PLUGIN>/scripts/build_retrieve.py [--include-parents]` **from the
+   project root** — this is the one pipeline script that does not use `_config`/project-root
+   discovery, so `--assay-sheets` and `--output` resolve straight off the cwd
+   (`build_retrieve.py:78-84`).
 2. By default exclude DNA/RNA/MUS/TIS/PAT/PAV/CHM/CEL (auto-pulled by `chat_nextseek`).
 3. Write `./RETRIEVE.TXT` (newline-separated, sorted).
 4. Report per-sample-type counts.
 
 **Edge cases:**
-- No upload-new sheets present: refuse, suggest `/curate-build` + `/curate-consolidate`
+- No `-upload-new` sheets present: **not an error.** `build_retrieve.py:31-39` falls back
+  to `*-upload.xlsx`, which is what `/curate-consolidate` writes. Refuse only when neither
+  exists — then suggest `/curate-build` + `/curate-consolidate`.
 - User passes UIDs to fetch via `chat_nextseek`; auto-pulls parents; returns `*_AllMetadata.xlsx`
 
 ---
@@ -464,7 +567,7 @@ Routes by first arg:
 **Inputs:** downloaded `*_AllMetadata.xlsx` from `chat_nextseek`, current `RETRIEVE.TXT`, upload sheets
 
 **Action:**
-1. Invoke `scripts/review_metadata_vs_uploads.py --metadata-xlsx <xlsx> --retrieve RETRIEVE.TXT --assay-sheets assay_sheets`.
+1. Invoke `uv run --script <PLUGIN>/scripts/review_metadata_vs_uploads.py --metadata-xlsx <xlsx> --retrieve RETRIEVE.TXT --assay-sheets assay_sheets`.
 2. Report three diffs:
    - which upload-sheet field values differ from the round-tripped values
    - which `RETRIEVE.TXT` UIDs are missing from the download
