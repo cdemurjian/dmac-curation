@@ -168,3 +168,88 @@ def template_fields(template_id: str, *, api_key: str | None = None,
     found: list[TemplateField] = []
     _walk(payload, "", found)
     return found
+
+
+CEDAR_SEARCH_URL = "https://resource.metadatacenter.org/search"
+
+
+@dataclass
+class TemplateCandidate:
+    """One CEDAR template considered for a sample type."""
+
+    name: str
+    template_id: str
+    field_count: int = 0
+    described: int = 0
+    bound: int = 0
+    score: float = 0.0
+
+
+def search_templates(query: str, *, api_key: str | None = None,
+                     limit: int = 20, http=None) -> list[TemplateCandidate]:
+    """Templates matching a query, scored by how well specified they are.
+
+    Quality varies enormously and an unusable template is worse than none: the
+    Pistoia Alliance template carries 7 fields with no descriptions and no
+    ontology bindings, while `common assay template` carries 28 with 27
+    described and 22 bound. Score on what a curator can actually read.
+    """
+    key = api_key or os.environ.get(CEDAR_ENV_VAR)
+    if not key:
+        return []
+
+    params = urllib.parse.urlencode({"q": query, "resource_types": "template",
+                                     "limit": str(max(limit, 1))})
+    headers = {"Authorization": f"apiKey {key}", "Accept": "application/json"}
+    getter = http or _default_http
+
+    try:
+        payload = getter(f"{CEDAR_SEARCH_URL}?{params}", headers=headers,
+                         timeout=_TIMEOUT_SECONDS)
+    except Exception:  # noqa: BLE001 - a failed search must degrade, not raise
+        return []
+    if not isinstance(payload, dict):
+        return []
+
+    out: list[TemplateCandidate] = []
+    for entry in payload.get("resources") or []:
+        if not isinstance(entry, dict) or not entry.get("@id"):
+            continue
+        fields = template_fields(entry["@id"], api_key=key, http=http)
+        described = sum(1 for f in fields if f.description)
+        bound = sum(1 for f in fields if f.branches)
+        out.append(TemplateCandidate(
+            name=entry.get("schema:name") or "",
+            template_id=entry["@id"],
+            field_count=len(fields), described=described, bound=bound,
+            score=len(fields) + 2.0 * described + 3.0 * bound))
+    return out
+
+
+def fallback_template(*, api_key: str | None = None,
+                      http=None) -> TemplateCandidate | None:
+    """The pinned generic template, for when no domain template fits.
+
+    There is deliberately NO `select_template`. Choosing a template is a
+    judgement call that a fixed query cannot make: searching `sequencing`
+    returns 0 while `*seq*` returns 18, and searching `*viab*` returns 0 because
+    the library genuinely holds nothing for viability. Those look identical to a
+    function and completely different to a reader. Worse, CEDAR matches token
+    prefixes against template NAMES, so the stopword "assay" pulls
+    `Pistoia Alliance assay template` into the results for any assay type and a
+    score-based picker will happily call it type-specific.
+
+    `search_templates` is the primitive; `curate-sampletype.md` drives the
+    search, adapts the query, and judges. This function only supplies the
+    fallback once that judgement concludes nothing fits.
+    """
+    key = api_key or os.environ.get(CEDAR_ENV_VAR)
+    if not key:
+        return None
+    template_id = REFERENCE_TEMPLATES["common assay template"]
+    fields = template_fields(template_id, api_key=key, http=http)
+    return TemplateCandidate(
+        name="common assay template", template_id=template_id,
+        field_count=len(fields),
+        described=sum(1 for f in fields if f.description),
+        bound=sum(1 for f in fields if f.branches))

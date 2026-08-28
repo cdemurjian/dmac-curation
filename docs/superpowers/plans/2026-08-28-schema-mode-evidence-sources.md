@@ -677,229 +677,39 @@ git commit -m "feat(schema): surface repository requirements as the first eviden
 
 ---
 
-### Task 5: Per-type CEDAR template selection
+### Task 5: CEDAR template selection as an agent step — REDESIGNED, DONE
 
-**Files:**
-- Modify: `scripts/schema/templates.py`
-- Test: `tests/test_schema_templates.py`
+**Superseded the original deterministic `select_template`.** The live gate
+caught it choosing wrongly in both directions, and the cause is not fixable by a
+better query or a better score.
 
-**Interfaces:**
-- Consumes: `template_fields`, `REFERENCE_TEMPLATES` (existing).
-- Produces:
-  - `@dataclass TemplateCandidate` with `.name: str`, `.template_id: str`, `.field_count: int`, `.described: int`, `.bound: int`, `.score: float`
-  - `search_templates(query: str, *, api_key=None, limit=20, http=None) -> list[TemplateCandidate]`
-  - `select_template(record: dict, *, api_key=None, http=None) -> tuple[TemplateCandidate | None, bool]` — the bool is `is_fallback`
+CEDAR matches **token prefixes against template NAMES**. So:
 
-- [ ] **Step 1: Write the failing tests**
+| query | hits | meaning |
+|---|---|---|
+| `sequencing` | 0 | a BAD QUERY — templates are named `seq`, never `sequencing` |
+| `*seq*` | 18 | RNA-Seq, ATAC-Seq, DBiT-seq, Seq-Scope, Pixel-seq, MiAIRR |
+| `*viab*` | 0 | a REAL ABSENCE — nothing viability-specific exists |
+| `Cell Viability Assay` | 8 | all generic, matched on the stopword `assay` |
 
-Append to `tests/test_schema_templates.py`:
+A function cannot tell row 1 from row 3 — both are zero. A reader comparing them
+can. And a score-based picker ranks `Pistoia Alliance assay template` (63
+fields) top for D.VIA and calls it type-specific, which is the exact defect this
+plan exists to remove.
 
-```python
-# --- per-type selection -----------------------------------------------------
-#
-# Pinning ONE template gave D.VIA and D.SEQ an identical 28-row checklist,
-# because the input was identical. Type-specific templates DO exist - RNA-Seq
-# returns 8, ATAC 2, proteomics 7 - and were dismissed on a single bad query.
-# Where none matches (viability, cytometry, flow all return 0) the generic
-# template is a legitimate FALLBACK, and the review must say so.
+**What shipped:**
+- `search_templates(query, ...)` stays the primitive — tested, unchanged.
+- `select_template` is **deleted**, with a test asserting it stays deleted.
+- `fallback_template()` supplies the pinned generic once the agent has concluded
+  nothing fits.
+- `commands/curate-sampletype.md` carries the search loop: query, inspect the
+  names, strip stopwords, wildcard the distinctive stem, try abbreviation and
+  expansion, try Tags terms, then JUDGE — and report which queries ran.
 
-SEARCH_RESPONSE = {
-    "totalCount": 2,
-    "resources": [
-        {"@id": "https://repo.metadatacenter.org/templates/aaa",
-         "schema:name": "RNA-Seq Metadata"},
-        {"@id": "https://repo.metadatacenter.org/templates/bbb",
-         "schema:name": "Pistoia Alliance assay template"},
-    ],
-}
-
-RICH_TEMPLATE = {
-    "_ui": {"order": ["instrument", "read length"]},
-    "properties": {"instrument": _field("The sequencer.", ("OBI",)),
-                   "read length": _field("Read length in bp.")},
-}
-POOR_TEMPLATE = {"_ui": {"order": ["x"]}, "properties": {"x": _field()}}
-
-EMPTY_SEARCH = {"totalCount": 0, "resources": []}
-
-SEQ_RECORD = {"SampleType": "D.SEQ", "Associated Assay Parents": "Short Read Sequencing"}
-VIA_RECORD = {"SampleType": "D.VIA", "Associated Assay Parents": "Cell Viability Assay"}
-
-
-def _selection_http(search=SEARCH_RESPONSE):
-    return RoutedHTTP([("/search", search),
-                       ("/templates/aaa", RICH_TEMPLATE),
-                       ("/templates/bbb", POOR_TEMPLATE),
-                       ("/templates/", RICH_TEMPLATE)])
-
-
-def test_search_templates_returns_nothing_without_a_key(monkeypatch):
-    monkeypatch.delenv(tp.CEDAR_ENV_VAR, raising=False)
-    assert tp.search_templates("sequencing") == []
-
-
-def test_search_templates_reads_name_and_id(monkeypatch):
-    monkeypatch.setenv(tp.CEDAR_ENV_VAR, "testkey")
-    out = tp.search_templates("sequencing", http=_selection_http())
-    assert [c.name for c in out] == ["RNA-Seq Metadata",
-                                     "Pistoia Alliance assay template"]
-    assert out[0].template_id.endswith("/aaa")
-
-
-def test_search_templates_scores_a_described_bound_template_above_a_bare_one(monkeypatch):
-    monkeypatch.setenv(tp.CEDAR_ENV_VAR, "testkey")
-    out = tp.search_templates("sequencing", http=_selection_http())
-    by = {c.name: c for c in out}
-    assert by["RNA-Seq Metadata"].score > by["Pistoia Alliance assay template"].score
-    assert by["RNA-Seq Metadata"].described == 2
-    assert by["RNA-Seq Metadata"].bound == 1
-
-
-def test_select_template_prefers_a_domain_match(monkeypatch):
-    monkeypatch.setenv(tp.CEDAR_ENV_VAR, "testkey")
-    chosen, is_fallback = tp.select_template(SEQ_RECORD, http=_selection_http())
-    assert chosen.name == "RNA-Seq Metadata"
-    assert is_fallback is False
-
-
-def test_select_template_falls_back_when_nothing_matches(monkeypatch):
-    """viability / cytometry / flow all return 0. That must be visible."""
-    monkeypatch.setenv(tp.CEDAR_ENV_VAR, "testkey")
-    chosen, is_fallback = tp.select_template(
-        VIA_RECORD, http=_selection_http(search=EMPTY_SEARCH))
-    assert is_fallback is True
-    assert chosen.name == "common assay template"
-
-
-def test_select_template_without_a_key_returns_no_choice(monkeypatch):
-    monkeypatch.delenv(tp.CEDAR_ENV_VAR, raising=False)
-    chosen, is_fallback = tp.select_template(SEQ_RECORD)
-    assert chosen is None
-```
-
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `uv run --with pytest pytest tests/test_schema_templates.py -q`
-Expected: FAIL — `AttributeError: module 'schema.templates' has no attribute 'search_templates'`
-
-- [ ] **Step 3: Write the minimal implementation**
-
-Append to `scripts/schema/templates.py`:
-
-```python
-CEDAR_SEARCH_URL = "https://resource.metadatacenter.org/search"
-
-
-@dataclass
-class TemplateCandidate:
-    """One CEDAR template considered for a sample type."""
-
-    name: str
-    template_id: str
-    field_count: int = 0
-    described: int = 0
-    bound: int = 0
-    score: float = 0.0
-
-
-def search_templates(query: str, *, api_key: str | None = None,
-                     limit: int = 20, http=None) -> list[TemplateCandidate]:
-    """Templates matching a query, scored by how well specified they are.
-
-    Quality varies enormously and an unusable template is worse than none: the
-    Pistoia Alliance template carries 7 fields with no descriptions and no
-    ontology bindings, while `common assay template` carries 28 with 27
-    described and 22 bound. Score on what a curator can actually read.
-    """
-    key = api_key or os.environ.get(CEDAR_ENV_VAR)
-    if not key:
-        return []
-
-    params = urllib.parse.urlencode({"q": query, "resource_types": "template",
-                                     "limit": str(max(limit, 1))})
-    headers = {"Authorization": f"apiKey {key}", "Accept": "application/json"}
-    getter = http or _default_http
-
-    try:
-        payload = getter(f"{CEDAR_SEARCH_URL}?{params}", headers=headers,
-                         timeout=_TIMEOUT_SECONDS)
-    except Exception:  # noqa: BLE001
-        return []
-    if not isinstance(payload, dict):
-        return []
-
-    out: list[TemplateCandidate] = []
-    for entry in payload.get("resources") or []:
-        if not isinstance(entry, dict) or not entry.get("@id"):
-            continue
-        fields = template_fields(entry["@id"], api_key=key, http=http)
-        described = sum(1 for f in fields if f.description)
-        bound = sum(1 for f in fields if f.branches)
-        out.append(TemplateCandidate(
-            name=entry.get("schema:name") or "",
-            template_id=entry["@id"],
-            field_count=len(fields), described=described, bound=bound,
-            score=len(fields) + 2.0 * described + 3.0 * bound))
-    return out
-
-
-def select_template(record: dict, *, api_key: str | None = None,
-                    http=None) -> tuple[TemplateCandidate | None, bool]:
-    """The best template for this sample type, and whether it is the fallback.
-
-    Searches on the producing assay. Where nothing matches - `viability`,
-    `cytometry` and `flow` all return zero - `common assay template` stands in,
-    and the second element is True so the review can SAY it is generic. A
-    generic checklist read as a type-specific one is the defect this replaces.
-    """
-    key = api_key or os.environ.get(CEDAR_ENV_VAR)
-    if not key:
-        return None, False
-
-    query = str((record or {}).get("Associated Assay Parents") or "").strip()
-    candidates = search_templates(query, api_key=key, http=http) if query else []
-    if candidates:
-        return max(candidates, key=lambda c: c.score), False
-
-    fallback_id = REFERENCE_TEMPLATES["common assay template"]
-    fields = template_fields(fallback_id, api_key=key, http=http)
-    return TemplateCandidate(
-        name="common assay template", template_id=fallback_id,
-        field_count=len(fields),
-        described=sum(1 for f in fields if f.description),
-        bound=sum(1 for f in fields if f.branches)), True
-```
-
-- [ ] **Step 4: Run to verify it passes**
-
-Run: `uv run --with pytest pytest tests/test_schema_templates.py -q`
-Expected: all pass, including the 6 new tests.
-
-- [ ] **Step 5: Live smoke run — REQUIRED, do not skip**
-
-```bash
-set -a; . ./.env; set +a
-uv run python -c "
-import sys; sys.path.insert(0,'scripts')
-from schema import templates as tp, field_index as fi
-cat=fi.load_catalog()
-for t in ('D.SEQ','D.VIA','D.MSP'):
-    r=fi.type_record(cat,t)
-    c,fb=tp.select_template(r)
-    print(f'{t}: {c.name if c else None}  fallback={fb}  fields={c.field_count if c else 0}')
-"
-```
-
-Expected: D.SEQ selects a sequencing template with `fallback=False`; D.VIA reports `fallback=True` on `common assay template`. If D.SEQ comes back as a fallback, the search query or scoring is wrong — fix before committing.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add scripts/schema/templates.py tests/test_schema_templates.py
-git commit -m "feat(schema): select a CEDAR template per type, with the generic one as an explicit fallback"
-```
-
----
+**Verified live.** D.SEQ: `Short Read Sequencing` → 0, `*seq*` → 8 real
+candidates (Seq-Scope 26 fields/26 described/10 bound). D.VIA: absence confirmed
+across `*viab*`, `*cytotox*`, `*cytom*`, `*flow*`, `*facs*` — all 0 — so its
+fallback is earned rather than assumed.
 
 ### Task 6: Checklist section declares a fallback
 

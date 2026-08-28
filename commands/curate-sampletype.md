@@ -188,23 +188,42 @@ Patching the schema to accommodate our own error pollutes a shared vocabulary.
      field this type lacks - OBI divides `cell viability assay` by detection
      chemistry (Annexin V, ATP bioluminescence, resorufin), which is a field
      D.VIA does not have. Degrades to nothing without `BIOPORTAL_API_KEY`.
-   - **the reference template checklist** via `scripts/schema/templates.py`:
-     `template_fields(REFERENCE_TEMPLATES["common assay template"])` returns 28
-     fields, 27 described and 22 bound to a BioAssay Ontology branch. Diff them
-     against this type and partition them with `coverage(fields, resolver)`,
-     where the resolver runs `rank_candidates()` and hands back the top
-     `Candidate.match_pass`. **Never report an exact-name coverage count**: it
-     put D.SEQ, a type carrying 84 fields, at "0 of 28", because the reference
-     writes prose names (`detection instrument`) and NExtSEEK writes compact
-     ones (`Sequencer`), so the two conventions almost never collide.
-     **Always carry `Candidate.match_pass` into the verdict, and never render a
-     `semantic` hit as though it settled anything.** That pass matches on shared
-     word stems, so `bioassay type` returns `Checksum_PrimaryType` (63 usages)
-     purely on "type". Shown bare it reads as a ruling; shown as
-     "semantic match, weak" it reads as what it is. An `exact` or `normalized`
-     hit is worth acting on; a `semantic` one is worth a glance.
-     This is the only source that names FIELDS rather than values; BioPortal
-     structurally cannot (see SCHEMA.md). Degrades to nothing without
+   - **a CEDAR template, SELECTED BY YOU, not by a query.** This step is
+     judgement, and the tooling deliberately provides no `select_template`.
+     `templates.search_templates(query)` is the primitive; you drive it.
+
+     **How CEDAR's search actually behaves** - learn this before concluding
+     anything, because getting it wrong produced a wrong answer once already:
+
+     - It matches **token prefixes against template NAMES**, not descriptions
+       and not content. `NGS`, `Illumina` and `library` all return 0.
+     - So the assay's own name is often the WRONG query. `sequencing` returns
+       **0** while `*seq*` returns **18** - RNA-Seq Metadata, ATAC-Seq Metadata
+       2.0, DBiT-seq, Seq-Scope, RNAseq (Bulk), RNAseq (sc-sn), Pixel-seqV2,
+       MiAIRR. The templates are named `seq`, never `sequencing`.
+     - Wildcards work and you should use them: `seq*` gives 10, `*seq*` gives 18.
+     - The token **`assay` is a stopword that poisons results.** Searching
+       `Cell Viability Assay` returns `common assay template` and
+       `Pistoia Alliance assay template` - generic templates matching on that
+       one word, with nothing viability-specific among them. A score-based
+       picker calls the highest one type-specific. It is not.
+
+     **The loop.** Search on the assay name. If you get 0 hits, or only generic
+     `*assay template*` names, DO NOT conclude the library has nothing. Retry:
+     strip the stopwords, wildcard the distinctive stem (`*seq*`, `*proteom*`),
+     try the abbreviation and the expansion, try terms from the type's Tags.
+     Then read the NAMES that come back and judge whether any is actually about
+     this assay. Report which queries you ran.
+
+     **Only after that may you fall back.** `templates.fallback_template()`
+     returns the pinned generic, and you must pass `is_fallback: True` so the
+     review says the checklist is generic. Absence is a real answer when you
+     have earned it: `*viab*`, `*cytotox*`, `*cytom*`, `*flow*` and `*facs*` all
+     return 0, so D.VIA genuinely has no template and its review should say so.
+     `sequencing` returning 0 is NOT that - it is a bad query.
+
+     Then `template_fields(candidate.template_id)` for the field list, and
+     `coverage(fields, resolver)` to partition it. Degrades to nothing without
      `CEDAR_API_KEY`.
 
 3. **Identify gaps.** What does this assay actually produce that the record does

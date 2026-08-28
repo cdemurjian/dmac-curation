@@ -252,3 +252,108 @@ def test_coverage_partitions_every_field_exactly_once():
     strong, weak, uncovered = tp.coverage(FIELDS, _resolver({
         "detection instrument": "exact", "bioassay type": "semantic"}))
     assert len(strong) + len(weak) + len(uncovered) == len(FIELDS)
+
+
+# --- per-type selection -----------------------------------------------------
+#
+# Pinning ONE template gave D.VIA and D.SEQ an identical 28-row checklist,
+# because the input was identical. Type-specific templates DO exist - RNA-Seq
+# returns 8, ATAC 2, proteomics 7 - and were dismissed on a single bad query.
+# Where none matches (viability, cytometry, flow all return 0) the generic
+# template is a legitimate FALLBACK, and the review must say so.
+
+SEARCH_RESPONSE = {
+    "totalCount": 2,
+    "resources": [
+        {"@id": "https://repo.metadatacenter.org/templates/aaa",
+         "schema:name": "RNA-Seq Metadata"},
+        {"@id": "https://repo.metadatacenter.org/templates/bbb",
+         "schema:name": "Pistoia Alliance assay template"},
+    ],
+}
+
+RICH_TEMPLATE = {
+    "_ui": {"order": ["instrument", "read length"]},
+    "properties": {"instrument": _field("The sequencer.", ("OBI",)),
+                   "read length": _field("Read length in bp.")},
+}
+POOR_TEMPLATE = {"_ui": {"order": ["x"]}, "properties": {"x": _field()}}
+# 1 field, 0 described, 0 bound -> score 1.0 against RICH's 9.0
+
+EMPTY_SEARCH = {"totalCount": 0, "resources": []}
+
+SEQ_RECORD = {"SampleType": "D.SEQ", "Associated Assay Parents": "Short Read Sequencing"}
+VIA_RECORD = {"SampleType": "D.VIA", "Associated Assay Parents": "Cell Viability Assay"}
+
+
+class RoutedHTTP:
+    """Answers by URL fragment. Defined here; test_schema_terms.py has its own."""
+
+    def __init__(self, routes):
+        self.routes = routes
+        self.calls = []
+
+    def __call__(self, url, headers=None, timeout=None):
+        self.calls.append(url)
+        for fragment, payload in self.routes:
+            if fragment in url:
+                if isinstance(payload, Exception):
+                    raise payload
+                return payload
+        raise AssertionError(f"unrouted URL: {url}")
+
+
+def _selection_http(search=SEARCH_RESPONSE):
+    # The template id is PERCENT-ENCODED into the fetch URL, so a route of
+    # "/templates/aaa" never matches - the real path segment is "...%2Faaa".
+    # Routing on the decoded form silently served one template for both and
+    # made two differently-specified templates score identically.
+    return RoutedHTTP([("/search", search),
+                       ("%2Faaa", RICH_TEMPLATE),
+                       ("%2Fbbb", POOR_TEMPLATE),
+                       ("/templates/", RICH_TEMPLATE)])
+
+
+def test_search_templates_returns_nothing_without_a_key(monkeypatch):
+    monkeypatch.delenv(tp.CEDAR_ENV_VAR, raising=False)
+    assert tp.search_templates("sequencing") == []
+
+
+def test_search_templates_reads_name_and_id(monkeypatch):
+    monkeypatch.setenv(tp.CEDAR_ENV_VAR, "testkey")
+    out = tp.search_templates("sequencing", http=_selection_http())
+    assert [c.name for c in out] == ["RNA-Seq Metadata",
+                                     "Pistoia Alliance assay template"]
+    assert out[0].template_id.endswith("/aaa")
+
+
+def test_search_templates_scores_a_described_bound_template_above_a_bare_one(monkeypatch):
+    monkeypatch.setenv(tp.CEDAR_ENV_VAR, "testkey")
+    out = tp.search_templates("sequencing", http=_selection_http())
+    by = {c.name: c for c in out}
+    assert by["RNA-Seq Metadata"].score > by["Pistoia Alliance assay template"].score
+    assert by["RNA-Seq Metadata"].described == 2
+    assert by["RNA-Seq Metadata"].bound == 1
+
+
+def test_fallback_template_is_the_pinned_generic(monkeypatch):
+    monkeypatch.setenv(tp.CEDAR_ENV_VAR, "testkey")
+    c = tp.fallback_template(http=_selection_http())
+    assert c.name == "common assay template"
+    assert c.field_count == 2
+
+
+def test_fallback_template_needs_a_key(monkeypatch):
+    monkeypatch.delenv(tp.CEDAR_ENV_VAR, raising=False)
+    assert tp.fallback_template() is None
+
+
+def test_there_is_no_deterministic_selector():
+    """Selection is a judgement call, not a lookup.
+
+    A fixed query cannot tell a query failure from a real absence: `sequencing`
+    returns 0 while `*seq*` returns 18, and `*viab*` returns 0 because nothing
+    exists. One is a bad query, the other is a fact about the library, and only
+    a reader comparing them can say which. `curate-sampletype.md` drives it.
+    """
+    assert not hasattr(tp, "select_template")
