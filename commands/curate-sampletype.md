@@ -191,6 +191,14 @@ Patching the schema to accommodate our own error pollutes a shared vocabulary.
      `context/assays_db.json`
    - sibling types in the same clade via `siblings_in_clade(catalog, TYPE)` -
      what do they collect that this type does not?
+   - **the PARENT types via `parents_of(catalog, TYPE)`** - a different question
+     from clade siblings, and usually a more useful one. D.SEQ's 38 Raw-clade
+     siblings are unrelated assays, while its `DNA` parent carries `Barcode`,
+     `Concentration`, `NumPrepCycles` and `LibraryType` - fields you would
+     otherwise propose as new. **A field held upstream through lineage is NOT a
+     gap**, and `Parent_SampleTypes` is prose you must not split by hand: four
+     separators are in use, CEL is missing a comma, and `.` appears inside the
+     codes themselves. `parents_of` matches known codes instead.
    - real observed values from any `previous_metadata/*.xlsx` in cwd, via
      `scripts/schema/dictionary.py` `observe_values()`. Real values beat
      guessed ones (SKILL.md hard rule 4).
@@ -279,6 +287,20 @@ Patching the schema to accommodate our own error pollutes a shared vocabulary.
      Then read the NAMES that come back and judge whether any is actually about
      this assay. Report which queries you ran.
 
+     **Run a POSITIVE CONTROL before concluding absence.** Every network
+     function here - `search_templates`, `template_fields`, `search_terms`,
+     `clade_neighbors`, `field_vocabulary` - ends in `except Exception: return
+     []`. That is deliberate, so one dead endpoint never breaks a run, but it
+     means an expired key, a revoked template or a network blip is
+     INDISTINGUISHABLE from a genuine zero. "`*viab*` returns 0, so nothing
+     exists" is also exactly what you would conclude with a dead key.
+
+     So before you record an absence, run a query you KNOW returns hits and
+     check it does: `*seq*` should give 18 for CEDAR, and
+     `search_terms("cell viability assay", ontologies=("OBI",))` should resolve
+     exact for BioPortal. Report the control alongside the zeros. An absence
+     without a control is not evidence.
+
      **Only after that may you fall back.** `templates.fallback_template()`
      returns the pinned generic, and you must pass `is_fallback: True` so the
      review says the checklist is generic. Absence is a real answer when you
@@ -351,11 +373,27 @@ Patching the schema to accommodate our own error pollutes a shared vocabulary.
    rejected. Filter to what this assay can actually produce, and record the
    filtering as your judgement so it can be overruled.
 
-   **A repository vocabulary outranks an ontology one for a reason.** GEO's
-   enforced literal is `Revio`; BioPortal offers `PacBio Revio`. Both name the
-   same machine and only one passes validation - this is the `Illumina NextSeq
-   500` vs `NextSeq 500` trap in SKILL.md. Where a repository covers the type,
-   prefer its list and withhold the ontology's.
+   **A repository vocabulary usually outranks an ontology one - but check WHOSE
+   list it is.** The literals really do diverge: BioPortal offers `PacBio Revio`
+   where the vendored list has `Revio`, and only one passes a strict validator.
+   That is the `Illumina NextSeq 500` vs `NextSeq 500` trap in SKILL.md.
+
+   **Do not assume the list belongs to the repository whose file you opened.**
+   `GEO-updated.json`'s own `controlled_vocabulary.authority` says the block was
+   "mined directly from the uploaded SRA_metadata.xlsx workbook", and
+   `REPORTS.md` records that GEO's `*instrument model` is deliberately FREE
+   TEXT, never CV-checked. So the 82 instrument models are SRA's, and binding
+   them as GEO's is an error this file previously made. Read the `authority`
+   note before citing any vocabulary as enforced.
+
+   **And a vendored list can be wrong for its own repository.** The GEO template
+   ships `library_layout: ["single", "paired"]`, but
+   `scripts/report/mapping.py` keeps `_GEO_LAYOUT_CV = ["single", "paired-end"]`
+   in code precisely because GEO rejects `paired` - while CEDAR's HRAVS branch
+   returns `single-end`/`paired-end`. Three sources, three literals, one strict
+   validator. Where report mode has already corrected a vocabulary, prefer ITS
+   list; where the sources simply disagree, bind nothing and raise it as an open
+   question.
 
    Read `_sources` in the artifact before trusting any of it. Some branches
    yield nothing usable - `applies to disease` in DOID lexically matches

@@ -190,3 +190,59 @@ def test_the_reuse_check_can_now_see_a_field_behind_an_acronym():
     names = [c.name for c in fi.rank_candidates("Platform", index,
                                              catalog=catalog, limit=10)]
     assert "QCPlatform" in names
+
+
+# --- parent lineage ---------------------------------------------------------
+#
+# `Parent_SampleTypes` is PROSE, not a list, and every naive split is wrong.
+# Four separators are in use across the catalog - `,` (6 records), ` or ` (15),
+# ` and ` (1) and `.` (MUS reads 'AB, BAC. CHM') - CEL is missing a comma
+# entirely ('CEL, TIS MUS, NHP, PAV'), and splitting on `.` shatters the type
+# codes themselves, which contain one. So parents are FOUND by matching known
+# codes rather than split out by delimiter.
+
+def test_a_single_parent_is_returned():
+    catalog = fi.load_catalog()
+    assert fi.parents_of(catalog, "D.SEQ") == ["DNA"]
+
+
+def test_or_separated_parents_are_all_returned():
+    catalog = fi.load_catalog()
+    assert fi.parents_of(catalog, "DNA") == ["CEL", "RNA", "DNA", "TIS", "BAC"]
+
+
+def test_mixed_or_and_and_separators():
+    catalog = fi.load_catalog()
+    assert fi.parents_of(catalog, "D.ELSA") == ["AB", "ABP", "CEL", "TIS"]
+
+
+def test_a_missing_comma_does_not_lose_a_parent():
+    """CEL reads 'CEL, TIS MUS, NHP, PAV' - TIS and MUS share a separator."""
+    catalog = fi.load_catalog()
+    assert fi.parents_of(catalog, "CEL") == ["CEL", "TIS", "MUS", "NHP", "PAV"]
+
+
+def test_a_period_separator_does_not_shatter_the_codes():
+    """MUS reads 'AB, BAC. CHM'. Splitting on '.' would also break `D.SEQ`."""
+    catalog = fi.load_catalog()
+    assert fi.parents_of(catalog, "MUS") == ["AB", "BAC", "CHM"]
+
+
+def test_a_type_with_no_declared_parents_returns_empty():
+    catalog = fi.load_catalog()
+    assert fi.parents_of(catalog, "MUS") != []          # sanity: MUS has some
+    assert fi.parents_of([{"SampleType": "X"}], "X") == []
+
+
+def test_only_real_sample_type_codes_are_returned():
+    catalog = fi.load_catalog()
+    codes = {r["SampleType"] for r in catalog if r.get("SampleType")}
+    for t in ("DNA", "CEL", "MUS", "D.ELSA"):
+        assert set(fi.parents_of(catalog, t)) <= codes
+
+
+def test_an_unknown_sample_type_returns_an_empty_list_not_an_empty_string():
+    """`type_record` raises for an unknown code; the fallback must stay a list."""
+    out = fi.parents_of(fi.load_catalog(), "NOT.A.TYPE")
+    assert out == []
+    assert isinstance(out, list)

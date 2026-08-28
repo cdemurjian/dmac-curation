@@ -48,10 +48,12 @@ CEDAR_TEMPLATE_URL = "https://resource.metadatacenter.org/templates/{id}"
 FIELD_TYPE = "https://schema.metadatacenter.org/core/TemplateField"
 ELEMENT_TYPE = "https://schema.metadatacenter.org/core/TemplateElement"
 
-# Pinned by @id because search cannot select by assay name. `common assay
-# template` is the only general template in the reachable library that is
-# well-specified: the Pistoia Alliance one carries 7 fields with no
-# descriptions and no ontology bindings at all.
+# The GENERIC fallback, pinned by @id, used only once the agent has concluded no
+# type-specific template fits. It is not "the best template" and no longer
+# claims to be: the justification here used to cite the Pistoia Alliance
+# template as carrying "7 fields with no descriptions", which was measured once
+# and never rechecked - it now carries 63 fields with 56 described and 31 bound,
+# and OUTSCORES this one. Measure at runtime; see the module docstring.
 #
 # NOTE: this is bibo:draft at v0.0.1 and owned by a third party. It is read at
 # runtime and never vendored, so a change upstream shows up as a changed

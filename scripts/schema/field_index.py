@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass, field
+import re
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -221,6 +222,43 @@ def _words(name: str) -> set[str]:
     if buf:
         words.append(buf)
     return {normalize_field_name(w) for w in words if len(w) >= 2}
+
+
+def parents_of(catalog: list[dict], sampletype: str) -> list[str]:
+    """The sample types this one descends from, in declared order.
+
+    `Parent_SampleTypes` is PROSE and every naive split is wrong. Four
+    separators are in use - `,`, ` or `, ` and `, and a bare `.` (MUS reads
+    'AB, BAC. CHM') - CEL is missing a comma entirely ('CEL, TIS MUS, NHP,
+    PAV'), and splitting on `.` would shatter the type codes themselves, since
+    `D.SEQ` contains one.
+
+    So parents are FOUND rather than split: every known code is matched against
+    the string, longest first so `D.SEQ` wins over a bare `SEQ`. Anything that
+    is not a real sample type is dropped, which makes the punctuation moot.
+
+    This matters because the clade siblings step answers a different question. A
+    data type's 38 Raw-clade siblings are unrelated assays, while its PARENT
+    usually holds the fields it would otherwise duplicate - D.SEQ's DNA parent
+    carries Barcode, Concentration and NumPrepCycles.
+    """
+    codes = [r["SampleType"] for r in catalog
+             if isinstance(r, dict) and r.get("SampleType")]
+    try:
+        raw = type_record(catalog, sampletype).get("Parent_SampleTypes") or ""
+    except Exception:  # noqa: BLE001 - an unknown type has no parents, not an error
+        return []
+    if not raw:
+        return []
+
+    pattern = "|".join(re.escape(c) for c in sorted(codes, key=len, reverse=True))
+    seen, found = set(), []
+    for m in re.finditer(pattern, raw):
+        code = m.group(0)
+        if code not in seen:
+            seen.add(code)
+            found.append(code)
+    return found
 
 
 def mine_tags(record: dict) -> list[str]:

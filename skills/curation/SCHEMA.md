@@ -185,6 +185,13 @@ nothing else, so the OWL restrictions describing an assay's inputs and outputs
 are unreachable. CEDAR templates are literally field lists, which is exactly the
 artifact the "does a field for this already exist?" problem needs.
 
+**Absence needs a positive control.** Every network path in `terms.py` and
+`templates.py` ends in `except Exception: return []` so one dead endpoint cannot
+break a run. The cost is that a failure and a real zero look identical, and this
+mode leans hard on telling them apart - `sequencing` returning 0 is a bad query,
+`*viab*` returning 0 is a fact, and an expired key returns 0 for both. Prove the
+search is alive with a known-good query before recording any absence.
+
 **A checklist, not a lookup.** The shared library cannot be selected by assay
 name - `viability`, `flow cytometry`, `sequencing` and `metabolomics` all return
 zero hits - so templates are pinned by `@id` and diffed against the type.
