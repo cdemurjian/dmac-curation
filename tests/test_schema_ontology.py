@@ -134,3 +134,48 @@ def test_bioportal_availability_is_env_driven(monkeypatch):
 def test_nothing_is_written_inside_the_plugin(tmp_path, plugin_sentinel):
     so.write_ontology_artifact(tmp_path, "D.VIA",
                                {"Type": so.propose_values(DVIA, "Type")})
+
+
+# --- precedence -------------------------------------------------------------
+#
+# A submission is literally rejected against a repository vocabulary, so it
+# outranks everything except a real observed workbook value (hard rule 4).
+# Tags drops to the floor: it is a per-sample-type prose list, not a per-field
+# vocabulary, and binding it to one field is an unverifiable assertion.
+
+RECORD_WITH_TAGS = {"SampleType": "D.SEQ", "Tags": "RNA-Seq, FASTQ"}
+
+
+def test_repository_outranks_bioportal_for_the_same_value():
+    out = so.propose_values(RECORD_WITH_TAGS, "LibraryStrategy",
+                            bioportal=["RNA-Seq"], repository=["RNA-Seq"])
+    assert [p.source for p in out if p.value == "RNA-Seq"] == ["repository"]
+
+
+def test_observed_still_outranks_repository():
+    """Hard rule 4: the workbook beats every declared schema."""
+    out = so.propose_values(RECORD_WITH_TAGS, "LibraryStrategy",
+                            repository=["RNA-Seq"], observed=["RNA-Seq"])
+    assert [p.source for p in out if p.value == "RNA-Seq"] == ["observed"]
+
+
+def test_bioportal_outranks_a_cedar_branch_value():
+    out = so.propose_values({}, "assay footprint", tags=[],
+                            cedar_branch=["microplate"], bioportal=["microplate"])
+    assert [p.source for p in out if p.value == "microplate"] == ["bioportal"]
+
+
+def test_cedar_branch_outranks_a_tag():
+    out = so.propose_values({}, "x", tags=["microplate"], cedar_branch=["microplate"])
+    assert [p.source for p in out if p.value == "microplate"] == ["cedar_branch"]
+
+
+def test_a_repository_value_carries_an_explanatory_note():
+    out = so.propose_values({}, "LibraryStrategy", tags=[], repository=["WGS"])
+    assert "reject" in out[0].note.lower()
+
+
+def test_every_source_still_contributes_its_unique_values():
+    out = so.propose_values(RECORD_WITH_TAGS, "LibraryStrategy",
+                            repository=["WGS"], bioportal=["exome sequencing"])
+    assert {p.value for p in out} == {"RNA-Seq", "FASTQ", "WGS", "exome sequencing"}

@@ -32,7 +32,14 @@ OUTPUT_SUBDIR = "schema"
 
 # Strongest source last: a later source overwrites an earlier one for the same
 # literal value, so a value both tagged and observed is credited as observed.
-_SOURCE_RANK = {"tags": 0, "sibling": 1, "bioportal": 2, "observed": 3}
+# Strongest source LAST: a later source overwrites an earlier one for the same
+# literal value. `observed` stays top per hard rule 4 - the workbook outranks the
+# schema. `repository` sits directly beneath it because a submission is literally
+# REJECTED against those lists. `tags` is the floor: it is a per-sample-type
+# prose list, not a per-field vocabulary, and binding it to one field is an
+# assertion nothing can check.
+_SOURCE_RANK = {"tags": 0, "sibling": 1, "cedar_branch": 2, "bioportal": 3,
+                "repository": 4, "observed": 5}
 
 
 @dataclass
@@ -57,7 +64,9 @@ def propose_values(record: dict, field_name: str, *,
                    observed: list[str] | None = None,
                    tags: list[str] | None = None,
                    siblings: list[str] | None = None,
-                   bioportal: list[str] | None = None) -> list[ProposedValue]:
+                   bioportal: list[str] | None = None,
+                   cedar_branch: list[str] | None = None,
+                   repository: list[str] | None = None) -> list[ProposedValue]:
     """Candidate permissible values for one field, deduped, source-attributed.
 
     Mining `Tags` is the cheapest win available: D.VIA's Tags column already
@@ -72,7 +81,9 @@ def propose_values(record: dict, field_name: str, *,
     contributions: list[tuple[str, str]] = []
     contributions += [(v, "tags") for v in tags]
     contributions += [(v, "sibling") for v in (siblings or [])]
+    contributions += [(v, "cedar_branch") for v in (cedar_branch or [])]
     contributions += [(v, "bioportal") for v in (bioportal or [])]
+    contributions += [(v, "repository") for v in (repository or [])]
     contributions += [(v, "observed") for v in (observed or [])]
 
     best: dict[str, str] = {}
@@ -92,6 +103,9 @@ def propose_values(record: dict, field_name: str, *,
         "observed": "seen in previous_metadata",
         "sibling": "used by a sibling type in the same clade",
         "bioportal": "suggested by BioPortal; unconfirmed",
+        "cedar_branch": "from the ontology branch a CEDAR template binds this field to",
+        "repository": ("enforced by the target repository; a submission is "
+                       "REJECTED without an exact match"),
     }
     return [ProposedValue(value=v, source=best[v], note=notes[best[v]])
             for v in order]
