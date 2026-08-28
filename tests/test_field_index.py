@@ -158,3 +158,35 @@ def test_type_record_raises_on_unknown_type():
 def test_siblings_in_clade_excludes_the_type_itself():
     sibs = fi.siblings_in_clade(CATALOG, "D.VIA")
     assert [s["SampleType"] for s in sibs] == ["D.FLOW"]
+
+
+# --- the reuse check's word splitter ----------------------------------------
+#
+# `_words` feeds the semantic pass, which is the last line of defence against
+# minting a duplicate. Two bugs made it blind exactly where it matters:
+# an uppercase RUN never split, so `QCPlatform` stayed one token and a
+# `Platform` query could not see it - on the very type that owns it - and a
+# `len(w) > 2` filter deleted real stems, leaving `F_bp` with no words at all.
+
+def test_words_splits_a_leading_acronym_from_the_word_it_qualifies():
+    assert fi._words("QCPlatform") == {"qc", "platform"}
+    assert fi._words("QCAssay") == {"qc", "assay"}
+
+
+def test_words_keeps_two_letter_stems():
+    assert fi._words("F_bp") == {"bp"}
+    assert fi._words("R_bp") == {"bp"}
+
+
+def test_words_still_splits_ordinary_camel_case():
+    assert fi._words("LibraryStrategy") == {"library", "strategy"}
+    assert fi._words("File_PrimaryData") == {"file", "primary", "data"}
+
+
+def test_the_reuse_check_can_now_see_a_field_behind_an_acronym():
+    """D.SEQ owns `QCPlatform`; a `Platform` query returned nothing at all."""
+    catalog = fi.load_catalog()
+    index = fi.build_field_index(catalog)
+    names = [c.name for c in fi.rank_candidates("Platform", index,
+                                             catalog=catalog, limit=10)]
+    assert "QCPlatform" in names

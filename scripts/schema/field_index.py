@@ -192,21 +192,35 @@ def rank_candidates(
 
 
 def _words(name: str) -> set[str]:
-    """CamelCase / underscore / space split into lowercase word stems."""
+    """CamelCase / underscore / space split into lowercase word stems.
+
+    An uppercase RUN is split before the character that begins the next word,
+    so `QCPlatform` yields qc + platform rather than one opaque token. Without
+    that, a `Platform` query could not see `QCPlatform` on D.SEQ - the very type
+    that owns it - and the semantic pass is the last thing standing between a
+    curator and a duplicate name.
+
+    Two-letter stems are kept. The old `len(w) > 2` filter deleted `bp`, which
+    left `F_bp` and `R_bp` with an EMPTY word set, so they could never match
+    anything at all.
+    """
+    chars = name.replace("_", " ").replace("-", " ")
     buf, words = "", []
-    for ch in name.replace("_", " ").replace("-", " "):
-        if ch.isupper() and buf and not buf[-1].isupper():
-            words.append(buf)
-            buf = ch
-        elif ch == " ":
+    for i, ch in enumerate(chars):
+        nxt = chars[i + 1] if i + 1 < len(chars) else ""
+        if ch == " ":
             if buf:
                 words.append(buf)
             buf = ""
-        else:
-            buf += ch
+            continue
+        if ch.isupper() and buf and (not buf[-1].isupper() or nxt.islower()):
+            words.append(buf)
+            buf = ch
+            continue
+        buf += ch
     if buf:
         words.append(buf)
-    return {normalize_field_name(w) for w in words if len(w) > 2}
+    return {normalize_field_name(w) for w in words if len(w) >= 2}
 
 
 def mine_tags(record: dict) -> list[str]:

@@ -193,3 +193,4 @@ def test_the_reuse_check_cannot_bridge_organism_to_species():
     fi, catalog, index = _index()
     assert fi.rank_candidates("Organism", index, catalog=catalog, limit=10) == []
     assert len(index["Species"].used_by) >= 4
+
