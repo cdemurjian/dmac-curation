@@ -129,6 +129,14 @@ viability assay` into Annexin V staining, ATP bioluminescence, resorufin
 detection and cell death, so detection chemistry is a real field D.VIA lacks.
 Definitions are carried because the label alone is usually too terse to judge.
 
+**An exact resolution is not a usable vocabulary.** `confidence` describes the
+class match and says nothing about whether its children fit your field. They are
+scoped to the ontology branch, not to your assay: `physical detection method`
+resolves exact in BAO and returns modalities spanning every bioassay, and
+`detection instrument` returns 39 commercial products including BAO's typo
+`Infinte M200`. Under strict 4-sheet validation an over-broad list rejects
+everything it omits, so filtering is required and belongs to the curator.
+
 **It suggests an axis, never a field.** Nothing extracts a field name from an
 ontology label; inferring the axis is the curator's work. `## External clade
 evidence` in the review renders the neighbours and stops there.

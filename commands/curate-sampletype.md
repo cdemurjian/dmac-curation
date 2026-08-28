@@ -16,6 +16,24 @@ which type - do not guess.
 into the current working directory, under `schema/`. There is **no lockfile**
 requirement, no scaffold, and no project. This works from anywhere.
 
+**Run it from a PROJECT directory when one exists.** "Works from anywhere" is
+not "works equally well anywhere": `dictionary.observe_values()` reads
+`previous_metadata/*.xlsx` **from cwd**, so running outside a project silently
+yields zero observed values - and observed values are the highest-ranked source
+there is (SKILL.md hard rule 4, the workbook outranks the schema). Nothing warns
+you. Every proposal then rests on schema and ontology evidence alone. If no
+workbook is in reach, SAY SO in the review's open questions, as a limitation of
+the run rather than a property of the type.
+
+**Never run it from the plugin repo itself** - `schema/` there breaks
+`tests/test_schema_dictionary.py::test_no_prebuilt_dictionary_ships_with_the_plugin`.
+
+**Invoke python as `uv run --with openpyxl`.** `dictionary.py` and `ontology.py`
+import openpyxl at module scope, so a bare `uv run` dies with
+`ModuleNotFoundError` before you touch a workbook. Hard rule 6's
+`uv run --script` does not apply to these modules; import them via
+`sys.path.insert(0, "<plugin>/scripts")` and `from schema import ...`.
+
 ## The default mode never applies anything
 
 By default it **never writes to NExtSEEK** and never edits `sampletypes_db.json`.
@@ -189,15 +207,35 @@ Patching the schema to accommodate our own error pollutes a shared vocabulary.
      do - and that is a fact about the type, not a failed lookup. Pass a
      `reason` so the review says which.
 
-     **Compute `held` with `rank_candidates()`, never by exact name.** The
-     repositories write prose names and NExtSEEK writes compact ones, so an
-     exact match reports GEO's `instrument model` as NOT HELD on D.SEQ even
-     though `Sequencer` is precisely that field - overstating the gap and
-     inviting a duplicate. Accept an `exact`, `normalized` or `synonym` pass as
-     held; treat a `semantic` pass as not held and let the row stand as a
-     question.
+     **`held` is YOUR judgement. No matcher computes it.** Repositories write
+     prose names (`instrument model`) and NExtSEEK writes compact ones
+     (`Sequencer`); the two vocabularies share almost no word stems, so nothing
+     lexical bridges them. `rank_candidates("instrument model")` never returns
+     `Sequencer` at any pass, and everything it does return is `semantic` -
+     an earlier version of this file prescribed a pass-based rule and it failed
+     on that very example. `tests/test_schema_repositories.py` pins this.
 
-   - **external clade evidence** via `scripts/schema/terms.py`: resolve the
+     So: run `rank_candidates()` for evidence, then decide yourself, and say in
+     the review that you decided. Two directions to check, because the error is
+     symmetric - an over-strict rule HIDES a duplicate you are about to mint,
+     and an over-loose one HIDES a required field you do not have.
+
+     Scope the index to THIS TYPE when judging `held`. Build it from the whole
+     catalog and GEO's `tissue`, `cell line`, `cell type`, `age` and `sex` all
+     report held for D.SEQ, which declares none of them - they live on CEL, PAT
+     and MUS. Step 4's reuse check is the opposite: it genuinely wants the
+     full-catalog index. Same function, two scopes, and only you know which.
+
+   - **external clade evidence** via `scripts/schema/terms.py`. A `weak`
+     resolution is a starting point, not a dead end: retry it the way you retry
+     a CEDAR search. Drop qualifiers (`Short Read Sequencing` -> `sequencing
+     assay`), try the parent concept, try a synonym. `Short Read Sequencing`
+     resolves weakly to `linked-read sequencing assay` and yields ONE neighbour,
+     while `DNA sequencing assay` resolves EXACT and yields 21. Render both if
+     you probe twice, each labelled with the query that produced it, and never
+     let a weak result stand unlabelled.
+
+     The primitives: resolve the
      producing assay with `resolve_class(assay, ontologies=("OBI",))` - NOT
      `search_terms(...)[0]`, which returns BioPortal's lexical ranking and put
      `Short Read Sequencing` on `linked-read sequencing assay`, a 10x-specific
@@ -223,8 +261,13 @@ Patching the schema to accommodate our own error pollutes a shared vocabulary.
        2.0, DBiT-seq, Seq-Scope, RNAseq (Bulk), RNAseq (sc-sn), Pixel-seqV2,
        MiAIRR. The templates are named `seq`, never `sequencing`.
      - Wildcards work and you should use them: `seq*` gives 10, `*seq*` gives 18.
-     - The token **`assay` is a stopword that poisons results.** Searching
-       `Cell Viability Assay` returns `common assay template` and
+     - **Substring traps.** `*plate*` returns ~25 hits by matching
+       "Tem**plate**". Check that a hit's NAME is about your assay, not about
+       CEDAR itself.
+     - The tokens **`assay` AND `cell` are stopwords that poison results.**
+       Searching `Cell Viability Assay` returns 20 hits of which 17 match on
+       `Cell` alone (`Cell DIVE`, `iPS Cell`, `Cell Line Metadata`), plus
+       `common assay template` and
        `Pistoia Alliance assay template` - generic templates matching on that
        one word, with nothing viability-specific among them. A score-based
        picker calls the highest one type-specific. It is not.
@@ -244,7 +287,11 @@ Patching the schema to accommodate our own error pollutes a shared vocabulary.
      `sequencing` returning 0 is NOT that - it is a bad query.
 
      Then `template_fields(candidate.template_id)` for the field list, and
-     `coverage(fields, resolver)` to partition it. Degrades to nothing without
+     `coverage(fields, resolver)` to partition it. **The resolver decides what
+     "covered" means, so say which index you gave it** - the full catalog
+     answers "does this house have such a field anywhere", the type-scoped index
+     answers "does THIS type have it". The review reads as the second; passing
+     the first quietly inflates the strong count with fields another type owns. Degrades to nothing without
      `CEDAR_API_KEY`.
 
 3. **Identify gaps.** What does this assay produce that the record does not
@@ -292,6 +339,23 @@ Patching the schema to accommodate our own error pollutes a shared vocabulary.
      inside BAO resolves exactly and yields array, microplate, vial, cuvette.
      Unbranched, `assay title` returns "Performed Patient Note Title". The
      branch is doing the work; do not drop it.
+
+   **An EXACT resolution is not a usable vocabulary.** Confidence describes the
+   class match, never the fitness of its children, and the children are scoped
+   to the BRANCH rather than to your assay. `physical detection method` resolves
+   exact in BAO and returns 12 modalities covering all bioassays - `mass
+   spectrometry`, `radiometry`, `isometric tension recording` cannot produce a
+   viability readout. `detection instrument` resolves exact and returns 39
+   specific commercial products, including BAO's own typo `Infinte M200`; bind
+   that under strict 4-sheet validation and every instrument BAO omits is
+   rejected. Filter to what this assay can actually produce, and record the
+   filtering as your judgement so it can be overruled.
+
+   **A repository vocabulary outranks an ontology one for a reason.** GEO's
+   enforced literal is `Revio`; BioPortal offers `PacBio Revio`. Both name the
+   same machine and only one passes validation - this is the `Illumina NextSeq
+   500` vs `NextSeq 500` trap in SKILL.md. Where a repository covers the type,
+   prefer its list and withhold the ontology's.
 
    Read `_sources` in the artifact before trusting any of it. Some branches
    yield nothing usable - `applies to disease` in DOID lexically matches

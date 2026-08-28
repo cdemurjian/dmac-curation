@@ -11,11 +11,18 @@ the OWL restrictions that would describe an assay's inputs and outputs. CEDAR
 templates are the opposite: a literal list of fields, each with a description
 and an ontology branch to draw values from. That is why this module exists.
 
-It is a CHECKLIST, not a lookup. CEDAR's shared library cannot be selected by
-assay name - `viability`, `flow cytometry`, `sequencing` and `metabolomics` all
-return zero hits - so a small set of pinned, general, well-specified templates
-is diffed against the sample type instead. `common assay template` carries 25
-fields, 24 of them described and 20 bound to a BioAssay Ontology branch.
+It is a CHECKLIST, not a lookup, and choosing WHICH template is a judgement the
+agent makes - see `curate-sampletype.md`. CEDAR matches token prefixes against
+template NAMES, so an assay's own name is often the wrong query: `sequencing`
+returns 0 while `*seq*` returns 18. A zero is therefore ambiguous - a bad query
+or a real absence - and only a reader comparing several queries can say which.
+
+No field count is quoted here, deliberately, matching SCHEMA.md. The pinned
+template is an unvendored third-party draft and its counts move: an earlier
+docstring here claimed 25/24/20 and another claimed 28/27/22 for the same
+template, and a justification for excluding the Pistoia template on "7 fields
+with no descriptions" survived long after it grew to 63 fields with 56
+described. Measure it at runtime; do not cite it from memory.
 
 Nothing here mints a field. The review renders the uncovered ones as a
 checklist with their descriptions, and the existing reuse check
@@ -189,10 +196,15 @@ def search_templates(query: str, *, api_key: str | None = None,
                      limit: int = 20, http=None) -> list[TemplateCandidate]:
     """Templates matching a query, scored by how well specified they are.
 
-    Quality varies enormously and an unusable template is worse than none: the
-    Pistoia Alliance template carries 7 fields with no descriptions and no
-    ontology bindings, while `common assay template` carries 28 with 27
-    described and 22 bound. Score on what a curator can actually read.
+    Quality varies enormously and an unusable template is worse than none, so
+    score on what a curator can actually read: field count, how many carry a
+    description, and how many bind to an ontology branch.
+
+    The score RANKS candidates; it does not choose one. It cannot tell that
+    `MiAIRR V1.1.0` (81 fields) is immune-repertoire-specific and wrong for a
+    general sequencing type, nor that `Pistoia Alliance assay template` matched
+    only on the stopword `assay`. Both outscore the right answer. The caller
+    reads the names and decides.
     """
     key = api_key or os.environ.get(CEDAR_ENV_VAR)
     if not key:

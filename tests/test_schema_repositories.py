@@ -143,3 +143,53 @@ def test_matching_is_case_insensitive():
 
 def test_a_record_missing_both_fields_maps_to_nothing():
     assert sr.repositories_for({}) == ()
+
+
+# --- the naming gap between repositories and the catalog --------------------
+#
+# CHARACTERISATION TESTS. These pin a LIMITATION rather than drive behaviour, so
+# they pass on first write. They exist because a documented remedy was shipped
+# that this limitation defeats, and nothing in the suite said so.
+#
+# Repository templates write prose names (`instrument model`) and NExtSEEK
+# writes compact ones (`Sequencer`). The two vocabularies share almost no word
+# stems, so no lexical matcher bridges them and `held` cannot be computed
+# mechanically. It is a curator judgement, informed by rank_candidates output
+# rather than decided by it.
+
+def _index():
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from schema import field_index as fi
+    catalog = fi.load_catalog()
+    return fi, catalog, fi.build_field_index(catalog)
+
+
+def test_a_repository_field_name_does_not_lexically_reach_its_catalog_twin():
+    """GEO's `instrument model` IS D.SEQ's `Sequencer`. Nothing finds that.
+
+    The shipped guidance said to accept an exact/normalized/synonym pass as
+    held. `Sequencer` never appears at any pass, and every candidate that does
+    appear is `semantic` - which that same guidance discards. So the remedy
+    reported NOT HELD on the very example used to justify it.
+    """
+    fi, catalog, index = _index()
+    names = [c.name for c in fi.rank_candidates("instrument model", index,
+                                                catalog=catalog, limit=10)]
+    assert "Sequencer" not in names
+    passes = {c.match_pass for c in fi.rank_candidates("instrument model", index,
+                                                       catalog=catalog, limit=10)}
+    assert passes <= {"semantic"}
+
+
+def test_the_reuse_check_cannot_bridge_organism_to_species():
+    """`Species` exists on four types and `Organism` returns nothing at all.
+
+    This is the mode's own stated failure - 856 of 1059 field names used by
+    exactly one type - and the reuse check does not prevent it. Only knowledge
+    of the domain catches it, which is why proposals carry a rationale.
+    """
+    fi, catalog, index = _index()
+    assert fi.rank_candidates("Organism", index, catalog=catalog, limit=10) == []
+    assert len(index["Species"].used_by) >= 4

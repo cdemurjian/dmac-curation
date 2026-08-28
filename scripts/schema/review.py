@@ -56,8 +56,16 @@ def render_review(sampletype: str, *, record: dict, current_fields: dict,
       dictionary_entries: field names this run wrote to field_dictionary.json.
       external_clade:     {"matched", "source", "neighbors", "reason"} from
                           schema.terms.clade_neighbors, or None if not consulted.
-      template_checklist: {"template", "total", "strong", "weak", "missing",
-                          "reason"} from schema.templates, or None if not consulted.
+      template_checklist: from schema.templates, or None if not consulted.
+                          {"template": name, "total": int, "strong": int,
+                           "weak": int, "is_fallback": bool - True renders the
+                           GENERIC-fallback warning, "reason": str - why empty,
+                           "missing": [{"name", "description", "branches",
+                           "required", "reuse"}]}.
+                          `missing` is weak PLUS uncovered, not uncovered alone:
+                          the prose reports a weak count, so dropping weak rows
+                          from the list leaves a number with nothing behind it.
+                          A weak row's `reuse` should say the match is semantic.
       repository_requirements: {"repositories", "fields", "vocabularies",
                           "reason"} from schema.repositories, or None if not
                           consulted.
