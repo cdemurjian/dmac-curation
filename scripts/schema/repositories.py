@@ -109,3 +109,47 @@ def required_fields(doc: dict, repository: str) -> list[RepositoryField]:
         seen.add(f.name)
         unique.append(f)
     return unique
+
+
+# Keywords matched against a record's producing assay and Tags. Deliberately
+# narrow: a type mapping to no public repository (D.VIA, D.FLOW, D.PRM) must
+# come back EMPTY so the review can say the source is thin BY FACT, not by
+# failure. Padding this list would put unevidenced fields in front of a curator,
+# which is the thing this mode exists to prevent.
+REPOSITORY_KEYWORDS = {
+    "GEO": ("sequencing", "rna-seq", "rnaseq", "microarray", "chip-seq",
+            "atac", "expression profiling"),
+    "SRA": ("sequencing", "rna-seq", "rnaseq", "wgs", "wxs", "amplicon",
+            "metagenom"),
+    "PRIDE": ("proteomic", "mass spectrometry", "mass-spec", "peptide",
+              "protein identification"),
+}
+
+
+def controlled_vocabularies(doc: dict) -> dict[str, list[str]]:
+    """The value lists a repository enforces, keyed by its own field names.
+
+    Only list-valued entries are vocabularies. The block also carries prose
+    (`authority`) and a nested by-platform mapping, neither of which is a flat
+    permissible-value list. PRIDE nests the whole block under `schema`.
+    """
+    if not isinstance(doc, dict):
+        return {}
+    block = doc.get("controlled_vocabulary")
+    if not isinstance(block, dict):
+        block = (doc.get("schema") or {}).get("controlled_vocabularies")
+    if not isinstance(block, dict):
+        return {}
+    return {k: v for k, v in block.items() if isinstance(v, list) and v}
+
+
+def repositories_for(record: dict) -> tuple[str, ...]:
+    """Which public repositories cover this sample type's data, if any."""
+    haystack = " ".join([
+        str((record or {}).get("Associated Assay Parents") or ""),
+        str((record or {}).get("Tags") or ""),
+    ]).casefold()
+    if not haystack.strip():
+        return ()
+    return tuple(name for name, keywords in REPOSITORY_KEYWORDS.items()
+                 if any(k in haystack for k in keywords))
