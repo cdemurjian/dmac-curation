@@ -176,6 +176,27 @@ Patching the schema to accommodate our own error pollutes a shared vocabulary.
    - real observed values from any `previous_metadata/*.xlsx` in cwd, via
      `scripts/schema/dictionary.py` `observe_values()`. Real values beat
      guessed ones (SKILL.md hard rule 4).
+   - **repository requirements** via `scripts/schema/repositories.py` - the
+     strongest source, and entirely local. `repositories_for(record)` says which
+     of GEO / SRA / PRIDE cover this data type;
+     `required_fields(load_template(r), r)` gives the fields a submission is
+     REJECTED without (`*` required, `**` conditional - do not flatten them);
+     `controlled_vocabularies(load_template(r))` gives the value lists those
+     repositories enforce. GEO alone ships 41 library strategies and 82
+     instrument models. No key, no network.
+
+     A type no repository covers comes back EMPTY - D.VIA, D.FLOW and D.PRM all
+     do - and that is a fact about the type, not a failed lookup. Pass a
+     `reason` so the review says which.
+
+     **Compute `held` with `rank_candidates()`, never by exact name.** The
+     repositories write prose names and NExtSEEK writes compact ones, so an
+     exact match reports GEO's `instrument model` as NOT HELD on D.SEQ even
+     though `Sequencer` is precisely that field - overstating the gap and
+     inviting a duplicate. Accept an `exact`, `normalized` or `synonym` pass as
+     held; treat a `semantic` pass as not held and let the row stand as a
+     question.
+
    - **external clade evidence** via `scripts/schema/terms.py`: resolve the
      producing assay with `resolve_class(assay, ontologies=("OBI",))` - NOT
      `search_terms(...)[0]`, which returns BioPortal's lexical ranking and put
@@ -226,18 +247,21 @@ Patching the schema to accommodate our own error pollutes a shared vocabulary.
      `coverage(fields, resolver)` to partition it. Degrades to nothing without
      `CEDAR_API_KEY`.
 
-3. **Identify gaps.** What does this assay actually produce that the record does
-   not capture? For a viability assay: readout type, instrument, timepoint, dose,
-   units, replicate, controls.
+3. **Identify gaps.** What does this assay produce that the record does not
+   capture? Weigh the four sources by what each can actually establish:
 
-   The external clade from step 2 is evidence here, not an answer. Read the
-   sibling definitions and name the axis they differ on yourself; nothing
-   extracts a field name from an ontology label, and the review says so.
+   - a **repository-required** field this type lacks is the strongest signal
+     available - a submission fails without it
+   - a **type-specific CEDAR** field is a community convention; a **fallback**
+     CEDAR field is only a question about assays in general, and the review must
+     say which one you are looking at
+   - **OBI clade** evidence suggests an AXIS to think about, never a field. Read
+     the sibling definitions and name the axis yourself
+   - your own **research knowledge** is what explains why any of it applies to
+     THIS assay, and it belongs in the rationale of every proposal
 
-   The template checklist is the sharper instrument: it names concrete fields
-   with descriptions and vocabularies. Treat each as a question for the
-   curator - does this house collect it, under another name, or not at all? -
-   never as an instruction to add it.
+   None of them is an instruction. A field required by GEO and absent here is
+   still a question for the curator, not a change to make.
 
 4. **Run the reuse check before minting any new name.** For each candidate,
    `rank_candidates(name, index, clade=..., assay=..., catalog=...)`. Show the

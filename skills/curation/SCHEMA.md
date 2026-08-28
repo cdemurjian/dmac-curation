@@ -145,6 +145,27 @@ axioms (`has_specified_input`, `has_specified_output`) live in OWL restrictions
 and are **not** reachable this way. BioPortal cannot tell you what fields an
 assay has; that is why this mines clade structure instead.
 
+## Repository requirements - the strongest source, and already local
+
+`context/report_templates/` ships the GEO, SRA and PRIDE templates `report` mode
+writes against, and `schema` mode never opened them. They carry two things no
+other source has: the fields a submission is REJECTED without (`*` required,
+`**` conditionally required), and the vocabularies those repositories enforce -
+`library_strategy` (41), `instrument_model_flat` (82), `library_selection` (33),
+`platform` (17).
+
+This outranks BioPortal for any type deposited publicly. D.SEQ's `Sequencer`
+should validate against GEO's 82 instrument models - the list a submission is
+actually rejected against - not the 6 OBI classes a search returns. SKILL.md
+already records the cost of getting this wrong: `paired-end` not `paired`,
+`Illumina NextSeq 500` not `NextSeq 500`.
+
+`repositories_for(record)` matches the producing assay and Tags against narrow
+keyword sets. It is deliberately narrow: D.VIA, D.FLOW and D.PRM come back
+EMPTY, and that emptiness is a fact about those types rather than a failure.
+Padding the keyword list to make every type look covered would put unevidenced
+fields in front of a curator, which is what this mode exists to prevent.
+
 ## The reference template checklist
 
 `templates.template_fields(id)` reads a pinned CEDAR template and returns every
