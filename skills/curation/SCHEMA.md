@@ -229,6 +229,40 @@ Entry shape:
 }
 ```
 
+## Field vocabulary - the middle of the chain
+
+`propose_values` has always accepted `bioportal=[...]` and, until this was
+added, nothing produced that list. Every `ontology.json` the plugin had ever
+written came entirely from the Tags column, whatever key was set.
+
+`terms.field_vocabulary(field, concept, ontologies=...)` fills it. The candidate
+values for a field are the **children** of the concept that field names - a
+parent is broader than the field and is never a permissible value for it.
+
+**The concept is composed by the caller, not taken from the field name.** A bare
+field name resolves confidently to the wrong thing: `Type` is an EXACT match for
+a generic ontology class called "Type", `Protocol` returns kinds-of-protocol.
+Nothing distinguishes those by shape from `Sequencer` -> `sequencer`, which is
+right, so nothing tries; the values come back for a human to read.
+
+For a **CEDAR-proposed** attribute the template declares its own branch, and
+that removes the ambiguity: `assay footprint` searched inside BAO resolves
+exactly and yields array, microplate, vial, cuvette. Searched unbranched,
+`assay title` returns "Performed Patient Note Title". Pass the branch.
+
+Value quality varies sharply by branch and must be reviewed, not trusted. BAO
+returns short dropdown-ready terms; OBI returns `cell viability assay using
+Annexin V staining`, which no curator types. Since 4-sheet ontology validation
+is STRICT and violations reject the file, a vocabulary of unusable labels breaks
+uploads - which is why `_SOURCE_RANK` puts observed workbook values above
+BioPortal.
+
+**Obsolete classes are filtered at the source.** `biological process` in GO
+returns `obsolete biological process` as its top hit while BioPortal reports
+`obsolete: false` for it - OBO marks deprecation in the LABEL and the structured
+flag does not follow. `search_terms` checks both signals, so a retired class
+never reaches a proposal, a binding, or clade evidence.
+
 ## BioPortal - suggests, never binds
 
 Every binding is emitted `"confirmed": false` with its source. Only a human

@@ -230,10 +230,29 @@ Patching the schema to accommodate our own error pollutes a shared vocabulary.
    a rename or a split.
 
 5. **Propose controlled values.** `scripts/schema/ontology.py` `propose_values()`
-   mines the Tags column first (it is often already a list of permissible
-   values), then observed values, then siblings, then BioPortal via
-   `scripts/schema/terms.py` if `BIOPORTAL_API_KEY` is set. Without a key the
-   first three still work; say so rather than failing.
+   merges Tags, observed values, siblings and BioPortal, ranking observed
+   highest (hard rule 4). Without a key the first three still work; say so
+   rather than failing.
+
+   **`propose_values` does NOT call BioPortal.** It accepts `bioportal=[...]`
+   and you must produce that list, or every value comes from Tags no matter
+   what key is set. Use `terms.field_vocabulary(field, concept, ontologies=...)`,
+   which walks the CHILDREN of the concept a field names. Two ways in:
+
+   - **a current attribute** - compose the concept from the field AND the
+     producing assay, then pass it. A bare field name is not its concept:
+     `Type` resolves EXACT to a generic class called "Type" and `Protocol` to
+     kinds-of-protocol. Nothing can tell that apart from `Sequencer` ->
+     `sequencer`, which is correct, so the values come back for you to look at.
+   - **a CEDAR-proposed attribute** - pass that field's own declared branch as
+     `ontologies`. The template was authored against BAO, so `assay footprint`
+     inside BAO resolves exactly and yields array, microplate, vial, cuvette.
+     Unbranched, `assay title` returns "Performed Patient Note Title". The
+     branch is doing the work; do not drop it.
+
+   Read `_sources` in the artifact before trusting any of it. Some branches
+   yield nothing usable - `applies to disease` in DOID lexically matches
+   `susceptibility to legionnaire disease` and has no children.
 
 6. **Emit the artifacts** into `./schema/`:
 

@@ -67,6 +67,18 @@ class ClassMatch:
     confidence: str      # exact | normalized | weak
 
 
+@dataclass
+class VocabularyProposal:
+    """Candidate permissible values for one field, drawn from an ontology."""
+
+    field: str
+    concept: str
+    values: list[str]
+    confidence: str = ""            # exact | normalized | weak
+    ontologies: tuple[str, ...] = ()
+    note: str = ""                  # why it is empty, when it is
+
+
 def _default_http(url: str, headers: dict | None = None, timeout: int | None = None):
     req = urllib.request.Request(url, headers=headers or {})
     with urllib.request.urlopen(req, timeout=timeout or _TIMEOUT_SECONDS) as resp:
@@ -86,6 +98,19 @@ def _collection(payload) -> list:
         entries = payload.get("collection")
         return entries if isinstance(entries, list) else []
     return []
+
+
+def _is_obsolete(entry: dict) -> bool:
+    """Whether a search hit names a retired class.
+
+    Two signals, because neither is sufficient. OBO ontologies mark deprecation
+    by prefixing the LABEL - GO returns `obsolete biological process` as the top
+    hit for "biological process" - while BioPortal reports `obsolete: false` for
+    that very class. Other ontologies do set the flag. Check both.
+    """
+    if entry.get("obsolete") is True:
+        return True
+    return (entry.get("prefLabel") or "").strip().casefold().startswith("obsolete ")
 
 
 def _acronym(entry: dict) -> str:
@@ -125,8 +150,12 @@ def search_terms(query: str, *, ontologies=None, api_key: str | None = None,
             return []
 
         hits: list[TermHit] = []
-        for entry in collection[:limit]:
+        for entry in collection:
+            if len(hits) >= limit:
+                break
             if not isinstance(entry, dict) or not entry.get("@id"):
+                continue
+            if _is_obsolete(entry):
                 continue
             definitions = entry.get("definition") or []
             hits.append(TermHit(
@@ -225,6 +254,53 @@ def clade_neighbors(hit: TermHit, *, api_key: str | None = None,
                 relation=relation,
             ))
     return found[:limit]
+
+
+def field_vocabulary(field: str, concept: str | None = None, *,
+                     ontologies=None, api_key: str | None = None,
+                     limit: int = 40, http=None) -> VocabularyProposal:
+    """Candidate values for a field: the CHILDREN of the concept it names.
+
+    This is the middle of a chain that was wired at both ends and driven by
+    nothing. `ontology.propose_values` accepts `bioportal=[...]`, and until now
+    no caller produced that list - so every ontology.json this plugin wrote came
+    entirely from the Tags column, whatever key was set.
+
+    `concept` is composed by the caller and defaults to `field`, because a bare
+    field name is usually NOT the concept it names. `Type` resolves EXACT to a
+    generic ontology class called "Type", and `Instrument` to a generic
+    "instrument" - confident, useless, and indistinguishable by shape from
+    `Sequencer` -> `sequencer`, which is correct. Nothing here can tell those
+    apart, so nothing here tries: the values come back for a human to look at.
+
+    `ontologies` narrows the search. For a CEDAR template field this should be
+    that field's declared branch - `assay footprint` inside BAO resolves exactly
+    and yields array, microplate, vial, cuvette, where an unnarrowed search
+    would not.
+
+    Only children are returned. A parent is broader than the field and is never
+    a permissible value for it.
+    """
+    concept = concept or field
+    searched = tuple(ontologies) if ontologies else ()
+
+    match = resolve_class(concept, ontologies=ontologies, api_key=api_key,
+                          limit=10, http=http)
+    if match is None:
+        return VocabularyProposal(
+            field=field, concept=concept, values=[], ontologies=searched,
+            note="no class matched this concept (or no BIOPORTAL_API_KEY)")
+
+    children = [n.label for n in clade_neighbors(
+        match.hit, api_key=api_key, limit=limit, http=http)
+        if n.relation == "child" and n.label]
+
+    note = "" if children else (
+        f"`{match.hit.label}` resolved but has no narrower classes, so it "
+        "yields no vocabulary")
+    return VocabularyProposal(field=field, concept=concept, values=children,
+                              confidence=match.confidence, ontologies=searched,
+                              note=note)
 
 
 def to_binding(hit: TermHit) -> dict:

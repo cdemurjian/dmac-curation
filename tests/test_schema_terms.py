@@ -361,3 +361,157 @@ def test_resolve_matches_ignoring_case_and_separators(monkeypatch):
 def test_resolve_returns_none_when_nothing_comes_back(monkeypatch):
     monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
     assert st.resolve_class("nonsense", http=FakeHTTP({"collection": []})) is None
+
+
+# --- field vocabulary -------------------------------------------------------
+#
+# The missing middle: propose_values accepts bioportal=[...] and nothing ever
+# produced that list, so every ontology.json this plugin has written came
+# entirely from the Tags column.
+#
+# The value list for a field is the CHILDREN of the concept the field names.
+# A bare field name is not that concept - `Type` resolves EXACT to a generic
+# ontology class named "Type" - so the concept is composed by the caller, and
+# for a CEDAR field its declared branch (BAO, DOID) narrows the search.
+
+VOCAB_SEARCH = {
+    "collection": [
+        {"@id": "http://www.bioassayontology.org/bao#BAO_0000248",
+         "prefLabel": "assay footprint",
+         "links": {"ontology": "http://data.bioontology.org/ontologies/BAO"},
+         "definition": []},
+    ]
+}
+
+VOCAB_CHILDREN = {
+    "collection": [
+        {"@id": "http://x#1", "prefLabel": "microplate", "definition": ["A plate."]},
+        {"@id": "http://x#2", "prefLabel": "cuvette", "definition": []},
+    ]
+}
+
+VOCAB_PARENTS = [
+    {"@id": "http://x#0", "prefLabel": "assay format", "definition": []},
+]
+
+
+def _vocab_http():
+    return RoutedHTTP([("/children", VOCAB_CHILDREN),
+                       ("/parents", VOCAB_PARENTS),
+                       ("search", VOCAB_SEARCH)])
+
+
+def test_field_vocabulary_is_empty_without_a_key(monkeypatch):
+    monkeypatch.delenv(st.BIOPORTAL_ENV_VAR, raising=False)
+    v = st.field_vocabulary("assay footprint")
+    assert v.values == []
+    assert v.note
+
+
+def test_field_vocabulary_returns_the_child_labels(monkeypatch):
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    v = st.field_vocabulary("assay footprint", http=_vocab_http())
+    assert v.values == ["microplate", "cuvette"]
+
+
+def test_field_vocabulary_excludes_the_parent(monkeypatch):
+    """A parent is broader than the field. It is not a permissible value."""
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    v = st.field_vocabulary("assay footprint", http=_vocab_http())
+    assert "assay format" not in v.values
+
+
+def test_field_vocabulary_records_the_resolution_confidence(monkeypatch):
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    v = st.field_vocabulary("assay footprint", http=_vocab_http())
+    assert v.confidence == "exact"
+    assert v.concept == "assay footprint"
+
+
+def test_field_vocabulary_takes_a_composed_concept_distinct_from_the_field(monkeypatch):
+    """`Type` alone resolves to a generic class; the concept carries the context."""
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    v = st.field_vocabulary("Type", concept="assay footprint", http=_vocab_http())
+    assert v.field == "Type"
+    assert v.concept == "assay footprint"
+    assert v.values == ["microplate", "cuvette"]
+
+
+def test_field_vocabulary_searches_the_ontologies_it_is_given(monkeypatch):
+    """A CEDAR field declares its branch; that is a better search than a guess."""
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    http = _vocab_http()
+    st.field_vocabulary("assay footprint", ontologies=("BAO",), http=http)
+    search_urls = [u for u in http.calls if "search" in u]
+    assert search_urls and "ontologies=BAO" in search_urls[0]
+
+
+def test_field_vocabulary_notes_why_it_found_nothing(monkeypatch):
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    http = RoutedHTTP([("search", {"collection": []})])
+    v = st.field_vocabulary("nonsense", http=http)
+    assert v.values == []
+    assert "no class" in v.note.lower()
+
+
+def test_field_vocabulary_notes_a_class_that_has_no_children(monkeypatch):
+    """A leaf class yields no vocabulary. Say so rather than returning silence."""
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    http = RoutedHTTP([("/children", {"collection": []}),
+                       ("/parents", []), ("search", VOCAB_SEARCH)])
+    v = st.field_vocabulary("assay footprint", http=http)
+    assert v.values == []
+    assert "no narrower" in v.note.lower()
+
+
+# --- obsolete classes -------------------------------------------------------
+#
+# `biological process` searched in GO returns `obsolete biological process` as
+# its top hit, and BioPortal reports obsolete=False for it - OBO marks
+# deprecation by prefixing the LABEL, and the structured flag does not follow.
+# Trusting either alone proposes a retired class as live vocabulary.
+
+OBSOLETE_RESPONSE = {
+    "collection": [
+        {"@id": "http://purl.obolibrary.org/obo/GO_0008150x",
+         "prefLabel": "obsolete biological process",
+         "obsolete": False,          # BioPortal really does say False here
+         "links": {"ontology": "http://data.bioontology.org/ontologies/GO"},
+         "definition": []},
+        {"@id": "http://purl.obolibrary.org/obo/GO_0065007",
+         "prefLabel": "biological regulation",
+         "obsolete": False,
+         "links": {"ontology": "http://data.bioontology.org/ontologies/GO"},
+         "definition": []},
+        {"@id": "http://purl.obolibrary.org/obo/GO_flagged",
+         "prefLabel": "a properly flagged retired term",
+         "obsolete": True,
+         "links": {"ontology": "http://data.bioontology.org/ontologies/GO"},
+         "definition": []},
+    ]
+}
+
+
+def test_search_drops_a_label_prefixed_obsolete(monkeypatch):
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    hits = st.search_terms("biological process", http=FakeHTTP(OBSOLETE_RESPONSE))
+    assert "obsolete biological process" not in [h.label for h in hits]
+
+
+def test_search_drops_a_flagged_obsolete_class(monkeypatch):
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    hits = st.search_terms("biological process", http=FakeHTTP(OBSOLETE_RESPONSE))
+    assert "a properly flagged retired term" not in [h.label for h in hits]
+
+
+def test_search_keeps_the_live_class_behind_an_obsolete_one(monkeypatch):
+    """Dropping the retired top hit must promote the real one, not lose it."""
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    hits = st.search_terms("biological process", http=FakeHTTP(OBSOLETE_RESPONSE))
+    assert [h.label for h in hits] == ["biological regulation"]
+
+
+def test_obsolete_filtering_survives_into_resolution(monkeypatch):
+    monkeypatch.setenv(st.BIOPORTAL_ENV_VAR, "testkey")
+    m = st.resolve_class("biological process", http=FakeHTTP(OBSOLETE_RESPONSE))
+    assert m.hit.label == "biological regulation"
