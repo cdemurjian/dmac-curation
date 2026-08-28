@@ -25,6 +25,7 @@ OUTPUT_SUBDIR = "schema"
 
 REQUIRED_SECTIONS = (
     "## Current state",
+    "## Repository requirements",
     "## External clade evidence",
     "## Reference template checklist",
     "## Proposed additions",
@@ -40,7 +41,8 @@ def render_review(sampletype: str, *, record: dict, current_fields: dict,
                   ontology: dict, open_questions: list[str],
                   dictionary_entries: list[str],
                   external_clade: dict | None = None,
-                  template_checklist: dict | None = None) -> str:
+                  template_checklist: dict | None = None,
+                  repository_requirements: dict | None = None) -> str:
     """Build the review markdown.
 
     Args:
@@ -54,8 +56,11 @@ def render_review(sampletype: str, *, record: dict, current_fields: dict,
       dictionary_entries: field names this run wrote to field_dictionary.json.
       external_clade:     {"matched", "source", "neighbors", "reason"} from
                           schema.terms.clade_neighbors, or None if not consulted.
-      template_checklist: {"template", "covered", "total", "missing", "reason"}
-                          from schema.templates, or None if not consulted.
+      template_checklist: {"template", "total", "strong", "weak", "missing",
+                          "reason"} from schema.templates, or None if not consulted.
+      repository_requirements: {"repositories", "fields", "vocabularies",
+                          "reason"} from schema.repositories, or None if not
+                          consulted.
     """
     req = current_fields.get("required", [])
     std = current_fields.get("standard", [])
@@ -81,6 +86,43 @@ def render_review(sampletype: str, *, record: dict, current_fields: dict,
     for label, fields in (("Required", req), ("Standard", std), ("Possible", pos)):
         lines.append(f"- **{label}:** {', '.join(fields) if fields else '(none)'}")
     lines.append("")
+
+    lines.append("## Repository requirements")
+    lines.append("")
+    lines.append("The strongest evidence available, and the only source that is "
+                 "enforced: a submission is REJECTED without these. Read from the "
+                 "GEO, SRA and PRIDE templates vendored in "
+                 "`context/report_templates/` - no network, no key.")
+    lines.append("")
+    reqs = repository_requirements or {}
+    repo_reason = reqs.get("reason") or ""
+    repo_fields = reqs.get("fields") or []
+    if repo_reason:
+        lines.append(f"Nothing returned - {repo_reason}.")
+        lines.append("")
+    elif not repository_requirements:
+        lines.append("Not consulted this run.")
+        lines.append("")
+    else:
+        names = ", ".join(reqs.get("repositories") or []) or "(none)"
+        lines.append(f"Consulted: **{names}**.")
+        lines.append("")
+        for f in repo_fields:
+            kind = "conditional" if f.get("conditional") else "required"
+            held = f.get("held") or ""
+            status = f"already held as `{held}`" if held else "**NOT HELD**"
+            lines.append(f"- `{f.get('name', '')}` - {kind} in "
+                         f"{f.get('repository', '')} ({f.get('section', '')}) "
+                         f"- {status}")
+        lines.append("")
+        vocabs = reqs.get("vocabularies") or {}
+        if vocabs:
+            lines.append("Vocabularies these repositories enforce, usable "
+                         "directly as permissible values:")
+            lines.append("")
+            for name, count in vocabs.items():
+                lines.append(f"- `{name}` - {count} values")
+            lines.append("")
 
     lines.append("## External clade evidence")
     lines.append("")

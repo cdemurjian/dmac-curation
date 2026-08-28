@@ -317,3 +317,77 @@ def test_external_clade_does_not_hedge_an_exact_resolution():
         "confidence": "exact", "neighbors": NEIGHBORS, "reason": ""})
     section = text.split("## External clade evidence")[1].split("## Reference")[0]
     assert "weak" not in section.lower()
+
+
+# --- repository requirements ------------------------------------------------
+
+REPO_REQS = {
+    "repositories": ["GEO", "SRA"],
+    "fields": [
+        {"name": "library strategy", "section": "samples", "repository": "GEO",
+         "required": True, "conditional": False, "held": "LibraryStrategy"},
+        {"name": "genome build/assembly", "section": "protocols",
+         "repository": "GEO", "required": True, "conditional": False,
+         "held": ""},
+        {"name": "tissue", "section": "samples", "repository": "GEO",
+         "required": False, "conditional": True, "held": ""},
+    ],
+    "vocabularies": {"library_strategy": 41, "instrument_model_flat": 82},
+    "reason": "",
+}
+
+
+def _render_with_repos(reqs):
+    return sr.render_review(
+        "D.SEQ", record=RECORD,
+        current_fields={"required": [], "standard": [], "possible": []},
+        proposals=[], reuse_decisions=[], ontology={},
+        open_questions=[], dictionary_entries=[],
+        repository_requirements=reqs)
+
+
+def test_repository_requirements_is_a_required_section():
+    assert "## Repository requirements" in sr.REQUIRED_SECTIONS
+
+
+def test_repository_requirements_precedes_the_other_evidence():
+    """The strongest source is read first."""
+    text = _render()
+    assert text.index("## Current state") \
+        < text.index("## Repository requirements") \
+        < text.index("## External clade evidence")
+
+
+def test_repository_requirements_names_the_repositories_consulted():
+    text = _render_with_repos(REPO_REQS)
+    assert "GEO" in text and "SRA" in text
+
+
+def test_repository_requirements_marks_a_field_this_type_already_holds():
+    text = _render_with_repos(REPO_REQS)
+    section = text.split("## Repository requirements")[1].split("## External")[0]
+    assert "LibraryStrategy" in section
+
+
+def test_repository_requirements_distinguishes_conditional_from_required():
+    text = _render_with_repos(REPO_REQS)
+    section = text.split("## Repository requirements")[1].split("## External")[0]
+    assert "conditional" in section.lower()
+
+
+def test_repository_requirements_reports_the_enforced_vocabularies():
+    text = _render_with_repos(REPO_REQS)
+    assert "library_strategy" in text and "82" in text
+
+
+def test_repository_requirements_says_when_no_repository_covers_the_type():
+    """D.VIA is thin by fact. Never let that read as a failed lookup."""
+    text = _render_with_repos({"repositories": [], "fields": [], "vocabularies": {},
+                               "reason": "no public repository covers this data type"})
+    assert "no public repository covers this data type" in text
+
+
+def test_repository_requirements_defaults_to_not_consulted():
+    text = _render_with_repos(None)
+    section = text.split("## Repository requirements")[1].split("##")[0]
+    assert "not consulted" in section.lower()
