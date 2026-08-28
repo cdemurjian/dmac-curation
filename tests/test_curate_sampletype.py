@@ -391,3 +391,18 @@ def test_repository_requirements_defaults_to_not_consulted():
     text = _render_with_repos(None)
     section = text.split("## Repository requirements")[1].split("##")[0]
     assert "not consulted" in section.lower()
+
+
+def test_checklist_declares_when_it_fell_back_to_the_generic_template():
+    """A generic checklist read as type-specific is the defect this replaces."""
+    text = _render_with_checklist({**CHECKLIST, "is_fallback": True})
+    section = text.split("## Reference template checklist")[1].split("## Proposed")[0]
+    assert "no type-specific" in section.lower() or "generic" in section.lower()
+
+
+def test_checklist_does_not_hedge_a_domain_specific_template():
+    text = _render_with_checklist(
+        {**CHECKLIST, "template": "RNA-Seq Metadata", "is_fallback": False})
+    section = text.split("## Reference template checklist")[1].split("## Proposed")[0]
+    assert "generic" not in section.lower()
+    assert "RNA-Seq Metadata" in section

@@ -186,6 +186,11 @@ def render_review(sampletype: str, *, record: dict, current_fields: dict,
             "reference writes prose names (`detection instrument`) and NExtSEEK "
             "writes compact ones (`Sequencer`), so the two conventions almost "
             "never collide and a name-level count means nothing.")
+        if checklist.get("is_fallback"):
+            lines.append("")
+            lines.append("**No type-specific template matched this assay, so "
+                         "this is the GENERIC fallback.** Read every row as a "
+                         "question about assays in general, not about this one.")
         lines.append("")
         if not missing:
             lines.append("Every field in the reference is already covered.")
