@@ -8,6 +8,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from schema import review as sr  # noqa: E402
 from schema import ontology as so  # noqa: E402
+from schema import field_index as fi  # noqa: E402
 
 COMMAND = REPO / "commands" / "curate-sampletype.md"
 SCHEMA_DOC = REPO / "skills" / "curation" / "SCHEMA.md"
@@ -41,7 +42,8 @@ def _render():
             {"proposed": "PlateReaderModel", "used_instead": "Instrument",
              "reason": "16 existing usages across the catalog"},
         ],
-        ontology={"Type": so.propose_values(RECORD, "Type")},
+        ontology={"Type": so.propose_values(RECORD, "Type",
+                                    tags=fi.mine_tags(RECORD))},
         open_questions=["Is dose in uM or mg/mL? Both appear in previous_metadata."],
         dictionary_entries=["Timepoint", "Instrument"],
     )

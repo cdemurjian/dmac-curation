@@ -23,7 +23,7 @@ DVIA = {
 
 
 def test_propose_values_from_tags():
-    out = so.propose_values(DVIA, "Type")
+    out = so.propose_values(DVIA, "Type", tags=fi.mine_tags(DVIA))
     values = [p.value for p in out]
     for expected in ("MTS assay", "MTT assay", "WST-1", "CellTiter-Glo"):
         assert expected in values
@@ -31,7 +31,7 @@ def test_propose_values_from_tags():
 
 
 def test_propose_values_merges_observed_values():
-    out = so.propose_values(DVIA, "Type", observed=["MTS assay", "alamarBlue"])
+    out = so.propose_values(DVIA, "Type", tags=fi.mine_tags(DVIA), observed=["MTS assay", "alamarBlue"])
     by_value = {p.value: p for p in out}
     assert by_value["alamarBlue"].source == "observed"
     # A value present in BOTH is credited to the stronger source: observed.
@@ -39,7 +39,7 @@ def test_propose_values_merges_observed_values():
 
 
 def test_propose_values_dedupes():
-    out = so.propose_values(DVIA, "Type", observed=["MTS assay"])
+    out = so.propose_values(DVIA, "Type", tags=fi.mine_tags(DVIA), observed=["MTS assay"])
     assert len(out) == len({p.value for p in out})
 
 
@@ -48,13 +48,13 @@ def test_propose_values_on_a_type_with_no_tags_and_no_observations():
 
 
 def test_every_proposal_carries_its_source():
-    for p in so.propose_values(DVIA, "Type", observed=["alamarBlue"]):
+    for p in so.propose_values(DVIA, "Type", tags=fi.mine_tags(DVIA), observed=["alamarBlue"]):
         assert p.source in {"tags", "observed", "bioportal", "sibling"}
         assert p.value
 
 
 def test_to_ontology_json_is_the_write_4sheet_shape():
-    proposals = {"Type": so.propose_values(DVIA, "Type")}
+    proposals = {"Type": so.propose_values(DVIA, "Type", tags=fi.mine_tags(DVIA))}
     out = so.to_ontology_json(proposals)
     assert isinstance(out, dict)
     assert isinstance(out["Type"], list)
@@ -62,7 +62,7 @@ def test_to_ontology_json_is_the_write_4sheet_shape():
 
 
 def test_ontology_artifact_round_trips_on_disk(tmp_path):
-    proposals = {"Type": so.propose_values(DVIA, "Type")}
+    proposals = {"Type": so.propose_values(DVIA, "Type", tags=fi.mine_tags(DVIA))}
     path = so.write_ontology_artifact(tmp_path, "D.VIA", proposals)
     assert path == tmp_path / "schema" / "D.VIA.ontology.json"
     assert so.load_ontology_artifact(tmp_path, "D.VIA")["Type"]
@@ -70,7 +70,7 @@ def test_ontology_artifact_round_trips_on_disk(tmp_path):
 
 def test_artifact_records_the_source_of_every_value(tmp_path):
     """A bare value list cannot be judged; a list with sources can."""
-    proposals = {"Type": so.propose_values(DVIA, "Type", observed=["alamarBlue"])}
+    proposals = {"Type": so.propose_values(DVIA, "Type", tags=fi.mine_tags(DVIA), observed=["alamarBlue"])}
     so.write_ontology_artifact(tmp_path, "D.VIA", proposals)
     doc = json.loads((tmp_path / "schema" / "D.VIA.ontology.json").read_text())
     assert "_sources" in doc
@@ -79,7 +79,7 @@ def test_artifact_records_the_source_of_every_value(tmp_path):
 
 def test_load_ontology_artifact_strips_the_sources_block(tmp_path):
     """What feeds write_4sheet_xlsx must be exactly {field: [values]}."""
-    proposals = {"Type": so.propose_values(DVIA, "Type")}
+    proposals = {"Type": so.propose_values(DVIA, "Type", tags=fi.mine_tags(DVIA))}
     so.write_ontology_artifact(tmp_path, "D.VIA", proposals)
     loaded = so.load_ontology_artifact(tmp_path, "D.VIA")
     assert "_sources" not in loaded
@@ -92,7 +92,7 @@ def test_load_ontology_artifact_missing_returns_empty(tmp_path):
 def test_artifact_feeds_write_4sheet_xlsx_end_to_end(tmp_path):
     """The dead capability, brought to life: schema mode -> Ontology sheet."""
     openpyxl = pytest.importorskip("openpyxl")
-    proposals = {"Type": so.propose_values(DVIA, "Type")}
+    proposals = {"Type": so.propose_values(DVIA, "Type", tags=fi.mine_tags(DVIA))}
     so.write_ontology_artifact(tmp_path, "D.VIA", proposals)
     ontology = so.load_ontology_artifact(tmp_path, "D.VIA")
 
@@ -119,7 +119,8 @@ def test_artifact_feeds_write_4sheet_xlsx_end_to_end(tmp_path):
 
 def test_real_dvia_tags_yield_the_expected_value_set():
     rec = fi.type_record(fi.load_catalog(), "D.VIA")
-    values = {p.value for p in so.propose_values(rec, "Type")}
+    values = {p.value for p in so.propose_values(rec, "Type",
+                                                tags=fi.mine_tags(rec))}
     for expected in ("MTS assay", "MTT assay", "WST-1", "CellTiter-Glo"):
         assert expected in values
 
@@ -133,7 +134,7 @@ def test_bioportal_availability_is_env_driven(monkeypatch):
 
 def test_nothing_is_written_inside_the_plugin(tmp_path, plugin_sentinel):
     so.write_ontology_artifact(tmp_path, "D.VIA",
-                               {"Type": so.propose_values(DVIA, "Type")})
+                               {"Type": so.propose_values(DVIA, "Type", tags=fi.mine_tags(DVIA))})
 
 
 # --- precedence -------------------------------------------------------------
@@ -177,5 +178,34 @@ def test_a_repository_value_carries_an_explanatory_note():
 
 def test_every_source_still_contributes_its_unique_values():
     out = so.propose_values(RECORD_WITH_TAGS, "LibraryStrategy",
+                            tags=fi.mine_tags(RECORD_WITH_TAGS),
                             repository=["WGS"], bioportal=["exome sequencing"])
     assert {p.value for p in out} == {"RNA-Seq", "FASTQ", "WGS", "exome sequencing"}
+
+
+# --- Tags are per-sample-type, not per-field --------------------------------
+#
+# `tags` used to default to the record's whole Tags column whatever field was
+# asked for, so proposing values for `Scientist` returned MTS assay and
+# CellTiter-Glo - assay chemistries offered as permissible values for a
+# person's name, feeding a validator that rejects the whole file on one
+# violation. The Tags column describes the SAMPLE TYPE. Which field (if any) it
+# is a vocabulary FOR is a curator's assertion, so it must be passed in.
+
+def test_tags_are_not_injected_into_an_arbitrary_field():
+    assert so.propose_values(DVIA, "Scientist") == []
+
+
+def test_tags_are_not_injected_into_any_field_by_default():
+    for field in ("Plate", "MeasurementWavelength", "Notes", "Type"):
+        assert so.propose_values(DVIA, field) == [], field
+
+
+def test_tags_are_used_when_the_curator_passes_them():
+    out = so.propose_values(DVIA, "Type", tags=fi.mine_tags(DVIA))
+    assert "MTS assay" in [p.value for p in out]
+    assert all(p.source == "tags" for p in out)
+
+
+def test_an_explicit_empty_tag_list_is_still_honoured():
+    assert so.propose_values(DVIA, "Type", tags=[]) == []

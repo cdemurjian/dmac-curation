@@ -69,14 +69,21 @@ def propose_values(record: dict, field_name: str, *,
                    repository: list[str] | None = None) -> list[ProposedValue]:
     """Candidate permissible values for one field, deduped, source-attributed.
 
-    Mining `Tags` is the cheapest win available: D.VIA's Tags column already
-    reads 'viability data, cell viability, cytotoxicity data, MTS assay, MTT
-    assay, WST-1, live/dead assay, CellTiter-Glo, proliferation assay, cell
-    death data' - permissible values for its `Type` field, written down as
-    prose where nothing can enforce them.
+    Mining `Tags` is the cheapest win available WHERE IT APPLIES: D.VIA's Tags
+    column already reads 'viability data, cell viability, cytotoxicity data, MTS
+    assay, MTT assay, WST-1, live/dead assay, CellTiter-Glo, proliferation
+    assay, cell death data' - plausibly permissible values for its `Type` field,
+    written down as prose where nothing can enforce them.
+
+    But that is a claim about ONE field of ONE type, and it is the curator's to
+    make. Pass `tags=field_index.mine_tags(record)` once you have judged the
+    Tags to be a vocabulary for this field. Nothing is mined automatically.
     """
-    if tags is None:
-        tags = [t.strip() for t in (record.get("Tags") or "").split(",") if t.strip()]
+    # Tags are NOT mined by default. The Tags column describes the SAMPLE TYPE,
+    # not any one field, so defaulting it here put assay chemistries into every
+    # field asked for - `Scientist` returned MTS assay and CellTiter-Glo, into a
+    # validator that rejects the whole file on one violation.
+    tags = tags or []
 
     contributions: list[tuple[str, str]] = []
     contributions += [(v, "tags") for v in tags]
