@@ -101,7 +101,19 @@ PROTOCOL_OCCURRENCES = 26          # case-tolerant; the case-sensitive count is 
 # quotes it five times costs one occurrence, not five. Both sit in the reserved
 # 19MMDD band and the REALITY tier below confirms neither resolves to a real
 # sample. The remaining 5 are in the plan document that specified those tests.
-UID_PATTERN_OCCURRENCES = 447      # all synthetic
+# 447 -> 449 on 2026-08-31: two new Mode 2 review tests -- the cohort_key column
+# the sheet now emits, and the ingest round-trip that proves a sheet straight
+# out of `main` needs no hand edit -- each build a cohort from the SAME
+# synthetic uid the rest of `test_assay_hygiene_review_mode2.py` already uses.
+# It is a fixture literal in a test module, not an extract value; the REALITY
+# tier below confirms it resolves to no real sample.
+# 449 -> 452 on 2026-08-31: `test_assay_hygiene_update_assay_sheet.py` defines
+# three synthetic uids as module constants -- two ordinary samples and a third
+# used only to prove that a duplicate uid ELSEWHERE in the extract does not
+# block a sheet. All three sit in the reserved 19MMDD band and the REALITY tier
+# below confirms none resolves to a real sample. Constants, referred to
+# thereafter, so the module costs three occurrences and not one per use.
+UID_PATTERN_OCCURRENCES = 452      # all synthetic
 # 439 -> 440 on 2026-08-27: the prerequisites plan under docs/superpowers/plans/
 # cites one 19MMDD-band uid as the example new fixtures must follow. Verified
 # absent from all 177,393 production uids, and no 19xx-band uid is real for any
