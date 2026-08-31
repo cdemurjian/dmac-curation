@@ -74,6 +74,7 @@ immutable at `assets/RUN<n>/`, and one run is open at a time.
 | `/curate-assay-review` | serve the review surfaces, ingest the operator's rulings, auto-backup the store |
 | `/curate-assay-resolve` | turn approved pairs into per-project SEEK write targets, behind the project gate |
 | `/curate-assay-write` | **writes to production**, behind eight preflight refusals |
+| `/curate-assay-relabel` | **writes to the production graph** — repairs the DERIVED_FROM assay labels the write invalidated; backup first, SET-back undo |
 | `/curate-assay-status` | report which run is open and where it has got to; writes nothing |
 | `/curate-assay-backup` | dated, verified tarball of the ruling store |
 
@@ -100,7 +101,11 @@ not compute, not a re-run. It is gitignored; its only protection is the tarball
   named: `/curate-sampletype apply` (adds one attribute to a live sample type; dry-run by
   default, `--apply` to write, `--yes-production` on top of that for production) and
   `/curate-assay-write` (writes assay registrations to production behind eight preflight
-  refusals, a captured rollback handle and a verified DB backup).
+  refusals, a captured rollback handle and a verified DB backup). Two commands also write
+  to the production **graph**: stage 0's lineage backfill, which creates missing
+  `DERIVED_FROM` edges, and `/curate-assay-relabel`, which repairs the assay labels a
+  registration write invalidates — both behind a verified backup taken first, and neither
+  creating or deleting a relationship.
 - It does **not** invent sample types — `schema` mode writes a proposal and a rationale for
   a human to review, and only the explicit `apply` verb writes anything.
 - It does **not** fabricate values — unknowns are left as greppable

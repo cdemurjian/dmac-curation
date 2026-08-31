@@ -1,6 +1,6 @@
 ---
 name: dmac-curation
-description: Curator's workbench for NExtSEEK / FairDomHub metadata. Human-in-the-loop, PI-facing. Modes are pipeline (14 commands, 12 phases from inventory through sample tree, build, consolidate, QA, server-side QC, deposit, retrieve, to email PI), fdh (FairDomHub upload and direct API), schema (sample type authoring and controlled vocabulary), report (GEO / SRA / PRIDE submission artifacts), assay (house-scoped assay hygiene - 8 commands that find unregistered sample-assay pairs, put every proposal in front of a human, and write the approved ones to production). Activate when working in a directory containing files/, manuscript/, previous_metadata/, assets/assay-run.json, or any .dmac-curation.json lockfile, or when the user mentions NExtSEEK, FairDomHub, curation, sample types, assay hygiene, assay registration, or a GEO/SRA/PRIDE submission.
+description: Curator's workbench for NExtSEEK / FairDomHub metadata. Human-in-the-loop, PI-facing. Modes are pipeline (14 commands, 12 phases from inventory through sample tree, build, consolidate, QA, server-side QC, deposit, retrieve, to email PI), fdh (FairDomHub upload and direct API), schema (sample type authoring and controlled vocabulary), report (GEO / SRA / PRIDE submission artifacts), assay (house-scoped assay hygiene - 9 commands that find unregistered sample-assay pairs, put every proposal in front of a human, and write the approved ones to production). Activate when working in a directory containing files/, manuscript/, previous_metadata/, assets/assay-run.json, or any .dmac-curation.json lockfile, or when the user mentions NExtSEEK, FairDomHub, curation, sample types, assay hygiene, assay registration, or a GEO/SRA/PRIDE submission.
 ---
 
 # DMAC Curation
@@ -35,7 +35,7 @@ is nothing to declare in `plugin.json`.
 | `fdh` | `/fdh-upload`, `/fdh-api` | `FDH.md` | credentials only - no project needed |
 | `schema` | `/curate-sampletype` | `SCHEMA.md` | cwd - writes where you are, no project needed |
 | `report` | `/curate-report` | `REPORTS.md` | input - reads a lockfile if present, never requires one |
-| `assay` | `/curate-assay-init`, `/curate-assay-vocabulary`, `/curate-assay-detect`, `/curate-assay-review`, `/curate-assay-resolve`, `/curate-assay-write`, `/curate-assay-status`, `/curate-assay-backup` | `ASSAY.md` | house - one extract, all projects, no PI; run lockfile at assets/ |
+| `assay` | `/curate-assay-init`, `/curate-assay-vocabulary`, `/curate-assay-detect`, `/curate-assay-review`, `/curate-assay-resolve`, `/curate-assay-write`,  `/curate-assay-relabel`, `/curate-assay-status`, `/curate-assay-backup` | `ASSAY.md` | house - one extract, all projects, no PI; run lockfile at assets/ |
 
 Load a mode's reference doc when you enter that mode, not before. For each
 command's exact behavior, the `commands/*.md` files are authoritative.

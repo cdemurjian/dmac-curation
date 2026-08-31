@@ -19,7 +19,7 @@ CANONICAL_DESCRIPTION = (
     "sample tree, build, consolidate, QA, server-side QC, deposit, retrieve, to "
     "email PI), fdh (FairDomHub upload and direct API), schema (sample type "
     "authoring and controlled vocabulary), report (GEO / SRA / PRIDE submission "
-    "artifacts), assay (house-scoped assay hygiene - 8 commands that find "
+    "artifacts), assay (house-scoped assay hygiene - 9 commands that find "
     "unregistered sample-assay pairs, put every proposal in front of a human, and "
     "write the approved ones to production). Activate when working in a directory "
     "containing files/, manuscript/, previous_metadata/, assets/assay-run.json, or "
