@@ -90,6 +90,52 @@ def update(root: Path, **fields) -> dict:
     return _write(root, current)
 
 
+def reopen(root: Path, run: int) -> dict:
+    """Resume a run that was closed before it finished. -> the lockfile.
+
+    WHY THIS EXISTS. `close` is called to release the lock -- RUN2 was closed at
+    `resolve` precisely so a fresh `init` would not hit it -- and `create`
+    allocates a NEW run number and refuses while anything is open. Between them
+    there was no way back into an existing run, so finishing one meant editing
+    the lockfile by hand: the single file whose entire job is to be the thing
+    nobody edits by hand.
+
+    THE RUN NUMBER IS AN ARGUMENT AND NOT A LOOKUP. Reopening whatever the
+    lockfile happens to hold is how a session resumes RUN2 believing it is
+    RUN3, and re-submits rows that are already in production. Naming it is how
+    the caller proves which run it means.
+
+    IT DOES NOT TOUCH `step`. The run resumes where it stopped; rewinding it
+    would re-run a stage whose output is already on disk and, at `write`,
+    already in the database.
+    """
+    current = read(root)
+    if not current:
+        raise RunLocked(
+            f"no run has been opened under {root}; there is nothing to reopen. "
+            f"`curate-assay-init` opens run {run}.")
+    # THE LIVE LOCK IS REPORTED FIRST. When a different run is open, both facts
+    # are true and only one of them is dangerous: a second write phase against
+    # an open run is the MAX(id)+1 overwrite this lockfile exists to prevent.
+    if current.get("open") and current["run"] != run:
+        raise RunLocked(
+            f"run {current['run']} is still open (pid {current.get('pid')}). "
+            f"Close it before resuming run {run}: two concurrent write phases "
+            f"can silently overwrite each other's rows.")
+    if current["run"] != run:
+        raise RunLocked(
+            f"the lockfile holds run {current['run']}, not run {run}. Reopening "
+            f"a run you have misidentified re-submits its rows; check "
+            f"`curate-assay-status` before resuming.")
+    if current.get("open"):
+        return current
+    # RE-STAMPED, because the closed run's pid belongs to a process that has
+    # since exited and `create`'s refusal quotes it back at the next caller.
+    current["open"] = True
+    current["pid"] = os.getpid()
+    return _write(root, current)
+
+
 def close(root: Path) -> None:
     """Mark the run closed so another may open."""
     current = read(root)
