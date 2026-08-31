@@ -1,6 +1,6 @@
 ---
 name: dmac-curation
-description: Curator's workbench for NExtSEEK / FairDomHub metadata. Human-in-the-loop, PI-facing. Modes are pipeline (14 commands, 12 phases from inventory through sample tree, build, consolidate, QA, server-side QC, deposit, retrieve, to email PI), fdh (FairDomHub upload and direct API), schema (sample type authoring and controlled vocabulary), report (GEO / SRA / PRIDE submission artifacts). Activate when working in a directory containing files/, manuscript/, previous_metadata/, or any .dmac-curation.json lockfile, or when the user mentions NExtSEEK, FairDomHub, curation, sample types, or a GEO/SRA/PRIDE submission.
+description: Curator's workbench for NExtSEEK / FairDomHub metadata. Human-in-the-loop, PI-facing. Modes are pipeline (15 commands, 13 phases from inventory through sample tree, protocols, build, consolidate, QA, server-side QC, deposit, retrieve, to email PI), fdh (FairDomHub upload and direct API), schema (sample type authoring and controlled vocabulary), report (GEO / SRA / PRIDE submission artifacts). Activate when working in a directory containing files/, manuscript/, previous_metadata/, or any .dmac-curation.json lockfile, or when the user mentions NExtSEEK, FairDomHub, curation, sample types, or a GEO/SRA/PRIDE submission.
 ---
 
 # DMAC Curation
@@ -27,7 +27,7 @@ is nothing to declare in `plugin.json`.
 
 | mode | entry points | reference | state scope |
 |---|---|---|---|
-| `pipeline` | `/curate-init`, `/curate-inventory`, `/curate-sample-tree`, `/curate-questions`, `/curate-build`, `/curate-consolidate`, `/curate-resolve-assays`, `/curate-qa`, `/curate-qc`, `/curate-deposit`, `/curate-retrieve`, `/curate-validate`, `/curate-email`, `/curate-status` | `PHASES.md` | project - needs a lockfile and scaffold |
+| `pipeline` | `/curate-init`, `/curate-inventory`, `/curate-sample-tree`, `/curate-questions`, `/curate-protocols`, `/curate-build`, `/curate-consolidate`, `/curate-resolve-assays`, `/curate-qa`, `/curate-qc`, `/curate-deposit`, `/curate-retrieve`, `/curate-validate`, `/curate-email`, `/curate-status` | `PHASES.md` | project - needs a lockfile and scaffold |
 | `fdh` | `/fdh-upload`, `/fdh-api` | `FDH.md` | credentials only - no project needed |
 | `schema` | `/curate-sampletype` | `SCHEMA.md` | cwd - writes where you are, no project needed |
 | `report` | `/curate-report` | `REPORTS.md` | input - reads a lockfile if present, never requires one |
@@ -38,7 +38,7 @@ command's exact behavior, the `commands/*.md` files are authoritative.
 
 ### `pipeline` - the curation pipeline
 
-12 phases driven by 14 commands. This is where most work happens, but it is one
+13 phases driven by 15 commands. This is where most work happens, but it is one
 mode among four. Deep per-phase reference: `PHASES.md`.
 
 ### `fdh` - FairDomHub
@@ -131,6 +131,7 @@ marker, and a blank there fails silently.
 ## Vocabulary the user uses
 
 - "curate" / "curation" → the full pipeline
+- "the protocols" / "the SOPs" / "write up the methods" → Phase 3b (`/curate-protocols`)
 - "consolidate to flat" → Phase 6
 - "QA the sheet" → Phase 9
 - "build X sheet" → Phase 5

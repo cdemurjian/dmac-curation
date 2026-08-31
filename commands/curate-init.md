@@ -61,7 +61,7 @@ entry (Step 6) and a report (Step 7); they never collect a `lab`/`pi`, so there
 is nothing to render.
 
 4. In pipeline mode only, create the missing directories:
-   `mkdir -p files manuscript previous_metadata assay_sheets scripts`.
+   `mkdir -p files manuscript previous_metadata protocols assay_sheets scripts`.
 
 5. In pipeline mode only, render any missing templates. Existing files are
    never touched:

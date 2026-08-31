@@ -6,19 +6,25 @@ For each phase: inputs, outputs, scripts invoked, error modes, edge cases.
 
 ## Phase table
 
-14 commands drive 12 phases. Phase 9 is split into 9a (`/curate-qa`, local) and
+15 commands drive 13 phases. Phase 9 is split into 9a (`/curate-qa`, local) and
 9b (`/curate-qc`, server-side); phases 4 and 8 were retired as numbers (see
 "Retired phases"); the surviving numbers are deliberately **not** renumbered,
 because every scaffolded project's `CLAUDE.md` bakes in the order,
 `/curate-status` maps artifacts by number, and curators speak in phase numbers.
 
-The 11 pipeline phases run inventory (1) through email (13):
+**A phase inserted later takes a letter suffix, never a retired number.**
+Protocols slot between Questions and Build as 3b, the same way server-side QC
+slots after QA as 9b. Reusing 4 would silently redefine a number that older
+project notes still use for the task plan.
+
+The 12 pipeline phases run inventory (1) through email (13):
 
 | # | Phase | Command | Artifact |
 |---|---|---|---|
 | 1 | Inventory | `/curate-inventory` | `FILE_INDEX.md` |
 | 2 | Sample tree | `/curate-sample-tree` | `SAMPLE_TREE.md` |
 | 3 | Questions | `/curate-questions [add\|list\|resolve]` | `QUESTIONS_FOR_PI.md` |
+| 3b | Protocols | `/curate-protocols [--project-id N]` | `protocols/P.*.docx` + `protocols/COVERAGE.md` |
 | 5 | Build | `/curate-build [<arm>]` | `assay_sheets/4sheet_originals/*.xlsx` + `scripts/build_<arm>.py` |
 | 6 | Consolidate | `/curate-consolidate` | `assay_sheets/Arm{X}-upload.xlsx` (flat format) |
 | 7 | Resolve assays | `/curate-resolve-assays --project-id N` | `context/assay_ids_cache.json` + `context/assay_synonyms.json` |
@@ -61,7 +67,7 @@ An arm is what flows through the whole back half:
 | Phase | What the arm is |
 |---|---|
 | 2 | one ASCII tree per arm in `SAMPLE_TREE.md` |
-| 4 | one task per arm, optionally `blockedBy` other arms |
+| 3 | one task per arm, optionally `blockedBy` other arms (task-plan guidance) |
 | 5 | one `scripts/build_<arm>.py` + a set of `assay_sheets/4sheet_originals/<arm>_<sampletype>.xlsx` |
 | 6 | one flat `assay_sheets/Arm{X}-upload.xlsx` |
 | 7, 9, 12 | iterated over as `Arm*-upload.xlsx` |
@@ -70,10 +76,10 @@ Arms are labelled by letter (`A`, `B`, `C`, …) and are the argument to `/curat
 `/curate-status` reports progress as "6/8 arms built".
 
 **The word borrows clinical-trial language, but do not take it literally.** A trial arm is a
-treatment group, and treatment groups are independent by construction. Arms here are not: Phase 4
-explicitly supports "Arm G blocked by Arm E + Arm F". An arm is better read as *a coherent chunk of
-the dataset that can be built in one pass* — sometimes a treatment group, sometimes a downstream
-product that needs two upstream chunks finished first.
+treatment group, and treatment groups are independent by construction. Arms here are not: the
+task-plan guidance at the tail of Phase 3 explicitly supports "Arm G blocked by Arm E + Arm F". An
+arm is better read as *a coherent chunk of the dataset that can be built in one pass* — sometimes a
+treatment group, sometimes a downstream product that needs two upstream chunks finished first.
 
 ### When to split into separate arms
 
@@ -189,6 +195,109 @@ Use `TaskCreate` to record one task per arm, with `blockedBy` dependencies (e.g.
 Arm G blocked by Arm E plus Arm F). This is good practice, not a pipeline stage
 - it has no command, no script and no artifact, which is why it is no longer
 numbered.
+
+---
+
+## Phase 3b - Protocols
+
+**Command:** `/curate-protocols [--project-id N] [--only <topic>]`
+
+**Inputs:** `sample_tree.json` (which assays need documenting), `manuscript/`
+(the Methods text), `.dmac-curation.json` (lab + stamp), `.env` (registration only)
+
+**Outputs:** `protocols/P.<LAB>-<STAMP>-V<n>_<Topic>.docx` (one per topic),
+`protocols/COVERAGE.md` (build artifact), `protocols/README.md` (narrative),
+`protocols/_sops.json` (registration index, written by the upload)
+
+### Why it sits between 3 and 5
+
+The `Protocol` column of every upload row carries a **SOP title verbatim**, so
+the SOPs must exist before Phase 5 writes rows that cite them. And the tree is
+what says which assays need documenting, so it must exist first. That fixes the
+position: after 2, before 5.
+
+### The judgment is in two JSON files, not in the script
+
+`scripts/build_protocols.py` is deterministic. It renders, verifies and reports;
+it never decides which manuscript section belongs in which protocol. That
+decision lives in:
+
+- `protocols/_methods.json` - verbatim Methods sections, one entry per heading,
+  a transcription rather than a summary. A section may repeat; occurrences are
+  consumed in document order.
+- `protocols/_manifest.json` - `lab`, `stamp`, `version`, and one entry per
+  protocol giving its `topic`, the `headings` it consumes, the `assays` it
+  documents, and a `note` carried into Table A.
+
+Splitting it this way is what makes the extraction reproducible and the coverage
+tables derivable. A curator can re-read the manifest and see every mapping
+decision in one screen.
+
+**The `assays` strings must match the tree's edge assays exactly**, `- Metadata`
+and `- Data Linked` suffixes included. That string is the join key between a
+protocol and an edge; a near-miss reports the edge as uncovered and nothing
+errors.
+
+### Three checks the build enforces
+
+1. **Every heading the manifest names exists** in the methods file.
+2. **Every section is consumed exactly as often as it occurs.** An unconsumed
+   section is a protocol someone forgot to write; an overused one is a section
+   pasted into two documents.
+3. **Every body paragraph round-trips verbatim** out of the written `.docx`.
+   Sections marked `"verbatim": false` are exempt, which is how a transcribed
+   display equation (the PDF floats it as un-extractable math) passes without
+   weakening the check for everything else.
+
+### No Methods text means no protocol files
+
+A study with no written Methods and no PI-supplied protocol documents gets the
+coverage report and a question per uncovered assay, and nothing else. **Do not
+write placeholder protocols.** A `*** PLACEHOLDER ***` marker is right in a
+spreadsheet cell, where QA greps for it; it is wrong in a SOP, which gets
+registered on a shared server and emailed to a PI as if it described a real
+procedure. Phase 5 can proceed with a blank `Protocol` column.
+
+### Registration writes to a live server, so ask the user first
+
+**Approval to run phase 3b is not approval to upload.** Authoring the documents
+is local and reversible; registering them is neither. SOP records land in a
+catalog every curator on the project shares, they get cited by row after row,
+and there is no clean undo. So registration is always three steps:
+
+1. `scripts/upload_sops.py --project-id N` previews and writes nothing.
+2. Show that preview to the user and put the decision to them with
+   `AskUserQuestion`, naming the server, the project id, and the record count.
+3. Only after a clear yes: `--write --confirmed`.
+
+`--write` on its own is REFUSED before any network call. `--confirmed` asserts
+that a human saw the preview and approved it, which makes a false assertion a
+visible act rather than a silent omission. This mirrors `sampletype_attr.py`,
+where a live schema write needs `--apply` plus `--yes-production`: in this
+codebase a shared-server write always costs a second, deliberate flag.
+
+A re-run is still an upload. Resuming an interrupted batch, or adding one more
+protocol with `--only`, needs its own yes.
+
+Two NExtSEEK behaviours are already handled and should not be "fixed" again:
+`POST /nextseek_api/sops/` can return HTTP 500 with an HTML body **while still
+creating the record**, and it rewrites the submitted title with a
+`<YYMMDD>-V<n>_` prefix. The script therefore verifies against the server rather
+than the response, then `PATCH`es the canonical title. Reported upstream as
+[BioMicroCenter/NExtSEEK#109](https://github.com/BioMicroCenter/NExtSEEK/issues/109).
+
+**Edge cases:**
+- Document already exists: skipped. `--force` rewrites it, but if it is already
+  registered or emailed, bump `version` to `V2` instead of rewriting `V1`
+  underneath the record that cites it.
+- A protocol matching no edge is not automatically wrong. Study-wide statistics
+  and analysis methods for an out-of-scope tier are real methods with no row.
+  Keep them registered and say why in the `note`.
+- An edge matching no protocol IS a gap. Table B is the checklist.
+- Half-finished upload: re-run it. The skip list is built from the server, so a
+  batch interrupted mid-way resumes cleanly.
+- `COVERAGE.md` is regenerated, never hand-edited. After registering, re-run
+  `--coverage-only` so Table A carries the SOP ids.
 
 ---
 

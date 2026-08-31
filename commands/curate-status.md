@@ -25,12 +25,13 @@ dmac-curation modes.
 
 | mode | reported state |
 |---|---|
-| `pipeline` | per-phase artifact presence (phases 1, 2, 3, 5, 6, 7, 9, 10, 11, 12, 13), plus lab / pi / project id from the lockfile |
+| `pipeline` | per-phase artifact presence (phases 1, 2, 3, 3b, 5, 6, 7, 9, 10, 11, 12, 13), plus lab / pi / project id from the lockfile |
 | `fdh` | whether `FDH_API` or `FDH_TOKEN` is configured, and from where. **Never the value.** |
 | `schema` | sample types with a `schema/<TYPE>.review.md` in cwd |
 | `report` | formats with a `report/<FORMAT>.mapping.json` in cwd |
 
-Phases 4 and 8 are retired and are not reported; see `PHASES.md`.
+Phases 4 and 8 are retired, are not reported, and are never reused; a phase added
+later takes a letter suffix instead (3b protocols, 9b server-side QC). See `PHASES.md`.
 
 ## Behavioral rules
 

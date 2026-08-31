@@ -70,3 +70,35 @@ def test_phases_doc_no_longer_overclaims():
     text = (REPO / "skills" / "curation" / "PHASES.md").read_text()
     s = text.split("## Phase 12 ", 1)[1].split("\n## ", 1)[0]
     assert "--retrieve" in s
+
+
+def test_normalize_collapses_whitespace_around_semicolons():
+    """NExtSEEK stores multi-parent lists as "A;B"; builds may emit "A; B".
+
+    Without collapsing, every multi-parent row reads as a diff on a clean round
+    trip. Observed live: a 101-row upload reported 10 false Parent diffs and
+    nothing else.
+    """
+    from review_metadata_vs_uploads import normalize
+
+    assert normalize("A; B") == normalize("A;B") == "A;B"
+    assert normalize("A ;  B ;C") == "A;B;C"
+    assert normalize("MUS-260807SHE-1; MUS-260807SHE-2") == "MUS-260807SHE-1;MUS-260807SHE-2"
+    # single values and blanks are untouched
+    assert normalize("CEL-260807SHE-9") == "CEL-260807SHE-9"
+    assert normalize(None) == ""
+    assert normalize("  padded  ") == "padded"
+    # a genuine difference still shows up
+    assert normalize("A;B") != normalize("A;C")
+
+
+def test_join_uids_emits_the_canonical_separator():
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "scripts"))
+    from _common import join_uids
+
+    assert join_uids(["A", "B"]) == "A;B"
+    assert join_uids(["A"]) == "A"
+    assert join_uids([]) == ""
+    # blanks dropped, order preserved, stray spacing stripped
+    assert join_uids([" A ", None, "", "B"]) == "A;B"

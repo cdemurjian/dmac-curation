@@ -15,9 +15,9 @@ import _lockfile  # noqa: E402
 
 CANONICAL_DESCRIPTION = (
     "Curator's workbench for NExtSEEK / FairDomHub metadata. Human-in-the-loop, "
-    "PI-facing. Modes are pipeline (14 commands, 12 phases from inventory through "
-    "sample tree, build, consolidate, QA, server-side QC, deposit, retrieve, to "
-    "email PI), fdh "
+    "PI-facing. Modes are pipeline (15 commands, 13 phases from inventory through "
+    "sample tree, protocols, build, consolidate, QA, server-side QC, deposit, "
+    "retrieve, to email PI), fdh "
     "(FairDomHub upload and direct API), schema (sample type authoring and "
     "controlled vocabulary), report (GEO / SRA / PRIDE submission artifacts). "
     "Activate when working in a directory containing files/, manuscript/, "
@@ -94,7 +94,7 @@ def test_versions_agree_across_plugin_marketplace_and_lockfile():
 
 
 def test_version_is_the_toolkit_release():
-    assert _plugin_json()["version"] == "0.4.0"
+    assert _plugin_json()["version"] == "0.5.0"
 
 
 def test_description_names_every_mode():

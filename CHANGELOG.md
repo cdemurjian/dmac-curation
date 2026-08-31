@@ -2,6 +2,68 @@
 
 All notable changes to dmac-curation will be documented in this file.
 
+## 0.5.0 - 2026-08-17
+
+Protocols become a pipeline phase instead of a per-project one-off.
+
+### Added
+
+- **`/curate-protocols` (phase 3b)** - author the protocol `.docx` set from the
+  manuscript Materials and Methods, cross-check it against the sample tree, and
+  register it on NExtSEEK as SOP records. It sits between Questions (3) and
+  Build (5) for a hard reason: the `Protocol` column of every upload row carries
+  a **SOP title verbatim**, so the SOP has to exist before Phase 5 writes rows
+  that cite it, and the tree is what says which assays need documenting.
+
+  Numbered 3b, not 4. Phases 4 and 8 are retired numbers that are never reused,
+  so an inserted phase takes a letter suffix, the same convention `/curate-qc`
+  uses for 9b.
+
+- **`scripts/build_protocols.py`** - renders one
+  `P.<LAB>-<STAMP>-V<n>_<Topic>.docx` per manifest entry, plus a
+  `protocols/COVERAGE.md` carrying Table A (protocol to sample-tree edge) and
+  Table B (edge to protocol coverage). The script is deterministic; the judgment
+  lives in two JSON files the model writes, `protocols/_methods.json` (verbatim
+  Methods sections) and `protocols/_manifest.json` (which sections group into
+  which protocol, and the assay each documents). Three checks fail the build: a
+  heading the manifest wants but the methods file lacks, a section consumed more
+  or fewer times than it occurs, and a body paragraph that did not round-trip
+  verbatim out of the written document. Ported from the hand-built Shenoy
+  curation, and verified to reproduce all 15 of its delivered documents exactly.
+
+- **`scripts/upload_sops.py`** - registers the set on NExtSEEK. Previews by
+  default, and **asks a human before writing**: a bare `--write` is REFUSED
+  before any network call and must be paired with `--confirmed`, which asserts
+  that a person saw the preview and approved it. Approval to run phase 3b is not
+  approval to upload, because SOP records land in a catalog every curator on the
+  project shares and there is no clean undo. Same shape as `sampletype_attr.py`,
+  where a live schema write costs `--apply` plus `--yes-production`. Works around
+  two server behaviours reported as
+  [BioMicroCenter/NExtSEEK#109](https://github.com/BioMicroCenter/NExtSEEK/issues/109):
+  `POST /nextseek_api/sops/` can return HTTP 500 with an HTML body **while still
+  creating the record**, so the result is verified against the server rather than
+  the response; and it rewrites the submitted title with a `<YYMMDD>-V<n>_`
+  prefix, so the canonical title is set by a following `PATCH`. Writes
+  `protocols/_sops.json`, which fills the SOP column of Table A.
+
+- **`templates/PROTOCOLS.md.j2`** - the narrative half of `protocols/README.md`:
+  naming convention, provenance, and open items. `COVERAGE.md` stays a build
+  artifact and is never hand-edited.
+
+### Behavior worth knowing
+
+- **A study with no written Methods gets no protocol files.** It gets the
+  coverage report and a question per uncovered assay instead. A
+  `*** PLACEHOLDER ***` marker is right in a spreadsheet cell, where QA greps for
+  it; it is wrong in a SOP, which gets registered on a shared server and emailed
+  to a PI as if it described a real procedure. Phase 5 proceeds with a blank
+  `Protocol` column.
+- **An existing `.docx` is never overwritten without `--force`.** If it is
+  already registered or emailed, bump `version` to `V2` rather than rewriting
+  `V1` underneath the record that cites it.
+- Every batch authors its own protocol set. `upload_sops.py` skipping a filename
+  it already sees is idempotency for re-runs, not reuse of another curator's SOP.
+
 ## 0.4.0 - 2026-07-31
 
 Server-side validation, a human-readable review artifact, and a working route for

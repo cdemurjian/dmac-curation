@@ -4,15 +4,15 @@ A Claude Code plugin for curating research-project metadata into NExtSEEK / Fair
 It is a curator's workbench, not a single pipeline: human-in-the-loop and PI-facing
 throughout.
 
-**Status:** v0.3.0
+**Status:** v0.5.0
 
 ## What it does
 
 The plugin is organised as four **modes**. A mode is a convention, not a framework:
 entry-point commands, a reference doc loaded on demand, and optionally its own scripts.
 
-- **`pipeline`** — the metadata curation pipeline: 12 phases from inventory through
-  sample tree, build, consolidate, QA, deposit, retrieve, to emailing the PI. Needs a
+- **`pipeline`** — the metadata curation pipeline: 13 phases from inventory through
+  sample tree, protocols, build, consolidate, QA, deposit, retrieve, to emailing the PI. Needs a
   project (a lockfile and scaffold). Reference: [`skills/curation/PHASES.md`](skills/curation/PHASES.md).
 - **`fdh`** — FairDomHub: interactive study upload and direct programmatic API access.
   Needs credentials only, no project. Reference: [`skills/curation/FDH.md`](skills/curation/FDH.md).
@@ -33,6 +33,7 @@ entry-point commands, a reference doc loaded on demand, and optionally its own s
 | `/curate-inventory` | `FILE_INDEX.md` from PI inputs |
 | `/curate-sample-tree` | `SAMPLE_TREE.md` + `sample_tree.json` + interactive `SAMPLE_TREE.html`, mapping manuscript narrative to NExtSEEK sample types |
 | `/curate-questions` | running `QUESTIONS_FOR_PI.md` |
+| `/curate-protocols` | protocol `.docx` set from the manuscript Methods, a `COVERAGE.md` cross-check against the sample tree's assays, and SOP registration on NExtSEEK |
 | `/curate-build` | per-arm upload sheets (4-sheet xlsx review artifact) |
 | `/curate-consolidate` | collapse the 4-sheet sheets to flat-format `Arm{X}.xlsx`, plus `Arm{X}_review.xlsx` (one sheet per sample type, for humans) |
 | `/curate-resolve-assays` | fetch project assays via NExtSEEK API, cache + curate synonyms |
@@ -96,6 +97,8 @@ dmac-curation/
 │   ├── sampletype_attr.py             # add attributes to a live sample type (native editor)
 │   ├── consolidate_to_flat.py         # 4-sheet -> flat upload file + _review.xlsx
 │   ├── build_sample_tree_html.py      # sample_tree.json -> interactive SAMPLE_TREE.html
+│   ├── build_protocols.py             # _methods.json + _manifest.json -> P.*.docx + COVERAGE.md
+│   ├── upload_sops.py                 # register the protocol .docx set as NExtSEEK SOPs
 │   ├── fdh/                           # FairDomHub upload + API
 │   ├── report/                        # report-mode adapters, mapping, render, validate
 │   ├── schema/                        # schema-mode field index + vocabulary
@@ -119,6 +122,7 @@ cd /path/to/empty/project_dir
 # Then walk the pipeline mode:
 /curate-inventory       # → FILE_INDEX.md
 /curate-sample-tree     # → SAMPLE_TREE.md + sample_tree.json + SAMPLE_TREE.html
+/curate-protocols       # → protocols/P.*.docx + COVERAGE.md (SOP titles Phase 5 cites)
 /curate-build A         # → assay_sheets/4sheet_originals/
 /curate-consolidate     # → assay_sheets/Arm*.xlsx + Arm*_review.xlsx
 /curate-resolve-assays --project-id 10
