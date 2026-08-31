@@ -56,19 +56,29 @@ here may be a genuine missing registration the pipeline correctly found, since a
 curator's assay set is not known to be complete -- that is the premise of Modes 1
 and 2. Every precision this module reports is therefore a LOWER BOUND.
 
-MEASURED 2026-08-18 OVER THE 2026-08-14 EXTRACT, at a 20% hold-out on seed 0.
+RE-MEASURED 2026-08-31 OVER THE SAME EXTRACT, at a 20% hold-out on seed 0.
 32,793 of 163,816 samples held out, 42,867 of 214,296 membership rows hidden,
 509,875 of 794,593 edges in the training set, 36,090 curator-assigned pairs to
-recover, 59,182 proposals scored:
+recover, 59,086 proposals scored:
 
     band          ADD_PARENT                     ADD_CHILD
                   rows   correct  precision      rows   correct  precision
     NO_RATE          11        4     0.364          28        7     0.250
-    [0.00,0.50)   8,806      519     0.059      18,996      210     0.011
+    [0.00,0.50)   8,778      519     0.059      18,949      210     0.011
     [0.50,0.75)   2,869    1,757     0.612         318      172     0.541
-    [0.75,0.90)   1,814    1,529     0.843         949      815     0.859
+    [0.75,0.90)   1,814    1,529     0.843         939      815     0.868
     [0.90,0.95)   1,626    1,548     0.952         277      263     0.949
-    [0.95,1.00]   4,151    4,143     0.998      19,337   19,270     0.997
+    [0.95,1.00]   4,151    4,143     0.998      19,326   19,259     0.997
+
+WHAT MOVED AND WHY, since the 2026-08-18 reading of this table.
+`mode2.mode2_candidates` began refusing the 448 (sample, assay) pairs whose
+SAMPLE has no row in the `samples` extract, so the cold run proposes 174,379
+rather than 174,788 and scores 59,086 rather than 59,182. Against ground truth
+it costs 11 recoveries of 36,090, all of them ADD_CHILD -- held-out
+registrations on samples the live detector may no longer propose for at all.
+Not one band's precision moved at three decimal places except
+`[0.75,0.90)` ADD_CHILD, 0.859 -> 0.868, where 10 wrong rows left a 949-row
+band. That is the whole measured cost of the refusal on this instrument.
 
 STABLE ACROSS THE SPLIT, so the curve is not an artifact of one hold-out. Re-run
 at seed 7 and at fractions 0.1 and 0.5, the `[0.95,1.00]` precision reads
@@ -79,19 +89,22 @@ strongest form of the finding: every band's measured precision falls inside the
 band's own interval, the one recurring exception being `[0.90,0.95)` ADD_PARENT
 at 0.952 / 0.965 / 0.960 across the three configurations, up to 1.5 points above
 the band's top edge. A `reverse_rate` of 0.97 means what a `propagation_rate` of
-0.97 means.
+0.97 means. (THE SWEEP WAS MEASURED 2026-08-18 AND HAS NOT BEEN RE-RUN since
+the 2026-08-31 samples-row refusal, which moved seed 0's own top-band
+precisions by nothing at three decimal places. The six figures above are
+therefore the pre-refusal reading and are quoted as such rather than restated.)
 
 THE CURVE CUTS AGAINST THE SPEC'S DEMOTION OF `A_ADD_CHILD`, AND ONLY IN ITS TOP
 BAND. At equal precedent rate the two directions recover a curator's assay at
 indistinguishable precision -- 0.998 against 0.997 at `[0.95,1.00]` over 4,151
-and 19,337 proposals, and the demoted direction's top band is NOT one hop doing
+and 19,326 proposals, and the demoted direction's top band is NOT one hop doing
 the work: drop its largest evidence group and the remaining 13,649 rows still
 recover at 0.996. So `reverse_rate` at a given value is as good a guide to
 reading order as `propagation_rate` at that value.
 
 THAT CLAIM IS NARROW ON PURPOSE, AND `118 EVIDENCE GROUPS` MUST NOT BE READ AS
 THE DISCOUNT. The top band's 118 groups are heavily unequal: the largest keys
-5,688 rows, 29.4%, the top two 10,163, 52.6%, and the top three 11,720, 60.6%.
+5,677 rows, 29.4%, the top two 10,152, 52.5%, and the top three 11,709, 60.6%.
 Worse for any independence reading, the largest group is the SAME triple
 `(22615, 0, 34)` that tops the ADD_PARENT band, where it keys 617 of 4,151 -- so
 the two directions' top bands are not independent evidence of each other. What
@@ -99,13 +112,13 @@ survives is only what was measured: the band is not ONE hop.
 
 THE TOP BAND IS NOT THIN, WHICH IS A DIFFERENT QUESTION AND WAS ASKED
 SEPARATELY. Row-weighted, the demoted direction's `[0.95,1.00]` rows sit on a
-median direction denominator of 17,720 with 117 of 19,337 below 30; the mirror's
+median direction denominator of 17,720 with 117 of 19,326 below 30; the mirror's
 sit on 1,341 with 130 of 4,151 below 30. Neither band rests on thin evidence,
 and the demoted one rests on the thicker.
 
 What the demotion does survive on is the direction's BULK. In `[0.00,0.50)` the
-demoted direction recovers 210 of 18,996 against 519 of 8,806, five times worse,
-and that is where almost all of its 117,331 live rows sit. It also survives on
+demoted direction recovers 210 of 18,949 against 519 of 8,778, five times worse,
+and that is where almost all of its 117,026 live rows sit. It also survives on
 the two measurements the spec actually rests it on, neither of which this
 instrument touches: co-registration corroboration over increment 1's 866 flags,
 88 of 88 against 15 of 263, and the flagship hop `TIS <- PAV`, 0.006 reverse
@@ -212,7 +225,7 @@ RECOVERY_COLUMNS = ["band", "action", "rows", "correct", "precision", "samples",
 # denominators a population one can miss; `proposals_scored_correct_*` is keyed
 # on the action the BLINDED run actually emitted, because that is the row an
 # operator reads. Measured on the real extract they differ by exactly the flipped
-# pairs -- 20,737 correct ADD_CHILD proposals against 20,683 recovered ADD_CHILD
+# pairs -- 20,726 correct ADD_CHILD proposals against 20,672 recovered ADD_CHILD
 # truth pairs, the 54 being ADD_PARENT pairs recovered as the mirror -- and a
 # final identity asserts that the two totals reconcile through them.
 BACKTEST_CENSUS_KEYS = (
@@ -464,7 +477,7 @@ def training_edges(edges: pd.DataFrame, held_out) -> pd.DataFrame:
     propagation rate is `p` reads about `(1 - fraction) * p`. Measured at a 20%
     hold-out on seed 0 over the real extract, with the biased mining as the only
     difference, the `[0.95,1.00]` band all but empties: 1 ADD_PARENT row and 6
-    ADD_CHILD rows against 4,151 and 19,337, the mass landing in `[0.75,0.90)`
+    ADD_CHILD rows against 4,151 and 19,326, the mass landing in `[0.75,0.90)`
     instead at 5,424 and 19,165. Both readings came out of this module during
     development and the first one was wrong.
 
@@ -581,9 +594,9 @@ def recovery_bands(
     """Precision by band and by direction, with the support behind every cell.
 
     THE TWO DIRECTIONS ARE NEVER POOLED, at any band. Measured over the real
-    extract at a 20% hold-out, `[0.00,0.50)` recovers 519 of 8,806 ADD_PARENT
-    proposals and 210 of 18,996 ADD_CHILD ones -- five times apart -- while
-    `[0.95,1.00]` recovers 4,143 of 4,151 and 19,270 of 19,337, which is the same
+    extract at a 20% hold-out, `[0.00,0.50)` recovers 519 of 8,778 ADD_PARENT
+    proposals and 210 of 18,949 ADD_CHILD ones -- five times apart -- while
+    `[0.95,1.00]` recovers 4,143 of 4,151 and 19,259 of 19,326, which is the same
     number twice. One figure covering both would hide the first fact and
     manufacture the second.
 

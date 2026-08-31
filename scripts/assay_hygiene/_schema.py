@@ -331,8 +331,8 @@ PRECEDENT_COLUMNS = RULE_KEY + [
 #
 #   A COUNT AND NEVER A BOOLEAN, and ZERO IS THE FINDING. A row reading 0 would
 #   create a (sample type, assay) pair that exists NOWHERE in the database --
-#   measured 2026-08-17 over the emitted Mode 2 rows, 30,496 of 55,007
-#   ADD_PARENT rows (55.4%) and 73,195 of 117,331 ADD_CHILD rows (62.4%). A
+#   re-measured 2026-08-31 over the emitted Mode 2 rows, 30,495 of 54,864
+#   ADD_PARENT rows (55.6%) and 73,056 of 117,026 ADD_CHILD rows (62.4%). A
 #   boolean would collapse "joins five existing registrations" with "joins
 #   5,000", and a curator triages on the difference.
 #

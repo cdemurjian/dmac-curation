@@ -25,11 +25,19 @@ order of six `if` branches a later edit could reorder without failing anything:
     6. MODE 3      emits nothing; no detector exists
 
 Three of the five adjacent swaps in that list change a measured number, which is
-what makes it a contract rather than a comment. Re-measured 2026-08-21 over the
-175,339 input keys: GATE with MODE 1 moves 746 keys, MODE 1 with LINEAGE 749,
-LINEAGE with UNREACHABLE 67,898, UNREACHABLE with COMPAT 0. The fifth moves none
+what makes it a contract rather than a comment. Re-measured 2026-08-31 over the
+174,891 input keys: GATE with MODE 1 moves 746 keys, MODE 1 with LINEAGE 749,
+LINEAGE with UNREACHABLE 67,590, UNREACHABLE with COMPAT 0. The fifth moves none
 either, because `PRE_MODE_3` claims no key under any evidence at all -- which is
 a finding and not an oversight.
+
+The 2026-08-21 reading was 175,339 / 746 / 749 / 67,898 / 0. `mode2_candidates`
+then began refusing the 448 lineage pairs whose SAMPLE has no `samples` row, so
+the input lost those 448 keys and the third swap -- which counts REACHABLE
+lineage keys -- lost the 308 of them that were reachable. The first two are
+unchanged: 746 counts keys the gate refuses and 749 keys Mode 1 takes, and both
+populations rest on a claim, which needs a `samples` row to have been raised at
+all. That invariance is the cross-check that the refusal stayed in its lane.
 
 The 2026-08-17 reading of that sentence was 180,995 / 746 / 753 / 903, against a
 vocabulary with no curator rows. The operator then retired `DataType: tif`,
@@ -43,7 +51,7 @@ and the 761 it later became is likewise gone rather than restated.
 
 STEP 4 IS NEW ON 2026-08-21 AND IT IS NOT A NEW POPULATION. Step 3 used to claim
 every lineage key without asking the question `gate.type_registration_index`
-exists to answer -- so 99,449 of the 167,454 emitted MODE_2 rows proposed a
+exists to answer -- so 99,309 of the 167,006 emitted MODE_2 rows proposed a
 (type, assay) pair the house has never once made, while a metadata CLAIM on the
 same pair was refused. Those rows are still emitted and `rows` did not move:
 they now carry `GATE_UNREACHABLE` and `CLS_UNREACHABLE` and are counted as
@@ -124,39 +132,54 @@ available, or both -- and the SIX steps partition it:
     attached claims                                  130,764
       naming an assay the sample already holds       122,011   no absence, no key
 
-    input keys                                       175,339
+    lineage pairs a neighbour offers                 172,338
+      the sample has no `samples` row                    448   REFUSED, counted
+
+    input keys                                       174,891
       PRE_GATE        refused, a rejected claim        4,553   emits nothing
       PRE_MODE_1      registered in nothing            1,373
       PRE_LINEAGE     a neighbour carries it,
-                      and the pair is reachable       67,898
+                      and the pair is reachable       67,590
       PRE_UNREACHABLE a neighbour carries it, and no
                       sample of this type is
-                      registered in this assay        99,449
+                      registered in this assay        99,309
       PRE_COMPAT      the co-registration test         2,066
       PRE_MODE_3      the residue                          0   no detector
 
-    emitted rows                                     170,786
+    emitted rows                                     170,338
       MODE_1                                           1,373
-      MODE_2     lineage 67,898 + unreachable 99,449
-                 + compat 107                        167,454
+      MODE_2     lineage 67,590 + unreachable 99,309
+                 + compat 107                        167,006
       no mode    952 CLS_ALT_LABEL + 1,007 CLS_UNRESOLVED      1,959
       MODE_3                                               0
+
+THE SECOND BLOCK IS THE ONLY PLACE THIS PIPELINE DELETES A PROPOSAL, and it is
+printed above the keys for that reason. Every other line is a routing decision;
+that one is a refusal, and `mode2.mode2_census` reports it in both grains --
+448 rows over 185 samples -- so it can never be read off as a difference
+between two totals. Re-measured 2026-08-31; before the refusal the input read
+175,339 keys and the emitted rows 170,786.
 
 THE PRE_LINEAGE ROW OF THAT TABLE DENOTES A SMALLER POPULATION THAN IT USED TO,
 and that is the only line whose MEANING moved rather than its value. It read
 167,330 against a step that claimed every lineage key; `PRE_UNREACHABLE` now
 takes the ones proposing a (type, assay) pair the house has never made, so the
 two rows together are the whole lineage population and neither alone is it.
-Nothing was dropped: 67,898 + 99,449 = 167,347 keys, which is that whole
-population AT THIS MEASUREMENT -- the 17 keys between it and the 2026-08-17
-reading of 167,330 are the vocabulary retirement, not the split -- and `emitted
-rows` is unchanged by the split.
+Nothing was dropped BY THE SPLIT: 67,590 + 99,309 = 166,899 keys, which is that
+whole population AT THIS MEASUREMENT. It read 67,898 + 99,449 = 167,347 until
+2026-08-31 and the 448 between the two readings is the samples-row refusal,
+which IS a deletion and is reported as one; the 17 keys between 167,347 and the
+2026-08-17 reading of 167,330 were the vocabulary retirement, and neither is the
+split.
 
-THE LINEAGE CEILING IS 172,338 AND THE EMITTED MODE 2 IS SMALLER, by exactly the
-precedence: the gate refuses 4,242 of those rows because a rejected claim names
-the same pair, and Mode 1 takes 749 more because the sample is registered in
-nothing and its own metadata proposes the assay. Both are counted by name; a
-difference nobody names is how two readings of one number get published.
+THE LINEAGE CEILING IS 172,338, THE LANE OFFERS 171,890 AND THE EMITTED MODE 2
+IS SMALLER STILL. The 448 between the first two are the samples-row refusal --
+`mode2.mode2_candidates` will not propose for a sample the `samples` extract has
+no row for. Then the precedence: the gate refuses 4,242 of the remaining rows
+because a rejected claim names the same pair, and Mode 1 takes 749 more because
+the sample is registered in nothing and its own metadata proposes the assay.
+All three are counted by name; a difference nobody names is how two readings of
+one number get published.
 """
 from __future__ import annotations
 
@@ -754,8 +777,8 @@ def _registered_columns(
 # each key and exactly one row is emitted for it -- or none, where the step that
 # claimed it emits nothing.
 #
-# MEASURED 2026-08-21 ON THE SAME EXTRACT, EACH ADJACENT SWAP, over the 175,339
-# input keys. The four-swap table this comment carried before that date was
+# MEASURED 2026-08-31 ON THE SAME EXTRACT, EACH ADJACENT SWAP, over the 174,891
+# input keys. The four-swap table this comment carried before 2026-08-21 was
 # measured over "180,995 input keys", a population no test on this branch has
 # reproduced since; these five were re-derived by permuting `PRECEDENCE` over
 # the real extract and are the values
@@ -764,9 +787,13 @@ def _registered_columns(
 #
 #     GATE        <-> MODE 1          746 keys change step
 #     MODE 1      <-> LINEAGE         749
-#     LINEAGE     <-> UNREACHABLE  67,898
+#     LINEAGE     <-> UNREACHABLE  67,590
 #     UNREACHABLE <-> COMPAT            0
 #     COMPAT      <-> MODE 3            0
+#
+# The third read 67,898 over 175,339 keys until 2026-08-31, when
+# `mode2_candidates` began refusing the 448 lineage pairs whose sample has no
+# `samples` row.
 #
 # The last is zero because `PRE_MODE_3` claims no key under ANY evidence, which
 # `test_the_precedence_is_a_declared_order_and_three_of_its_four_swaps_move_a_key`
@@ -774,7 +801,7 @@ def _registered_columns(
 # world. That is the finding increment 2 exists to report.
 #
 # THE THIRD SWAP IS THE SIZE OF THIS REWORK. Putting `PRE_UNREACHABLE` before
-# `PRE_LINEAGE` moves 67,898 keys -- every REACHABLE lineage key -- because its
+# `PRE_LINEAGE` moves 67,590 keys -- every REACHABLE lineage key -- because its
 # test is `e.lineage` alone and relies on `PRE_LINEAGE` having taken them
 # already. That is the cascade rule working as designed and is why neither test
 # restates the other's condition.
@@ -1566,12 +1593,23 @@ def unify_findings(
 # other is this project's signature defect.
 #
 # `rows_mode_2` IS NOT THE LINEAGE CEILING and the three `lineage_*` keys are
-# why. Re-measured 2026-08-21: the lane offers 172,338; the gate refuses 4,242
-# and Mode 1 takes 749, leaving 167,347 lineage rows -- 67,898 at `PRE_LINEAGE`
-# and 99,449 at `PRE_UNREACHABLE` -- which with 107 compatibility rows make
-# 167,454. Every one of those numbers is a key here, because a difference nobody
+# why. Re-measured 2026-08-31: the lane offers 171,890; the gate refuses 4,242
+# and Mode 1 takes 749, leaving 166,899 lineage rows -- 67,590 at `PRE_LINEAGE`
+# and 99,309 at `PRE_UNREACHABLE` -- which with 107 compatibility rows make
+# 167,006. Every one of those numbers is a key here, because a difference nobody
 # names is how two readings of one number get published -- which has happened on
 # this branch.
+#
+# `lineage_ceiling_offered` IS THE LANE'S OWN COUNT AND NOT `mode2_ceiling`'s,
+# and since 2026-08-31 the two differ. It is `len(lanes[PRE_LINEAGE])`, so it is
+# what the lane EMITTED -- 171,890 -- while `lineage.mode2_ceiling` still counts
+# what the lineage graph OFFERS, 172,338. The 448 between them are the pairs
+# `mode2.mode2_candidates` refuses because the sample they propose for has no
+# `samples` row, and `mode2.mode2_census` reports them by name in
+# `rows_refused_without_a_samples_row`. The name here reads "ceiling" because
+# nothing in the precedence had ever cut the lane before that date; it is the
+# lane's offer, and a reader comparing it with the ceiling must expect the
+# refusal to sit between them.
 #
 # `keys_lineage` NO LONGER DENOTES THE WHOLE LINEAGE POPULATION and the name did
 # not change, which is the trap this comment exists to spring. It is the
@@ -1629,10 +1667,11 @@ def findings_census(
     it carried, and the second is not recoverable from the first: a
     `PRE_LINEAGE` key may or may not also carry a claim -- re-measured
     2026-08-21, 761 of the real extract's 67,898 do -- so `keys_from_a_claim`
-    cannot be counted off the steps at all.
+    cannot be counted off the steps at all. (That denominator is 67,590 since
+    2026-08-31; the numerator was not re-measured, and it cannot have grown.)
 
     THE SIBLING STEP MAKES THAT ARGUMENT SHARPER RATHER THAN WEAKER. 0 of the
-    99,449 `PRE_UNREACHABLE` keys carry a claim, and that is a fact about the
+    99,309 `PRE_UNREACHABLE` keys carry a claim, and that is a fact about the
     GATE and not about this step: a claim on a pair with no registrations is
     `GATE_UNREACHABLE`, which blocks, so `PRE_GATE` claims such a key four steps
     earlier. A reader who inferred "unreachable keys never carry claims" from
@@ -1949,7 +1988,17 @@ def main(extract_dir: str = "assay-hygiene/extract",
     # would be three answers to "which of these ids is a raw seek id", and the
     # lanes write that answer into one column of one artifact.
     fallback = B.fallback_assay_ids(assays)
-    findings = mode1_findings(attached, population, project_index(samples),
+    # ONE projects index, BOUND ONCE and handed to all four lanes plus
+    # `mode2_candidates`, for the reason `types` and `fallback` are bound once
+    # -- and here it binds harder than either. Since 2026-08-31 this dict is not
+    # only the source of the `project_ids` column: its KEY SET is the samples
+    # frame's own, so `mode2_candidates` refuses a proposal about a sample_id
+    # absent from it. The gate and the column it protects must be the same
+    # object or a null could reappear in an emitted row with nothing refusing
+    # it. It was built by three separate `project_index(samples)` calls until
+    # this change, which was harmless only while nothing read its keys.
+    projects = project_index(samples)
+    findings = mode1_findings(attached, population, projects,
                               fallback_assay_ids=fallback)
     census = mode1_census(attached, population, findings)
 
@@ -1982,11 +2031,17 @@ def main(extract_dir: str = "assay-hygiene/extract",
         type_reg=type_reg,
         assay_pop=M2.assay_population(membership, assays),
         titles=M2.assay_titles(assays),
-        projects=project_index(samples),
+        projects=projects,
         fallback_assay_ids=fallback,
     )
     ceiling = L.mode2_ceiling(children_of, parents_of, registered)
-    m2census = M2.mode2_census(m2, ceiling, attached)
+    # THE PAIRS THE LANE REFUSED, counted rather than merely absent. The ceiling
+    # above is UNGATED on purpose -- it measures what the lineage graph offers
+    # -- so this list is what reconciles it against the emitted frame, and
+    # `mode2_census` reports both grains of it.
+    refused = M2.candidates_without_a_samples_row(
+        children_of, parents_of, registered, projects=projects)
+    m2census = M2.mode2_census(m2, ceiling, attached, refused=refused)
 
     print(f"MODE 2 over the DERIVED_FROM CEILING -- every (sample, assay) a "
           f"lineage neighbour makes available BEFORE precedent is read:")
@@ -2015,15 +2070,28 @@ def main(extract_dir: str = "assay-hygiene/extract",
     print(f"  {m2census['rows_without_precedent']:,} row(s) carry NO measured "
           "rate and survive no threshold, including 0.0: absent evidence is "
           "not a rate of zero")
+    print(f"  {m2census['rows_refused_without_a_samples_row']:,} pair(s) the "
+          f"lineage graph offered, over "
+          f"{m2census['samples_refused_without_a_samples_row']:,} sample(s), "
+          "were REFUSED before any mode ran: the sample they propose for has "
+          "NO row in the samples extract, so there is nothing to register and "
+          "no metadata a curator could rule on. They are absent from every "
+          "figure above and from findings.csv. The samples stay available as "
+          "lineage NEIGHBOURS -- the gate is on the subject of a proposal, "
+          "never on its evidence.")
 
     # --- the unified pass ---------------------------------------------------
-    candidates = M2.mode2_candidates(children_of, parents_of, registered)
+    # THE SAME CALL `mode2_findings` MAKES, on the same `projects` dict, which
+    # is what keeps the precedence and the lane on one population: a pair
+    # refused there and kept here would be a key `unify_findings` granted a
+    # lane that no row ever reaches, and its partition assertion says so.
+    candidates = M2.mode2_candidates(children_of, parents_of, registered,
+                                     projects=projects)
     keys = absence_keys(attached, population=population,
                         registered=registered, candidates=candidates,
                         type_reg=type_reg, types=types, uuid_of=uuid_of)
     steps = precedence_steps(keys)
     titles = M2.assay_titles(assays)
-    projects = project_index(samples)
     compat = compat_findings(
         attached, steps=steps, registered=registered,
         table=CP.co_registration(membership, assays, nodes),

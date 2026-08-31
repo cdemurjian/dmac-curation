@@ -4,14 +4,15 @@
 # ///
 """The lineage lane's own tests. This file did not exist before this plan.
 
-`mode2.py` is the largest module in the package and generates 167,454 of the
-170,786 rows in `findings.csv`, and until now it was exercised only incidentally
+`mode2.py` is the largest module in the package and generates 167,006 of the
+170,338 rows in `findings.csv`, and until now it was exercised only incidentally
 through `tests/test_assay_hygiene_classify.py`. Both audits of 2026-08-21 noted
 that the one module with no direct test file is where the defects concentrated.
 
-Both figures re-derived 2026-08-21 by counting `mode` over the artifact:
-`csv.DictReader(open('assay-hygiene/findings.csv'))` -> 170,786 rows total,
-`MODE_2` 167,454, `MODE_1` 1,373, blank 1,959.
+Both figures re-derived 2026-08-31 by counting `mode` over a fresh
+`classify.main` run: 170,338 rows total, `MODE_2` 167,006, `MODE_1` 1,373,
+blank 1,959. They read 170,786 / 167,454 until the samples-row refusal of that
+date removed 448 Mode 2 proposals about samples with no `samples` row.
 
 NO LINE COUNT HERE ON PURPOSE. The first revision of this docstring said "806
 lines", which was already wrong at the commit that introduced it, since that
@@ -91,7 +92,8 @@ def _unify(w, bundle, findings, *, order=None, tests=None):
     """
     attached = _attached2(w)
     candidates = M2.mode2_candidates(bundle["children_of"],
-                                     bundle["parents_of"], bundle["registered"])
+                                     bundle["parents_of"], bundle["registered"],
+                                     projects=bundle["projects"])
     population = X.unregistered_samples(w["samples"], w["membership"],
                                         w["assays"])
     keys = X.absence_keys(attached, population=population,
@@ -165,7 +167,9 @@ def test_an_unreachable_lineage_row_is_classified_and_emitted_and_nothing_is_dro
     # keys, so a row silently swapped for another could not pass either.
     assert both == {(int(r.sample_id), int(r.proposed_internal_assay_id))
                     for r in old_unified.itertuples(index=False)}
-    assert len(unified) == len(old_unified) == 27
+    # 26 and not 27 since 2026-08-31: (500,11) proposed for a sample with no
+    # `samples` row and `mode2_candidates` now refuses the pair outright
+    assert len(unified) == len(old_unified) == 26
     # the old rule really did differ -- it put the unreachable key in the
     # ordinary lineage step -- or the comparison above proves nothing
     assert old_steps[(100, 12)] == X.PRE_LINEAGE != steps[(100, 12)]
@@ -174,7 +178,9 @@ def test_an_unreachable_lineage_row_is_classified_and_emitted_and_nothing_is_dro
     # the two steps PARTITION the lane rather than duplicating it, which is what
     # handing one frame to two lane keys has to mean
     by_step = Counter(steps.values())
-    assert by_step[X.PRE_LINEAGE] + by_step[X.PRE_UNREACHABLE] == 27
+    # 26 since 2026-08-31, the lineage half having lost (500,11) with the
+    # rest of the samples-row refusal; the unreachable half is untouched
+    assert by_step[X.PRE_LINEAGE] + by_step[X.PRE_UNREACHABLE] == 26
     # 10 keys and not the 11 unreachable rows the LANE holds: (290, 14) is
     # unreachable AND carries a claim the gate rejected, so `PRE_GATE` takes it
     # and it reaches no row at all. The two numbers differing is the check that
@@ -211,7 +217,7 @@ def test_filling_the_reachability_cell_moves_a_row_between_classes_and_moves_no_
     filled["type_reg"] = dict(bundle["type_reg"]) | {("D.IMG", 12): 1}
     after = M2.mode2_findings(_attached2(w), **filled)
 
-    assert len(after) == len(findings) == 28
+    assert len(after) == len(findings) == 27
     assert list(zip(after.sample_id, after.proposed_internal_assay_id)) == list(
         zip(findings.sample_id, findings.proposed_internal_assay_id))
     moved = _row(after, 100, 12)
@@ -253,7 +259,7 @@ def _pop_over_the_floor(bundle, assay_id):
     entry and the caller can still read the original.
 
     89,263 is the real population of internal assay 74, Tissue Collection, on
-    the 2026-08-21 extract -- 24,470 of the 99,449 unreachable rows propose it
+    the real extract -- 24,338 of the 99,309 unreachable rows propose it
     and not one of the 89,263 is a D.FLOW. That is the shape being reproduced,
     so the number is the real one rather than `FLOOR + 1`.
     """
@@ -317,7 +323,7 @@ def test_an_unreachable_pair_under_a_barely_used_assay_is_a_bootstrap_candidate(
                              findings.proposed_internal_assay_id,
                              findings.type_registrations) if n == 0]
     assert len(differ) == 11 == int((findings.type_registrations == 0).sum())
-    assert len(findings) == 28
+    assert len(findings) == 27
 
 
 def test_an_unreachable_pair_under_a_heavily_used_assay_is_not():
@@ -362,7 +368,7 @@ def test_an_unreachable_pair_under_a_heavily_used_assay_is_not():
             & (findings.proposed_internal_assay_id == 12))
     assert int(pair.sum()) == 8
     assert set(heavy[pair.values].classification) == {S.CLS_UNREACHABLE}
-    assert len(heavy) == len(findings) == 28
+    assert len(heavy) == len(findings) == 27
     pd.testing.assert_frame_equal(heavy[~pair.values].reset_index(drop=True),
                                   findings[~pair].reset_index(drop=True))
 
@@ -390,7 +396,7 @@ def test_the_bootstrap_floor_is_a_reading_order_and_gates_nothing():
     steps, unified = _unify(w, bundle, findings)
     heavy_steps, heavy_unified = _unify(w, bundle, heavy)
     assert steps == heavy_steps
-    assert len(unified) == len(heavy_unified) == 27
+    assert len(unified) == len(heavy_unified) == 26
     claimed = {k for k, s in steps.items() if s == X.PRE_UNREACHABLE}
     for frame in (unified, heavy_unified):
         assert {(int(r.sample_id), int(r.proposed_internal_assay_id))
@@ -518,8 +524,8 @@ def test_a_rule_that_has_never_once_co_registered_is_marked_unsupported():
 
     `proposed_by` IS A PROVENANCE LABEL AND IT IS NOT LYING. `BY_PRECEDENT`
     means a rule on the hop produced the proposal and no gated claim did; it
-    says nothing whatever about what that rule CONTAINS. Measured 2026-08-24
-    over the real extract's 170,786 findings rows, 115,087 of the 166,578
+    says nothing whatever about what that rule CONTAINS. Re-measured 2026-08-31
+    over the real extract's 170,338 findings rows, 114,811 of the 166,130
     `BY_PRECEDENT` rows -- 69.1% -- rest on a rule reading `n_both == 0`, which
     is the house stating it has never once made that co-registration. So a
     curator filtering `proposed_by` for well-supported rows gets, in the
@@ -562,7 +568,7 @@ def test_a_rule_that_has_never_once_co_registered_is_marked_unsupported():
 
     by_precedent = _pairs(findings[findings.proposed_by == X.BY_PRECEDENT])
     supports = _pairs(findings[findings.precedent_supports == True])  # noqa: E712
-    assert len(by_precedent) == len(supports) == 26, (
+    assert len(by_precedent) == len(supports) == 25, (
         "the two counts are equal in this world; if that ever stops being "
         "true the docstring above is what needs correcting, not the sets below")
     assert by_precedent != supports
@@ -592,12 +598,13 @@ def test_every_row_names_the_id_space_its_proposed_assay_lives_in():
     is deliberate and documented -- see `precedent.assay_index` -- and until
     now nothing on the row said which of the two id spaces the value lives in.
 
-    ON THE REAL EXTRACT IT IS 1,321 ROWS OF 170,786, measured 2026-08-24, over
-    8 of the 17 junction-less records. A consumer joining that column against
-    dmac internal ids silently drops those 1,321. One joining against SEEK ids
-    does something worse than come up short: 162,370 of the other 169,465
-    carry an internal id that numerically collides with some seek `assays.id`,
-    so the join SUCCEEDS and returns the WRONG assay, and only 7,095 miss.
+    ON THE REAL EXTRACT IT IS 1,321 ROWS OF 170,338, re-measured 2026-08-31,
+    over 8 of the 17 junction-less records. A consumer joining that column
+    against dmac internal ids silently drops those 1,321. One joining against
+    SEEK ids does something worse than come up short: 161,922 of the other
+    169,017 carry an internal id that numerically collides with some seek
+    `assays.id`, so the join SUCCEEDS and returns the WRONG assay, and only
+    7,095 miss.
     BOTH JOINS ARE SIMULATED HERE BY HAND, so the assertion is a difference
     between two rules rather than a restatement of one.
 
@@ -639,4 +646,4 @@ def test_every_row_names_the_id_space_its_proposed_assay_lives_in():
     seek = {int(a) for a in w["assays"].assay_id}
     on_seek = _pairs(findings[findings.proposed_internal_assay_id.isin(seek)])
     assert on_seek == marked
-    assert len(everything - on_seek) == len(everything) - len(marked) == 27
+    assert len(everything - on_seek) == len(everything) - len(marked) == 26

@@ -161,8 +161,8 @@ def classification_census(findings: pd.DataFrame) -> pd.Series:
     BUILT FROM THE FRAME AND NOT FROM A LIST OF CLASSES THIS MODULE KNOWS
     ABOUT, which is the whole point of it. A report that groups on a fixed
     tuple describes the rows that tuple happens to cover and says nothing about
-    the rest; measured on the 2026-08-21 extract, that omission was 99,449 of
-    170,786 rows -- a majority of the document's subject, absent from it, with
+    the rest; re-measured 2026-08-31, that omission would be 99,309 of
+    170,338 rows -- a majority of the document's subject, absent from it, with
     every printed figure still individually correct.
 
     So the index is whatever `value_counts(dropna=False)` finds, with three
@@ -262,8 +262,8 @@ def _integrity_cell(value) -> tuple[str, str]:
     return f"{int(value):,}", "--"
 
 
-def _lineage_facts(extract_dir) -> tuple[dict, dict]:
-    """-> (ceiling, integrity), both from the functions that DEFINE them.
+def _lineage_facts(extract_dir) -> tuple[dict, dict, dict]:
+    """-> (ceiling, integrity, refused), all from the functions that DEFINE them.
 
     `mode2_ceiling` and `lineage_index` are called again here rather than
     having their results threaded out of `classify.main`, which is the one
@@ -276,6 +276,22 @@ def _lineage_facts(extract_dir) -> tuple[dict, dict]:
     4 reconciled the two disagreeing ceiling readings onto. Dropping the 17
     junction-less assays' registrations gives 54,780 / 116,365 instead of
     55,007 / 117,463, and both are arithmetically correct.
+
+    `refused` IS THE THIRD RETURN BECAUSE THE REPORT CANNOT RECOVER IT FROM THE
+    ARTIFACTS. Every other figure this module publishes is counted off a csv
+    that is on disk; the refused pairs are precisely the rows NOT on it, and
+    "how many proposals were dropped" is unanswerable from a file of the ones
+    that were kept. It is `{"rows", "samples"}`, off
+    `mode2.candidates_without_a_samples_row` -- the same function
+    `classify.main` refuses with -- so the report and the run cannot hold two
+    opinions about how many were dropped. 448 rows over 185 samples on the
+    2026-08-21 extract.
+
+    THE CEILING IS UNGATED AND STAYS SO, which is why these are two returns and
+    not one adjusted number: `mode2_ceiling` measures what the lineage graph
+    OFFERS, the refusal is a decision taken afterwards, and the report prints
+    them side by side so a reader can subtract rather than be handed a
+    difference nobody named.
     """
     d = Path(extract_dir)
     samples = pd.read_parquet(d / "samples.parquet")
@@ -285,7 +301,13 @@ def _lineage_facts(extract_dir) -> tuple[dict, dict]:
     children_of, parents_of, _uuid_of, integrity = L.lineage_index(
         edges, samples, membership)
     registered = A.registered_internal(membership, assays)
-    return L.mode2_ceiling(children_of, parents_of, registered), integrity
+    dropped = M2.candidates_without_a_samples_row(
+        children_of, parents_of, registered, projects=X.project_index(samples))
+    return (
+        L.mode2_ceiling(children_of, parents_of, registered),
+        integrity,
+        {"rows": len(dropped), "samples": len({s for s, _ in dropped})},
+    )
 
 
 def _ceiling_from(extract_dir) -> dict:
@@ -381,9 +403,9 @@ def _term_contrast_note(findings: pd.DataFrame) -> list[str]:
     fourth on the same argument: it is a cut through the third, so leaving it
     out would reopen exactly the shortfall the third column closed.
 
-    ON THE 2026-08-21 ARTIFACTS THE CHANGE MOVES NOTHING, AND THAT IS A FACT
-    ABOUT THE GATE RATHER THAN A REASON TO SKIP IT. Measured on that run, 0 of
-    the 99,449 `CLS_UNREACHABLE` rows carry a `raw_value` at all -- a claim on a
+    ON THE REAL ARTIFACTS THE CHANGE MOVES NOTHING, AND THAT IS A FACT
+    ABOUT THE GATE RATHER THAN A REASON TO SKIP IT. Re-measured 2026-08-31, 0 of
+    the 90,338 `CLS_UNREACHABLE` rows carry a `raw_value` at all -- a claim on a
     pair with no registrations is `GATE_UNREACHABLE`, which blocks, so `PRE_GATE`
     takes such a key before `PRE_UNREACHABLE` is reached -- and this function
     groups only rows that have a term. The exemplar it finds is the same one it
@@ -552,12 +574,57 @@ def cohort_table(findings: pd.DataFrame) -> pd.DataFrame:
     return out[COHORT_COLUMNS].reset_index(drop=True)
 
 
+def _refused_lines(refused: dict | None) -> list[str]:
+    """The samples-row refusal, as prose. `None` says it was not measured.
+
+    THE ONE POPULATION THIS REPORT CANNOT COUNT OFF AN ARTIFACT, because it is
+    exactly the rows no artifact holds. `findings.csv` carries what was kept;
+    "how many were dropped and why" has to be threaded in from the function that
+    dropped them, which is `mode2.candidates_without_a_samples_row` via
+    `_lineage_facts`. A proposal that vanishes reads to a curator exactly like
+    one that was never generated, so it is published even at zero.
+
+    `None` IS NOT ZERO AND IS RENDERED AS ITSELF. `build_report` is called
+    directly by tests with no `refused` argument, and a report that printed "0
+    refused" for a run that never measured the refusal would be stating a clean
+    result it does not have.
+
+    UNBOLDED, DELIBERATELY. Bolding is this report's convention for a headline
+    count that `test_every_bolded_integer_in_the_prose_is_a_number_the_artifacts_
+    hold` can re-derive from the csvs or the ceiling, and by construction these
+    two are in neither. They are a qualifier ON the ceiling table above rather
+    than a figure of its own, and they sit immediately under it for that reason.
+    """
+    if refused is None:
+        return ["This run did not measure the samples-row refusal, so this "
+                "section reports NOTHING rather than zero."]
+    return [
+        f"{refused['rows']:,} of the ceiling's pairs, over "
+        f"{refused['samples']:,} samples, were REFUSED before any mode ran "
+        "and appear in no row of `findings.csv`. The sample each one proposes "
+        "for has NO row in the `samples` extract: it exists as a graph node and "
+        "in the membership table, and MySQL has no record of it. There is "
+        "nothing to register, no project to write into and no metadata a "
+        "curator could rule on, so the proposal is refused rather than shown.",
+        "",
+        "Those samples remain available as lineage NEIGHBOURS. The refusal is "
+        "on the SUBJECT of a proposal and never on its evidence, so a proposal "
+        "about a sample that DOES exist still rests on their registrations.",
+        "",
+        "The ceiling above is deliberately not reduced by this number. It "
+        "counts what the lineage graph offers, before any decision; the "
+        "refusal is a decision, so it is reported beside the ceiling rather "
+        "than subtracted from it in silence.",
+    ]
+
+
 def build_report(findings: pd.DataFrame,
                  disposition: pd.DataFrame,
                  defects: pd.DataFrame,
                  *,
                  ceiling: dict,
                  integrity: dict,
+                 refused: dict | None = None,
                  out_dir: str | None = None,
                  top_patterns: int = 15) -> str:
     """The operator report. Pure formatting over frames already on disk.
@@ -842,6 +909,10 @@ def build_report(findings: pd.DataFrame,
         "Mode 1's population, and it should: a sample registered nowhere has a",
         "gap wherever a neighbour holds something.",
         "",
+        "#### What the ceiling offered and this run REFUSED",
+        "",
+    ] + _refused_lines(refused) + [
+        "",
     ]
     if n_findings:
         # BOTH LINEAGE CLASSES COME OFF THE CEILING, and subtracting only the
@@ -860,7 +931,16 @@ def build_report(findings: pd.DataFrame,
         # readings coincide today -- a Mode 1 row carries no classification at
         # all -- and the ceiling is the one that would still be right if they
         # ever stopped coinciding.
+        # THE GAP HAS THREE TERMS SINCE 2026-08-31 AND THE SENTENCE NAMES ALL
+        # THREE. It read "exactly the rows the gate refused plus the rows Mode 1
+        # claimed first" while `mode2_candidates` was refusing 448 more, which
+        # made the word "exactly" false by that many -- the same failure this
+        # paragraph already carries a comment about, one term further on. The
+        # refused count is threaded in rather than derived by subtraction, so
+        # the sentence states the terms it has instead of asserting that the
+        # ones it names add up.
         gap = int(ceiling["union_rows"]) - lineage_derived
+        refused_rows = None if refused is None else int(refused["rows"])
         lines += [
             "**The ceiling is not what was emitted, and the gap is the point of",
             "the word.** The union above is "
@@ -869,12 +949,16 @@ def build_report(findings: pd.DataFrame,
             f"{lineage_rows:,} on a pair samples of the type do hold elsewhere "
             f"and {unreachable_rows:,} on a pair none of them ever has -- so "
             f"{gap:,} of the ceiling reached no",
-            "finding. That difference is exactly the rows the vocabulary gate",
-            "refused plus the rows Mode 1 claimed first -- a key the gate",
-            "rejects reaches NO mode even where a neighbour carries the pair,",
-            "which is the third design error reversed. The run prints the split",
-            "as `lineage_refused_by_the_gate` and `lineage_taken_by_mode_1`;",
-            "it is not re-derived here, because a second derivation of a figure",
+            "finding. That difference is three things and not two: the rows",
+            "refused for having no `samples` row"
+            + ("" if refused_rows is None else f" ({refused_rows:,})")
+            + ", counted in the subsection",
+            "above; plus the rows the vocabulary gate refused; plus the rows",
+            "Mode 1 claimed first -- a key the gate rejects reaches NO mode even",
+            "where a neighbour carries the pair, which is the third design error",
+            "reversed. The run prints the last two as",
+            "`lineage_refused_by_the_gate` and `lineage_taken_by_mode_1`;",
+            "neither is re-derived here, because a second derivation of a figure",
             "the census already owns is how this package published two",
             "irreconcilable ceilings in the first place.",
             "",
@@ -884,8 +968,8 @@ def build_report(findings: pd.DataFrame,
     # `CLS_ABSENCE_LINEAGE` alone. `precedent_survival` keys on `action`, so a
     # row with no direction cannot enter the curve whatever is handed in --
     # which means the filter was never what SELECTED the population, only what
-    # SHRANK it. On the 2026-08-21 extract it shrank a 167,347-row curve to
-    # 67,898 under a heading naming neither number.
+    # SHRANK it. Re-measured 2026-08-31 it would shrink a 166,899-row curve to
+    # 67,590 under a heading naming neither number.
     directioned = findings[
         findings.action.isin((S.A_ADD_PARENT, S.A_ADD_CHILD))] \
         if n_findings else findings
@@ -1098,7 +1182,7 @@ def main(extract_dir: str = "assay-hygiene/extract",
     findings = pd.read_csv(out / "findings.csv", low_memory=False)
     disposition = pd.read_csv(out / "mode3-disposition.csv")
     defects = pd.read_csv(out / "vocabulary-defects.csv")
-    ceiling, integrity = _lineage_facts(d)
+    ceiling, integrity, refused = _lineage_facts(d)
 
     cohort_table(findings).to_csv(out / COHORTS_NAME, index=False)
     # THE SHEET IS BUILT FROM THIS FRAME, NOT FROM THE CSV IT CAME OUT OF.
@@ -1109,7 +1193,7 @@ def main(extract_dir: str = "assay-hygiene/extract",
     RV.write_review(findings, RV.load_context(d), out)
     report = build_report(findings, disposition, defects,
                           ceiling=ceiling, integrity=integrity,
-                          out_dir=out_dir)
+                          refused=refused, out_dir=out_dir)
     (out / REPORT_NAME).write_text(report)
     print(f"\nwrote {out / REPORT_NAME} over {len(findings):,} finding(s), "
           f"{len(disposition):,} re-disposed flag(s) and {len(defects):,} "

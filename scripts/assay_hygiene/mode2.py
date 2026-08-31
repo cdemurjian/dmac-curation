@@ -166,11 +166,20 @@ SURVIVAL_COLUMNS = ["threshold", "action", "rows", "samples", "rule_groups",
 # (type, assay) pair from nothing. The remaining keys describe the mode's own
 # bookkeeping and are totals, each printed beside the split above it.
 #
-# TWO IDENTITIES HOLD OVER THEM and a test asserts both, plus two more against
+# TWO IDENTITIES HOLD OVER THEM and a test asserts both, plus three more against
 # `lineage.mode2_ceiling`, which counts the same population by a different route:
 #
 #     rows = rows_add_parent + rows_add_child
 #     rows = rows_with_precedent + rows_without_precedent
+#     rows    + rows_refused_without_a_samples_row    = ceiling union_rows
+#     samples + samples_refused_without_a_samples_row = ceiling union_samples
+#
+# THE THIRD IS WHAT KEEPS THE REFUSAL HONEST. `mode2_ceiling` counts what the
+# lineage graph OFFERS and applies no gate -- it says so in its own docstring and
+# it stays that way -- so the pairs `mode2_candidates` refuses have to reconcile
+# through a named key rather than by the ceiling quietly shrinking in step with
+# the lane. A refusal that moved both numbers at once would be invisible in
+# exactly the artifact that is supposed to report it.
 #
 # `rows_with_a_blocked_claim` OVERLAPS `rows` minus the ACCEPTED-CLAIM ROWS --
 # `rows_proposed_by_both` plus `rows_proposed_by_claim_no_rule`, the pair named
@@ -222,7 +231,25 @@ MODE2_CENSUS_KEYS = (
     "rows_on_a_sample_registered_nowhere",
     "samples_registered_nowhere",
     "rows_without_a_sample_type",
-    "rows_without_a_samples_row",
+    # THE THREE SAMPLES-ROW KEYS, AND THE FIRST ONE IS THE ALARM. Until
+    # 2026-08-31 there was one key here, `rows_without_a_samples_row`, and it
+    # read 448 on the real extract: 448 EMITTED proposals about samples with no
+    # row in the MySQL `samples` extract. The signal existed and nothing acted
+    # on it, and an operator ruled APPROVE on 179 of them. `mode2_candidates`
+    # now refuses those pairs, so the emitted count is 0 BY CONSTRUCTION and
+    # stays in the census at 0 -- printed, like every zero this package reports,
+    # because a population shown only when it is nonzero reads on a clean run
+    # exactly like one that was never measured. It is the gate's own alarm: it
+    # can only go non-zero if the refusal stops working.
+    #
+    # The two `refused` keys carry what the first one used to. They are RENAMED
+    # rather than repurposed in place: a key that keeps its name while its
+    # meaning inverts -- from "emitted" to "refused" -- would make every reading
+    # of the old number, in every report and docstring that quotes 448, silently
+    # wrong.
+    "rows_emitted_without_a_samples_row",
+    "rows_refused_without_a_samples_row",
+    "samples_refused_without_a_samples_row",
 )
 
 
@@ -463,12 +490,40 @@ def precedent_rules(precedent: pd.DataFrame) -> dict[tuple, Rule]:
     return out
 
 
-def mode2_candidates(
+def _offered_pairs(
     children_of: dict[int, frozenset[int]],
     parents_of: dict[int, frozenset[int]],
     registered: dict[int, set[int]],
 ) -> list[tuple[int, int]]:
-    """Every (sample, assay) a lineage neighbour makes available. THE CEILING.
+    """Every (sample, assay) a lineage neighbour makes available, ungated.
+
+    THE ONE ENUMERATION. `mode2_candidates` and
+    `candidates_without_a_samples_row` are the two halves of this list and both
+    read it here, so "what the lineage graph offers" has a single definition and
+    the kept half plus the refused half is the whole of it by construction
+    rather than by a second walk that could disagree.
+    """
+    out: dict[tuple[int, int], None] = {}
+    empty: frozenset[int] = frozenset()
+    nothing: set[int] = set()
+    for sample_id in dict.fromkeys(list(children_of) + list(parents_of)):
+        have = registered.get(sample_id, nothing)
+        for neighbour in (list(children_of.get(sample_id, empty))
+                          + list(parents_of.get(sample_id, empty))):
+            for assay_id in registered.get(neighbour, nothing):
+                if assay_id not in have:
+                    out[(sample_id, assay_id)] = None
+    return list(out)
+
+
+def mode2_candidates(
+    children_of: dict[int, frozenset[int]],
+    parents_of: dict[int, frozenset[int]],
+    registered: dict[int, set[int]],
+    *,
+    projects: dict[int, str],
+) -> list[tuple[int, int]]:
+    """Every (sample, assay) a lineage neighbour offers FOR A SAMPLE THAT EXISTS.
 
     ONE ENTRY PER (SAMPLE, ASSAY) AND NEVER PER EDGE OR PER NEIGHBOUR, because
     the proposal is a membership row: adding sample S to assay X is one write
@@ -478,10 +533,58 @@ def mode2_candidates(
     extract -- as the size of the proposal set.
 
     A CEILING AND NOT A FORECAST, and the word must accompany the number
-    everywhere. Nothing here consults precedent, the vocabulary or the gate.
-    Measured 2026-08-17 over `DERIVED_FROM`: 172,338 pairs over 115,626 samples,
+    everywhere. Nothing here consults precedent or the vocabulary. Measured
+    2026-08-17 over `DERIVED_FROM`: 172,338 pairs over 115,626 samples offered,
     which `lineage.mode2_ceiling` counts independently and which a test
     reconciles against this list.
+
+    THE ONE THING IT DOES REFUSE, since 2026-08-31: A SAMPLE WITH NO `samples`
+    ROW. 448 of those 172,338 pairs, over 185 samples, propose registering a
+    sample_id that exists as a Neo4j node and in `membership` and has NO row in
+    the MySQL `samples` extract at all. There is nothing to register: the write
+    target cannot be resolved, the sample carries no metadata, and an operator
+    ruling on the proposal is ruling about a record they cannot look up. On the
+    2026-08-27 extract 270 node sample_ids are in this state (neither their
+    sample_id nor their uuid appears in `samples.parquet`, so it is not id
+    drift) and the operator ruled APPROVE on 179 proposals resting on them.
+    They were stopped at the far end of the pipeline by `resolve_targets`'
+    project gate, under the reason "sample belongs to no project" -- true, but a
+    much milder statement than "there is no such sample", and reached by
+    accident rather than by rule.
+
+    THE GATE IS ON THE SUBJECT AND NEVER ON THE EVIDENCE, and that is why it
+    lives here rather than in `lineage.lineage_index`. That index KEEPS the 243
+    edge endpoints with no `samples` row on purpose -- 182 of them are
+    registered, so each can settle a real absence for a NEIGHBOUR that does
+    exist, and resolving edges through `samples` would answer LIN_NONE for those
+    neighbours with the loss showing up in no artifact. Removing them from the
+    index would take the evidence with the proposal. Here only the sample the
+    row is ABOUT is tested, so a neighbour with no `samples` row still supports
+    every proposal it did before.
+
+    AND IT IS THE EARLIEST PLACE THE ANSWER EXISTS FOR MODE 2. This function is
+    the single definition of the lane's population: `mode2_findings` calls it
+    to build its rows and `classify.main` calls it again to feed
+    `absence_keys`, so one refusal here reaches the emitted frame AND the
+    precedence, and `unify_findings`' partition assertion -- every key the
+    precedence granted a lane reaches exactly one row -- stays true. Gating in
+    `mode2_findings` alone would break it.
+
+    `projects` IS THE TEST, and it is `classify.project_index`'s own output --
+    the same object `mode2_findings` writes `project_ids` out of. Its keys are
+    exactly the sample_ids the `samples` frame carries: `project_index` emits an
+    entry for every row of that frame and the EMPTY STRING where the projects
+    are null, so absence from this dict means "no `samples` row" and can mean
+    nothing else. Passing a separately-derived `known_samples` set would put the
+    gate and the column it protects on two objects one edit away from
+    disagreeing; passing this one makes a null `project_ids` on an emitted row
+    impossible by construction, which is what
+    `rows_emitted_without_a_samples_row` then asserts every run.
+
+    KEYWORD-ONLY AND WITHOUT A DEFAULT, for the reason `mode2_findings` gives
+    about `assay_pop`: an empty dict is a LEGAL projects index -- a world whose
+    samples frame is empty -- so a default would refuse every pair and return
+    nothing, silently, which reads exactly like a lineage graph with no edges.
 
     IN ARRIVAL ORDER, deduplicated, and NOT sorted. The order follows
     `lineage_index`'s dicts, which follow the edge frame, whose row order is not
@@ -500,17 +603,38 @@ def mode2_candidates(
     where Mode 1's population and Mode 2's overlap: 2,405 of Mode 1's 6,242 reach
     a Mode 2 row, 2.1% of each direction's samples.
     """
-    out: dict[tuple[int, int], None] = {}
-    empty: frozenset[int] = frozenset()
-    nothing: set[int] = set()
-    for sample_id in dict.fromkeys(list(children_of) + list(parents_of)):
-        have = registered.get(sample_id, nothing)
-        for neighbour in (list(children_of.get(sample_id, empty))
-                          + list(parents_of.get(sample_id, empty))):
-            for assay_id in registered.get(neighbour, nothing):
-                if assay_id not in have:
-                    out[(sample_id, assay_id)] = None
-    return list(out)
+    return [pair for pair in _offered_pairs(children_of, parents_of, registered)
+            if pair[0] in projects]
+
+
+def candidates_without_a_samples_row(
+    children_of: dict[int, frozenset[int]],
+    parents_of: dict[int, frozenset[int]],
+    registered: dict[int, set[int]],
+    *,
+    projects: dict[int, str],
+) -> list[tuple[int, int]]:
+    """The pairs `mode2_candidates` refuses. Its exact complement.
+
+    NOTHING IS DROPPED SILENTLY, which is this package's strongest convention:
+    a proposal that vanishes reads to a curator exactly like one that was never
+    generated. `mode2_census` counts this list into
+    `rows_refused_without_a_samples_row` and
+    `samples_refused_without_a_samples_row`, `classify.main` prints both, and
+    `run_detect` publishes them beside the ceiling they came out of.
+
+    THE COMPLEMENT AND NOT A RE-DERIVATION. Both halves filter one
+    `_offered_pairs` walk on one predicate, so `len(mode2_candidates(...)) +
+    len(candidates_without_a_samples_row(...))` is the offered total by
+    construction. A second walk with the predicate negated by hand is the shape
+    that reports a refusal count which does not reconcile with what was kept.
+
+    Same arguments, same order, same arrival order as `mode2_candidates`: two
+    functions over one enumeration should not need two calling conventions.
+    """
+    return [pair for pair in _offered_pairs(children_of, parents_of, registered)
+            if pair[0] not in projects]
+
 
 def _mode2_summary(
     action: str, relation: str, neighbour_uuid: str, n_supports: int,
@@ -731,10 +855,13 @@ def mode2_findings(
     ONE ROW PER (SAMPLE, ASSAY), INCLUDING A PAIR REACHABLE BOTH WAYS. Adding a
     sample to an assay is one membership write whichever neighbour argues for it,
     so 132 pairs on the real extract that qualify in both directions are emitted
-    once, as `A_ADD_PARENT`, the corroborated direction -- and that, exactly, is
-    why the emitted ADD_CHILD count (117,331) is smaller than the ceiling's
-    (117,463). `lineage_n_supports` records how many neighbours there were, so
-    the collapse hides nothing.
+    once, as `A_ADD_PARENT`, the corroborated direction -- which is one of the
+    two reasons the emitted ADD_CHILD count (117,026) is smaller than the
+    ceiling's (117,463). The other is the samples-row refusal, 305 ADD_CHILD
+    pairs of its 448; see `mode2_candidates`. 117,463 - 132 - 305 = 117,026, and
+    a test asserts that three-term identity rather than the two-term one it read
+    until 2026-08-31. `lineage_n_supports` records how many neighbours there
+    were, so the collapse hides nothing.
 
     THE RULE KEY IS ALL FOUR COMPONENTS and its PROJECT comes from the
     neighbour's own registration, through `registration_projects`. A
@@ -806,8 +933,15 @@ def mode2_findings(
             blocked_pairs.add(pair)
 
     rows = []
+    # `projects` IS THE SAMPLES-ROW GATE as well as the source of the
+    # `project_ids` column, and handing the same object to both is deliberate.
+    # See `mode2_candidates`: a pair whose SUBJECT has no `samples` row is
+    # refused there and counted by `candidates_without_a_samples_row`, so no row
+    # below can read a missing key -- while a NEIGHBOUR with no `samples` row
+    # still supports every proposal it did before.
     for sample_id, assay_id in mode2_candidates(children_of, parents_of,
-                                                registered):
+                                                registered,
+                                                projects=projects):
         relation, neighbour, neighbour_uuid = L.neighbour_registers(
             sample_id, assay_id, children_of, parents_of, uuid_of, registered)
         kids, rents = L.lineage_supports(
@@ -885,8 +1019,15 @@ def mode2_findings(
             # the 243 unresolved endpoints, 182 of them registered
             "uuid": uuid_of.get(sample_id),
             "sample_type": sample_type,
-            # NULL and not "" for the 185 candidate samples with no `samples`
-            # row: their projects were never read, where "" means read and none
+            # STILL `.get` WITH NO DEFAULT, AND THAT IS NOW AN ALARM RATHER
+            # THAN A VALUE. `mode2_candidates` refuses every pair whose sample
+            # is absent from this very dict, so a null here is unreachable --
+            # and if it ever becomes reachable again the census key
+            # `rows_emitted_without_a_samples_row` goes non-zero and says so,
+            # every run. A `""` default would make that failure invisible by
+            # spelling it "measured, and none", which is Mode 1's statement and
+            # not this lane's. It read NULL for 448 rows over 185 samples until
+            # 2026-08-31; see `mode2_candidates` for what those rows were.
             "project_ids": projects.get(sample_id),
             "registered_internal_assay_ids": reg_ids,
             "registered_internal_assay_titles": reg_titles,
@@ -973,8 +1114,22 @@ def mode2_census(
     findings: pd.DataFrame,
     ceiling: dict[str, int],
     attached: pd.DataFrame,
+    *,
+    refused: list[tuple[int, int]],
 ) -> dict[str, int]:
     """Where every Mode 2 proposal sits. See `MODE2_CENSUS_KEYS`.
+
+    `refused` IS `candidates_without_a_samples_row`'s OUTPUT, taken and not
+    re-derived, and it is the one population this census reports that is NOT in
+    `findings` -- because the whole point of it is that those rows are not.
+    It is the PAIR LIST rather than a count so the census can report both grains
+    off one object: 448 rows over 185 samples on the real extract, and a
+    proposal count quoted without its sample count is this project's signature
+    defect. It is required and keyword-only for the reason `mode2_findings`
+    gives about `assay_pop`: an empty list is a LEGAL value -- an extract in
+    which every edge endpoint has a `samples` row -- so a default would report a
+    clean run wherever a caller forgot the argument, which is precisely the
+    reading a curator would act on.
 
     `ceiling` is `lineage.mode2_ceiling`'s output, taken rather than re-derived,
     and it is a CROSS-CHECK and not a source: it counts the same population by a
@@ -1038,7 +1193,16 @@ def mode2_census(
         "rows_on_a_sample_registered_nowhere": len(nowhere),
         "samples_registered_nowhere": nowhere.sample_id.nunique(),
         "rows_without_a_sample_type": int(findings.sample_type.isna().sum()),
-        "rows_without_a_samples_row": int(findings.project_ids.isna().sum()),
+        # THE ALARM, read off the EMITTED frame and never off `refused`. It is
+        # 0 by construction -- `mode2_candidates` refuses exactly the samples
+        # `mode2_findings` would read a null for, off the same `projects` dict
+        # -- so a non-zero here means the gate stopped working, and the only
+        # way to see that is to keep measuring the frame rather than restating
+        # the refusal.
+        "rows_emitted_without_a_samples_row": int(
+            findings.project_ids.isna().sum()),
+        "rows_refused_without_a_samples_row": len(refused),
+        "samples_refused_without_a_samples_row": len({s for s, _ in refused}),
     }
     assert set(out) == set(MODE2_CENSUS_KEYS), "MODE2_CENSUS_KEYS is out of date"
     return {k: int(v) for k, v in out.items()}
@@ -1056,11 +1220,14 @@ def precedent_survival(
     autonomous write for it to gate. `mode2_findings` never reads
     `SURVIVAL_THRESHOLDS`, and a test asserts that off the source.
 
-    THE TWO DIRECTIONS ARE NEVER POOLED, at any threshold. Measured 2026-08-17 at
-    `rate >= 0.5`: 8,170 ADD_PARENT rows survive of 55,007, and 2,067 ADD_CHILD
-    of 117,331 -- so the weak direction is cut to 1.8% of its ceiling and the
-    strong one to 14.9%. One combined figure would present the mirror as carrying
-    the evidence of the direction that is corroborated 88 times out of 88.
+    THE TWO DIRECTIONS ARE NEVER POOLED, at any threshold. Re-measured 2026-08-31
+    at `rate >= 0.5`: 8,168 ADD_PARENT rows survive of 54,864, and 2,032
+    ADD_CHILD of 117,026 -- so the weak direction is cut to 1.7% of the rows
+    emitted in it and the strong one to 14.9%. One combined figure would present
+    the mirror as carrying the evidence of the direction that is corroborated 88
+    times out of 88. (It read 8,170 of 55,007 and 2,067 of 117,331 until the
+    samples-row refusal of 2026-08-31, and the denominators are EMITTED rows and
+    not the ceiling -- a distinction this sentence got wrong for one round.)
 
     A ROW WITH NO MEASURED RATE SURVIVES NOTHING, INCLUDING THRESHOLD 0.0, which
     is why 0.0 is in the default list: it is where absent evidence visibly fails

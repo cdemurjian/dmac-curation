@@ -334,13 +334,23 @@ def build_dossiers(findings: pd.DataFrame, context: dict,
                 # seek id, so those cannot be written whatever anyone rules --
                 # said in words here rather than left as an empty list, which
                 # reads as "not looked up".
-                # THREE STATES, NEVER TWO. `project_ids` is null on some
-                # findings rows -- the sample is absent from samples.parquet, as
-                # the 448 `rows_without_a_samples_row` in the detect census --
-                # and an empty project set finds no seek record, which the first
-                # cut reported as NOT WRITABLE. That is an absence rendered as a
-                # verdict, and two round-3 agents rejected real cohorts on it.
-                # "I cannot tell" is its own answer here as everywhere else.
+                # THREE STATES, NEVER TWO. An empty project set finds no seek
+                # record, which the first cut reported as NOT WRITABLE. That is
+                # an absence rendered as a verdict, and two round-3 agents
+                # rejected real cohorts on it. "I cannot tell" is its own answer
+                # here as everywhere else.
+                #
+                # `project_ids` USED TO BE NULL ON SOME FINDINGS ROWS -- the
+                # sample absent from samples.parquet, the 448 the detect census
+                # then reported as `rows_without_a_samples_row`. Since
+                # 2026-08-31 `mode2.mode2_candidates` refuses those pairs
+                # outright and the census key is
+                # `rows_emitted_without_a_samples_row`, pinned at 0. This branch
+                # therefore now runs only on a sample that HAS a `samples` row
+                # and simply belongs to no project -- 435 such rows on the RUN2
+                # extract, a real and different population -- so the three
+                # states are still three and the null is no longer one of the
+                # ways to reach the middle one.
                 "IS_WRITABLE_IN_THIS_PROJECT": (
                     None if assays is None or not projs
                     else bool(seek_records(assays, iaid, projs))),

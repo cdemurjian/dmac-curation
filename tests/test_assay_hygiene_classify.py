@@ -1153,9 +1153,9 @@ def _world2():
         1, 2, 3    TIS in 11        6, 7    TIS in 12        9    TIS in 13
         4, 5       PAV in 13        8       D.IMG in 11
 
-    The SIXTEEN edges and the TWENTY-EIGHT proposals they produce. `->` is
-    `child -> parent`, and the assay in parentheses is what each endpoint holds.
-    Both counts are re-derived by
+    The SIXTEEN edges, the TWENTY-EIGHT proposals they OFFER and the
+    TWENTY-SEVEN emitted. `->` is `child -> parent`, and the assay in
+    parentheses is what each endpoint holds. All three counts are re-derived by
     `test_the_fixture_world_carries_exactly_the_populations_its_docstring_states`,
     which reads them off the world rather than trusting this sentence.
 
@@ -1174,7 +1174,7 @@ def _world2():
         E12  110 D.IMG(13) -> 210 TIS(12)    (210,13) ADD_PARENT  (110,12) ADD_CHILD
         E13  210 TIS(12)   -> 310 PAV(13)    (310,12) ADD_PARENT  (210,13) 2nd support
         E14  130 D.IMG(490)-> 430 TIS(12)    (430,490) ADD_PARENT (130,12) ADD_CHILD
-        E15  501 D.IMG(11) -> 500 TIS(12)    (500,11) ADD_PARENT  (501,12) ADD_CHILD
+        E15  501 D.IMG(11) -> 500 TIS(12)    (500,11) REFUSED     (501,12) ADD_CHILD
         E16  600 D.IMG(11*)-> 610 TIS(12)    (610,11) ADD_PARENT  (600,12) ADD_CHILD
 
     `11*` is internal assay 11 reached through the PROJECT 40 seek record rather
@@ -1210,10 +1210,18 @@ def _world2():
       (430,490) the rule key's PROJECT is 20, because 130's registration is
                 through the junction-less assay. The world also carries a decoy
                 rule at project 10 for the same hop and assay.
-      (500,11)  500 has no row in the `samples` frame, the shape of the real
-                extract's 185 candidate samples. Its `project_ids` is NULL --
-                not measured -- where Mode 1's empty string means measured and
-                none.
+      (500,11)  REFUSED AND NOT EMITTED since 2026-08-31. 500 has no row in the
+                `samples` frame, the shape of the real extract's 185 candidate
+                samples carrying 448 rows, so there is nothing to register and
+                no metadata a curator could rule on. `mode2_candidates` drops
+                the pair and `mode2_census` reports it as
+                `rows_refused_without_a_samples_row`. It used to be emitted
+                carrying a NULL `project_ids` -- not measured -- where Mode 1's
+                empty string means measured and none; that null is now
+                unreachable and `rows_emitted_without_a_samples_row` says so.
+      (501,12)  THE OTHER HALF OF E15, AND IT SURVIVES. 501 exists and its
+                proposal rests on 500's registration, so the refusal above is on
+                the SUBJECT of a proposal and never on its evidence.
       (610,11)  the rule key's PROJECT again, this time where it is the ONLY
                 component in dispute. 600 holds internal assay 11 through the
                 project-40 seek record alone, so the hop keys
@@ -1261,17 +1269,17 @@ def _world2():
 
     The census, hand-traced off the table above:
 
-        rows                                28
-        samples                             26
-        rows_add_parent                     12   200,330,340,350,360,380,390,
-                                                 210,310,430,500,610
-        samples_add_parent                  12
+        rows                                27
+        samples                             25
+        rows_add_parent                     11   200,330,340,350,360,380,390,
+                                                 210,310,430,610
+        samples_add_parent                  11
         rows_add_child                      16   100,103,230,240,250,260,170,
                                                  280x2,290,295x2,110,130,501,600
         samples_add_child                   14
         rows_reachable_both_ways             1   (210,13)
         rows_with_multiple_supports          2   (200,11) and (210,13)
-        rows_with_precedent                 27
+        rows_with_precedent                 26
         rows_without_precedent               1   (360,11)
         rows_proposed_by_both                1   (280,13)
         rows_proposed_by_claim_no_rule       0   no claim rides a rule-less hop
@@ -1286,20 +1294,26 @@ def _world2():
         rows_on_a_sample_registered_nowhere  2   (295,12) and (295,13)
         samples_registered_nowhere           1   295
         rows_without_a_sample_type           0
-        rows_without_a_samples_row           1   (500,11)
+        rows_emitted_without_a_samples_row   0   by construction
+        rows_refused_without_a_samples_row   1   (500,11)
+        samples_refused_without_a_samples_row 1  500
 
     And against `lineage.mode2_ceiling`, which counts the same world by another
-    route: `add_parent_rows` 12, `add_child_rows` 17, `union_rows` 28,
-    `union_samples` 26, `both_directions` 1. The ceiling's ADD_CHILD is ONE
-    larger than the emitted one, and (210,13) is that one.
+    route and applies NO gate: `add_parent_rows` 12, `add_child_rows` 17,
+    `union_rows` 28, `union_samples` 26, `both_directions` 1. TWO differences
+    separate it from the emitted frame and both are named keys. The ceiling's
+    ADD_CHILD is ONE larger because it counts (210,13) once per direction where
+    the frame emits it once. And its ADD_PARENT is ONE larger because (500,11)
+    is refused: 27 emitted + 1 refused = 28 offered.
 
     The two unseen-pair counts are 1 and 10 rather than 0 and n, deliberately: a
     direction split where one side is empty cannot show that the split is being
-    made. Measured on the real extract they are 55.4% and 62.4%.
+    made. Re-measured on the real extract 2026-08-31 they are 55.6% and 62.4%.
 
     THE EDGES ARRIVE IN NEITHER SORT ORDER, so the emitted sort has work to do.
-    E15 is last and carries sample 500, and 280's two proposals are reached as
-    13 then 11 because 380's registrations are read in membership order.
+    E15 is last and carries samples 500 and 501, and 280's two proposals are
+    reached as 13 then 11 because 380's registrations are read in membership
+    order.
     """
     nodes, membership, samples, edges = [], [], [], []
     known: dict[int, str] = {}
@@ -1356,7 +1370,8 @@ def _world2():
     add(130, "D.IMG", [JUNCTIONLESS_SEEK_ID])
     add(430, "TIS", [12 + SEEK_OFFSET])
     # registered, edged, and ABSENT from the samples frame: 185 such samples
-    # carry 448 of the real extract's candidate rows
+    # carry 448 of the real extract's candidate rows, and since 2026-08-31 every
+    # one of those rows is REFUSED. 500 stays in the world as 501's neighbour.
     add(500, "TIS", [12 + SEEK_OFFSET], in_samples=False)
     add(501, "D.IMG", [11 + SEEK_OFFSET])
     # internal assay 11 through the PROJECT 40 seek record, and only that one, so
@@ -1539,12 +1554,17 @@ def _row(findings, sample_id, assay_id):
 
 
 def _census2(w, bundle, findings):
-    """The Mode 2 census over a world, so no test rebuilds the two extra inputs."""
+    """The Mode 2 census over a world, so no test rebuilds the three extra inputs."""
     return M2.mode2_census(
         findings,
         L.mode2_ceiling(bundle["children_of"], bundle["parents_of"],
                         bundle["registered"]),
-        _attached2(w))
+        _attached2(w),
+        # off the SAME `projects` the lane gated on, or the census would report
+        # a refusal the frame did not make
+        refused=M2.candidates_without_a_samples_row(
+            bundle["children_of"], bundle["parents_of"], bundle["registered"],
+            projects=bundle["projects"]))
 
 
 def test_the_hand_authored_precedent_frame_is_internally_consistent():
@@ -1783,8 +1803,10 @@ def test_a_pair_reachable_in_both_directions_is_one_row_in_the_strong_direction(
     direction, and `lineage_supports` hands back both lists so the choice hides
     nothing -- the row records two supports.
 
-    132 such pairs exist on the real extract, which is exactly why the emitted
-    ADD_CHILD count (117,331) is smaller than the ceiling's (117,463).
+    132 such pairs exist on the real extract, and they are one of the two
+    reasons the emitted ADD_CHILD count (117,026) is smaller than the ceiling's
+    (117,463). The other is the samples-row refusal, 305 ADD_CHILD pairs of its
+    448: 117,463 - 132 - 305 = 117,026.
     """
     w, bundle, findings = _pipeline2()
 
@@ -1995,24 +2017,68 @@ def test_a_sample_with_no_resolvable_type_measures_neither_cell_and_is_counted()
     assert len(out) == len(findings), "the row is still emitted"
 
 
-def test_a_sample_absent_from_the_samples_frame_reports_null_projects_not_empty():
-    """500 is registered and edged and has no `samples` row. 185 such samples
-    carry 448 of the real extract's candidate rows.
+def test_a_candidate_whose_sample_has_no_samples_row_is_refused_not_proposed():
+    """500 is registered and edged and has NO `samples` row. It is not a sample
+    this pipeline may propose anything ABOUT.
 
-    Mode 1's empty string means MEASURED AND NONE, which is the statement its
-    whole population rests on. Here the projects were never read, so the column
-    is null and the two are not the same claim.
+    THE DEFECT THIS CLOSES. 185 such samples carried 448 of the real extract's
+    candidate rows, every one of them a proposal to register a sample MySQL does
+    not have. The operator ruled APPROVE on 179 of them; they were stopped at
+    the very end by `resolve_targets`' project gate, under the reason "sample
+    belongs to no project" -- which is a DIFFERENT and much milder statement
+    than "there is no such sample". A refusal that arrives only by accident, and
+    then misnames itself, is not a refusal a curator can rely on.
+
+    THE SAMPLE STAYS A NEIGHBOUR, and that is the whole reason the gate is here
+    rather than in `lineage.lineage_index`. That index deliberately KEEPS the
+    243 edge endpoints with no `samples` row, because 182 of them are registered
+    and can therefore settle a real absence for a neighbour that does exist.
+    The gate is on the SUBJECT of a proposal and never on the evidence behind
+    one: (501,12) is still emitted, resting on 500's registration.
+
+    NOTHING VANISHES. `mode2_census` reports the refusal by name and by sample,
+    and `rows_emitted_without_a_samples_row` -- the count this key used to carry
+    at 448 -- stays in the census at 0, as the gate's own alarm.
     """
     w, bundle, findings = _pipeline2()
 
     assert 500 not in set(w["samples"].sample_id)
-    row = _row(findings, 500, 11)
-    assert pd.isna(row.project_ids)
-    assert row.uuid == "TIS-500", "the uuid comes out of the traversal, not a join"
-    # a sample WITH a row reports its projects, so null here is not the default
+    assert 500 not in bundle["projects"], (
+        "`project_index` keys exactly the samples frame, which is what makes it "
+        "the one object the gate and the `project_ids` column can share")
+
+    # the proposal ABOUT the absent sample is gone...
+    assert findings[findings.sample_id == 500].empty
+    # ...and so, by construction, is the null the defect showed up in
+    assert int(findings.project_ids.isna().sum()) == 0
+    # ...while a sample WITH a row still reports its projects, so the absence
+    # above is a refusal and not an empty column
     assert _row(findings, 200, 11).project_ids == "3"
+
+    # THE EVIDENCE ROLE SURVIVES. 501 exists, 500 does not, and 501's proposal
+    # rests on 500's registration through the edge 501 -> 500.
+    kept = _row(findings, 501, 12)
+    assert kept.action == S.A_ADD_CHILD
+    assert kept.lineage_neighbour_uuid == "TIS-500"
+
     census = _census2(w, bundle, findings)
-    assert census["rows_without_a_samples_row"] == 1
+    assert census["rows_emitted_without_a_samples_row"] == 0
+    assert census["rows_refused_without_a_samples_row"] == 1
+    assert census["samples_refused_without_a_samples_row"] == 1
+
+    # THE REFUSAL IS THE CEILING'S OWN ROW, SUBTRACTED. `mode2_ceiling` counts
+    # what the lineage graph OFFERS and applies no gate -- it says so in its
+    # own docstring -- so the two frames reconcile through this key rather than
+    # by the ceiling quietly shrinking with the lane.
+    ceiling = L.mode2_ceiling(bundle["children_of"], bundle["parents_of"],
+                              bundle["registered"])
+    assert (census["rows"] + census["rows_refused_without_a_samples_row"]
+            == ceiling["union_rows"] == 28)
+
+    # the refused pair, named, off the function that refuses it
+    assert M2.candidates_without_a_samples_row(
+        bundle["children_of"], bundle["parents_of"], bundle["registered"],
+        projects=bundle["projects"]) == [(500, 11)]
 
 
 def test_a_sample_registered_nowhere_reaches_mode_2_and_is_counted_there():
@@ -2050,7 +2116,7 @@ def test_mode_2_asserts_nothing_about_the_co_registration_test_it_never_ran():
     """
     _, _, findings = _pipeline2()
 
-    assert len(findings) == 28, "every assertion below is vacuous on an empty frame"
+    assert len(findings) == 27, "every assertion below is vacuous on an empty frame"
     for col in ("co_reg_rate", "co_reg_pop", "co_reg_registered_internal_assay_id",
                 "co_reg_alt_label_internal_assay_id", "co_reg_alt_label_pop",
                 "compat_band"):
@@ -2090,7 +2156,8 @@ def test_the_mode_2_frame_is_the_shared_contract_and_is_totally_sorted():
     # and they are reached 13 before 11
     assert emitted.index((280, 11)) < emitted.index((280, 13))
     assert M2.mode2_candidates(bundle["children_of"], bundle["parents_of"],
-                              bundle["registered"]) != emitted
+                              bundle["registered"],
+                              projects=bundle["projects"]) != emitted
 
 
 def test_the_census_reconciles_the_emitted_rows_against_the_independent_ceiling():
@@ -2105,18 +2172,26 @@ def test_the_census_reconciles_the_emitted_rows_against_the_independent_ceiling(
     w, bundle, findings = _pipeline2()
     ceiling = L.mode2_ceiling(bundle["children_of"], bundle["parents_of"],
                               bundle["registered"])
-    census = M2.mode2_census(findings, ceiling, _attached2(w))
+    census = M2.mode2_census(
+        findings, ceiling, _attached2(w),
+        refused=M2.candidates_without_a_samples_row(
+            bundle["children_of"], bundle["parents_of"], bundle["registered"],
+            projects=bundle["projects"]))
     assert set(census) == set(M2.MODE2_CENSUS_KEYS)
 
-    assert census["rows"] == 28
-    assert census["samples"] == 26
-    assert census["rows_add_parent"] == 12
-    assert census["samples_add_parent"] == 12
+    # 27 / 25 / 11 SINCE 2026-08-31, not 28 / 26 / 12. `mode2_candidates`
+    # refuses (500,11) -- an ADD_PARENT proposal about a sample with no
+    # `samples` row -- so the frame lost one row, its one sample and one
+    # ADD_PARENT. `rows_refused_without_a_samples_row` below carries it.
+    assert census["rows"] == 27
+    assert census["samples"] == 25
+    assert census["rows_add_parent"] == 11
+    assert census["samples_add_parent"] == 11
     assert census["rows_add_child"] == 16
     assert census["samples_add_child"] == 14
     assert census["rows_reachable_both_ways"] == 1
     assert census["rows_with_multiple_supports"] == 2
-    assert census["rows_with_precedent"] == 27
+    assert census["rows_with_precedent"] == 26
     assert census["rows_without_precedent"] == 1
 
     # the identities
@@ -2144,14 +2219,32 @@ def test_the_census_reconciles_the_emitted_rows_against_the_independent_ceiling(
     assert census["rows"] == len(findings)
     assert census["samples"] == findings.sample_id.nunique()
 
-    # ...and against the ceiling, which counted the same world independently
-    assert census["rows"] == ceiling["union_rows"] == 28
-    assert census["samples"] == ceiling["union_samples"] == 26
-    assert census["rows_add_parent"] == ceiling["add_parent_rows"] == 12
+    # ...and against the ceiling, which counted the same world independently.
+    # THE CEILING DID NOT MOVE ON 2026-08-31 AND MUST NOT: it measures what the
+    # lineage graph OFFERS and applies no gate, so the pair `mode2_candidates`
+    # refused reconciles through a NAMED key rather than by both numbers
+    # shrinking together, which would have hidden the refusal in the very
+    # artifact that reports it.
+    assert ceiling["union_rows"] == 28
+    assert ceiling["union_samples"] == 26
+    assert ceiling["add_parent_rows"] == 12
+    assert (census["rows"] + census["rows_refused_without_a_samples_row"]
+            == ceiling["union_rows"])
+    assert (census["samples"] + census["samples_refused_without_a_samples_row"]
+            == ceiling["union_samples"])
+    assert (census["rows_add_parent"]
+            + census["rows_refused_without_a_samples_row"]
+            == ceiling["add_parent_rows"] == 12)
     assert census["rows_reachable_both_ways"] == ceiling["both_directions"] == 1
+    # the refused pair is an ADD_PARENT, so this direction is untouched
     assert census["rows_add_child"] == (ceiling["add_child_rows"]
                                         - ceiling["both_directions"]) == 16
     assert ceiling["add_child_rows"] == 17, "the ceiling counts the pair twice"
+
+    # THE REFUSAL, reported by name and in both grains
+    assert census["rows_emitted_without_a_samples_row"] == 0
+    assert census["rows_refused_without_a_samples_row"] == 1
+    assert census["samples_refused_without_a_samples_row"] == 1
 
 
 def test_the_survival_table_reports_the_two_directions_apart_and_drops_no_evidence():
@@ -2160,16 +2253,19 @@ def test_the_survival_table_reports_the_two_directions_apart_and_drops_no_eviden
     Never a pooled figure: ADD_PARENT is corroborated 88 times out of 88 over the
     866 flags and ADD_CHILD 15 times out of 263, so one number covering both
     would present the weak direction as carrying the strong one's evidence.
-    Measured on the real extract at `rate >= 0.5`, ADD_PARENT survives 8,170 rows
-    and ADD_CHILD 2,067 -- of 55,007 and 117,331 EMITTED lane rows.
+    Re-measured 2026-08-31 at `rate >= 0.5`, ADD_PARENT survives 8,168 rows and
+    ADD_CHILD 2,032 -- of 54,864 and 117,026 EMITTED lane rows.
 
-    THOSE TWO DENOMINATORS ARE NOT BOTH CEILINGS, and this line called them
-    both one until 2026-08-18. ADD_PARENT's emitted count happens to EQUAL its
-    ceiling, 55,007; ADD_CHILD's does not -- its ceiling is 117,463 and 117,331
-    is what the lane emitted, a gap `mode2.py` names explicitly one function
-    away. A number that coincides with a ceiling in one direction and not the
-    other is the worst possible one to label by adjacency, and this branch has
-    already published two irreconcilable readings of this exact quantity.
+    NEITHER DENOMINATOR IS A CEILING, and this line called them both one until
+    2026-08-18 and then called one of them one until 2026-08-31. ADD_PARENT's
+    emitted count USED TO EQUAL its ceiling at 55,007 and no longer does: the
+    samples-row refusal took 143 ADD_PARENT pairs, leaving 54,864 against a
+    ceiling still reading 55,007. ADD_CHILD's never did -- its ceiling is
+    117,463 against 117,026 emitted, and `mode2.py` names both gaps explicitly
+    one function away. A number that coincides with a ceiling in one direction
+    and not the other is the worst possible one to label by adjacency, and this
+    branch has already published two irreconcilable readings of this exact
+    quantity.
 
     A THRESHOLD ORDERS READING AND GRANTS NOTHING. Every row above is emitted
     whatever this table says.
@@ -2184,9 +2280,11 @@ def test_the_survival_table_reports_the_two_directions_apart_and_drops_no_eviden
     assert table.action.isin((S.A_ADD_PARENT, S.A_ADD_CHILD)).all()
 
     at_zero = table[table.threshold == 0.0].set_index("action")
-    # ADD_PARENT: 12 rows, every one with a rule except (360,11)
-    assert at_zero.loc[S.A_ADD_PARENT, "of_rows"] == 12
-    assert at_zero.loc[S.A_ADD_PARENT, "rows"] == 11
+    # ADD_PARENT: 11 rows, every one with a rule except (360,11). It was 12 of
+    # which 11 rated until 2026-08-31, when the samples-row refusal took
+    # (500,11) -- a rated ADD_PARENT row -- out of both counts.
+    assert at_zero.loc[S.A_ADD_PARENT, "of_rows"] == 11
+    assert at_zero.loc[S.A_ADD_PARENT, "rows"] == 10
     assert at_zero.loc[S.A_ADD_CHILD, "of_rows"] == 16
     assert at_zero.loc[S.A_ADD_CHILD, "rows"] == 16
     # ...which is the assertion an unmeasured row defaulting to 0.0 would fail
@@ -2281,17 +2379,19 @@ def test_the_key_construction_speaks_the_language_mine_precedent_writes():
     every row finds a rule -- which holds only if the project, both types and the
     assay are all built the way the miner builds them.
 
-    ONE ROW IS EXEMPT AND IT IS NAMED. Sample 500 has no `samples` row, so
-    nothing about it changes here; the exemption is empty on this world, and a
-    future row that stops resolving fails this test rather than quietly losing
-    its evidence.
+    ONE ROW USED TO BE EXEMPT AND IT NO LONGER EXISTS. Sample 500 has no
+    `samples` row, so since 2026-08-31 `mode2_candidates` refuses its proposal
+    outright and the frame is 27 rows rather than 28; the exemption was empty on
+    this world before that and there is nothing left to exempt. A future row
+    that stops resolving fails this test rather than quietly losing its
+    evidence.
     """
     w, bundle, findings = _pipeline2()
     mined = P.mine_precedent(w["edges"], w["membership"], w["assays"])
     live = dict(bundle, rules=M2.precedent_rules(mined))
     out = M2.mode2_findings(_attached2(w), **live)
 
-    assert len(out) == 28
+    assert len(out) == 27
     unresolved = out[out.precedent_rate.isna()]
     assert list(zip(unresolved.sample_id, unresolved.proposed_internal_assay_id)) \
         == [], "every key this module builds must exist in the mined frame"
@@ -2361,11 +2461,17 @@ def test_the_fixture_world_carries_exactly_the_populations_its_docstring_states(
     So the two populations a reader checks the table against are pinned here.
     """
     w = _world2()
-    _, _, findings = _pipeline2(w)
+    _, bundle, findings = _pipeline2(w)
 
     # the header sentence
     assert len(w["edges"]) == 16
-    assert len(findings) == 28
+    # 27 EMITTED of the 28 the sixteen edges OFFER: (500,11) is refused, its
+    # sample having no `samples` row. Both numbers are in the docstring and both
+    # are pinned here, so neither can drift from the world again.
+    assert len(findings) == 27
+    assert M2.candidates_without_a_samples_row(
+        bundle["children_of"], bundle["parents_of"], bundle["registered"],
+        projects=bundle["projects"]) == [(500, 11)]
 
     # every reachability cell the docstring states, and NO cell it omits
     cells = G.type_registration_index(w["membership"], w["assays"], w["nodes"])
@@ -2711,20 +2817,32 @@ def test_the_real_extract_reproduces_the_ceiling_and_both_directions_separately(
     ADD_CHILD by more than an order of magnitude, so the word rides with the
     number here as it does everywhere else.
 
-    THE EMITTED SPLIT IS NOT THE CEILING SPLIT and the difference is exactly
-    `both_directions`: the ceiling counts a pair reachable both ways once per
-    direction, and the emitted frame counts it once, because it is one write.
+    THE EMITTED SPLIT IS NOT THE CEILING SPLIT and there are now TWO differences
+    rather than one. The ceiling counts a pair reachable both ways once per
+    direction and the emitted frame counts it once, because it is one write --
+    that is `both_directions`, 132. And since 2026-08-31 `mode2_candidates`
+    REFUSES 448 of the ceiling's pairs, over 185 samples, because the sample the
+    proposal is about has no row in the `samples` extract: 143 ADD_PARENT and
+    305 ADD_CHILD. The ceiling itself is unmoved, deliberately -- it measures
+    what the lineage graph offers and applies no gate -- so both differences are
+    named keys and neither is a coincidence of arithmetic.
 
     Three figures the brief carried are corrected here, each measured:
 
-      candidate rows at rate >= 0.5   brief 79,488 / 3,663; measured 8,170 /
-                                      2,067. The ADD_PARENT figure exceeds the
-                                      whole ADD_PARENT ceiling of 55,007 and so
-                                      cannot be a row count over this relation.
-      rows creating an unseen (type,  brief 55.6% / 67.6%; measured 55.4% /
-      assay) pair                     62.4% over the emitted rows.
+      candidate rows at rate >= 0.5   brief 79,488 / 3,663; measured 8,168 /
+                                      2,032 (8,170 / 2,067 before the
+                                      samples-row refusal). The ADD_PARENT
+                                      figure exceeds the whole ADD_PARENT
+                                      ceiling of 55,007 and so cannot be a row
+                                      count over this relation.
+      rows creating an unseen (type,  brief 55.6% / 67.6%; measured 55.6% /
+      assay) pair                     62.4% over the emitted rows -- 30,495 of
+                                      54,864 and 73,056 of 117,026. The first
+                                      share now coincides with the brief's and
+                                      the numerators still do not; it read
+                                      55.4% / 62.4% before the refusal.
       Mode 1 samples inside the       brief ~6% of ADD_CHILD samples; measured
-      ceiling                         2.1%, and 2,405 of Mode 1's 6,242.
+      ceiling                         2.0%, and 2,357 of Mode 1's 6,242.
     """
     r = _real2()
     children_of, parents_of, uuid_of, _ = L.lineage_index(
@@ -2758,19 +2876,38 @@ def test_the_real_extract_reproduces_the_ceiling_and_both_directions_separately(
         projects=X.project_index(r["samples"]),
         fallback_assay_ids=P.fallback_assay_ids(r["assays"]),
     )
-    census = M2.mode2_census(findings, ceiling, X.attach_gate(r["claims"], gated))
+    census = M2.mode2_census(
+        findings, ceiling, X.attach_gate(r["claims"], gated),
+        refused=M2.candidates_without_a_samples_row(
+            children_of, parents_of, registered,
+            projects=X.project_index(r["samples"])))
 
-    # THE EMITTED SPLIT, never pooled
-    assert census["rows_add_parent"] == 55007
-    assert census["samples_add_parent"] == 42654
-    assert census["rows_add_child"] == 117331 == 117463 - 132
-    assert census["samples_add_child"] == 102561
-    assert census["rows"] == 172338
-    assert census["samples"] == 115626
+    # THE EMITTED SPLIT, never pooled. Every figure here moved on 2026-08-31
+    # and by exactly one cause: the 448 pairs whose sample has no `samples` row
+    # are no longer emitted. The ceiling above did NOT move.
+    assert census["rows_add_parent"] == 54864 == 55007 - 143
+    assert census["samples_add_parent"] == 42511
+    assert census["rows_add_child"] == 117026 == 117463 - 132 - 305
+    assert census["samples_add_child"] == 102387
+    assert census["rows"] == 171890 == 172338 - 448
+    assert census["samples"] == 115441
+
+    # THE REFUSAL, in both grains and reconciled against the ungated ceiling
+    assert census["rows_emitted_without_a_samples_row"] == 0
+    assert census["rows_refused_without_a_samples_row"] == 448
+    assert census["samples_refused_without_a_samples_row"] == 185
+    assert (census["rows"] + census["rows_refused_without_a_samples_row"]
+            == ceiling["union_rows"])
+    assert (census["samples"]
+            + census["samples_refused_without_a_samples_row"]
+            == ceiling["union_samples"])
+    # ...and no emitted row can carry a null `project_ids` any more, read off
+    # the frame rather than off the key that reports it
+    assert int(findings.project_ids.isna().sum()) == 0
 
     # the two evidence populations
     assert census["rows_without_precedent"] == 10
-    assert census["rows_with_multiple_supports"] == 31180
+    assert census["rows_with_multiple_supports"] == 31040
     # RE-MEASURED 2026-08-20 after the tif/png/illumina/flowjo retirement.
     # These two are the ONLY census figures the retirement moves, and both are
     # claim-dependent by definition: `proposed_by_both` counts rows a metadata
@@ -2791,25 +2928,26 @@ def test_the_real_extract_reproduces_the_ceiling_and_both_directions_separately(
     # the raise held on this extract -- read off the frame, not off the key
     assert int((findings.proposed_by == X.BY_LINEAGE_ONLY).sum()) == 10
     assert census["rows_with_a_blocked_claim"] == 4242
-    assert census["rows_without_a_samples_row"] == 448
     assert census["rows_without_a_sample_type"] == 0
 
     # the unseen (type, assay) pair, BY DIRECTION and never as one share
-    assert census["rows_creating_an_unseen_pair_add_parent"] == 30496
-    assert census["rows_creating_an_unseen_pair_add_child"] == 73195
+    assert census["rows_creating_an_unseen_pair_add_parent"] == 30495
+    assert census["rows_creating_an_unseen_pair_add_child"] == 73056
 
-    # Mode 1's population inside Mode 2's, which the ceiling includes by design
-    assert census["rows_on_a_sample_registered_nowhere"] == 4243
-    assert census["samples_registered_nowhere"] == 2405
+    # Mode 1's population inside Mode 2's, which the ceiling includes by design.
+    # 4,195 / 2,357 and not 4,243 / 2,405: 48 of the 185 samples with no
+    # `samples` row were also registered nowhere, so they counted here too.
+    assert census["rows_on_a_sample_registered_nowhere"] == 4195
+    assert census["samples_registered_nowhere"] == 2357
     assert len(X.unregistered_samples(r["samples"], r["membership"],
                                       r["assays"])) == 6242
 
     # SURVIVAL, the two directions apart at every threshold
     table = M2.precedent_survival(findings).set_index(["threshold", "action"])
-    assert table.loc[(0.5, S.A_ADD_PARENT), "rows"] == 8170
-    assert table.loc[(0.5, S.A_ADD_CHILD), "rows"] == 2067
+    assert table.loc[(0.5, S.A_ADD_PARENT), "rows"] == 8168
+    assert table.loc[(0.5, S.A_ADD_CHILD), "rows"] == 2032
     assert table.loc[(0.75, S.A_ADD_PARENT), "rows"] == 2171
-    assert table.loc[(0.75, S.A_ADD_CHILD), "rows"] == 1340
+    assert table.loc[(0.75, S.A_ADD_CHILD), "rows"] == 1305
     assert table.loc[(0.95, S.A_ADD_PARENT), "rows"] == 46
     assert table.loc[(0.95, S.A_ADD_CHILD), "rows"] == 371
 
@@ -2852,9 +2990,12 @@ def test_the_real_extract_reproduces_the_ceiling_and_both_directions_separately(
     assert strong_groups == int(
         table.loc[(0.95, S.A_ADD_PARENT), "rule_groups"]) == 2
 
-    # ...and the unmeasured rows survive nothing, including 0.0
-    assert table.loc[(0.0, S.A_ADD_PARENT), "rows"] == 55007 - 5
-    assert table.loc[(0.0, S.A_ADD_CHILD), "rows"] == 117331 - 5
+    # ...and the unmeasured rows survive nothing, including 0.0. The 5-per-
+    # direction gap is the invariant; the two denominators are the EMITTED
+    # counts, which lost 143 and 305 rows to the samples-row refusal on
+    # 2026-08-31 and read 55,007 and 117,331 before it.
+    assert table.loc[(0.0, S.A_ADD_PARENT), "rows"] == 54864 - 5
+    assert table.loc[(0.0, S.A_ADD_CHILD), "rows"] == 117026 - 5
 
     # THE FLAGSHIP DATUM, read off the mined rules rather than quoted
     rules = M2.precedent_rules(
@@ -3069,9 +3210,13 @@ def _pipeline3(w=None):
     registered = A.registered_internal(w["membership"], w["assays"])
     children_of, parents_of, uuid_of, _ = L.lineage_index(
         w["edges"], w["samples"], w["membership"])
-    candidates = M2.mode2_candidates(children_of, parents_of, registered)
-    population = X.unregistered_samples(w["samples"], w["membership"], w["assays"])
+    # ONE projects index, bound BEFORE the candidates it now gates, as
+    # `classify.main` binds it: `mode2_candidates` refuses a proposal about a
+    # sample_id this dict has no key for.
     projects = X.project_index(w["samples"])
+    candidates = M2.mode2_candidates(children_of, parents_of, registered,
+                                     projects=projects)
+    population = X.unregistered_samples(w["samples"], w["membership"], w["assays"])
     titles = M2.assay_titles(w["assays"])
     table = CP.co_registration(w["membership"], w["assays"], w["nodes"])
 
@@ -4095,19 +4240,23 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
     is worse than a stale figure elsewhere because a reader has no way to tell
     which half is current. Corrected 2026-08-21 to the asserted values.
 
-    THE INPUT IS 175,339 KEYS AND NOT 172,338 OR 130,764. It is the union of
-    every claim-backed absence with the whole lineage ceiling, and neither
+    THE INPUT IS 174,891 KEYS AND NOT 171,890 OR 130,764. It is the union of
+    every claim-backed absence with the lineage lane's whole offer, and neither
     number alone is it: 122,011 of the 130,764 attached claims name an assay the
-    sample already holds and raise no key at all.
+    sample already holds and raise no key at all. (175,339 and 172,338 until
+    2026-08-31, when `mode2_candidates` began refusing the 448 pairs whose
+    sample has no `samples` row. The claim-side terms did not move: a claim is
+    raised off a sample's own metadata, so a sample with no `samples` row has
+    never raised one.)
 
     THE MODE 2 COUNT IN `findings.csv` IS SMALLER THAN THE CEILING AND THE GAP
-    IS THE PRECEDENCE. The lineage lane offers 172,338 rows; the gate refuses
-    4,242 of them because a rejected claim names the same pair, and Mode 1 takes
-    749 more because the sample is registered in nothing and its own metadata
-    proposes the assay. Both are counted here rather than inferred from a
-    difference. The remaining 167,347 split 67,898 `PRE_LINEAGE` and 99,449
-    `PRE_UNREACHABLE`, which is a split of the count and not a subtraction from
-    it.
+    IS THE PRECEDENCE. The lineage lane offers 171,890 rows of the ungated
+    ceiling's 172,338; the gate refuses 4,242 of them because a rejected claim
+    names the same pair, and Mode 1 takes 749 more because the sample is
+    registered in nothing and its own metadata proposes the assay. Both are
+    counted here rather than inferred from a difference. The remaining 166,899
+    split 67,590 `PRE_LINEAGE` and 99,309 `PRE_UNREACHABLE`, which is a split of
+    the count and not a subtraction from it.
 
     MODE 3 EMITS NOTHING and the 585 flags increment 1's detector raises are
     re-disposed: 31 gate rejects, 269 lineage absences, 35 routinely-coexisting
@@ -4125,8 +4274,9 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
                                         r["assays"])
     children_of, parents_of, uuid_of, _ = L.lineage_index(
         r["edges"], r["samples"], r["membership"])
-    candidates = M2.mode2_candidates(children_of, parents_of, registered)
     projects = X.project_index(r["samples"])
+    candidates = M2.mode2_candidates(children_of, parents_of, registered,
+                                     projects=projects)
     titles = M2.assay_titles(r["assays"])
     table = CP.co_registration(r["membership"], r["assays"], r["nodes"])
 
@@ -4135,18 +4285,27 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
                           type_reg=type_reg, types=types, uuid_of=uuid_of)
     steps = X.precedence_steps(keys)
     counts = Counter(steps.values())
-    assert len(keys) == 175339
+    # 174,891 SINCE 2026-08-31, not 175,339: the 448 lineage pairs whose sample
+    # has no `samples` row are refused before `absence_keys` ever sees them, and
+    # they split 308 reachable / 140 unreachable across the two lineage steps.
+    # The gate and Mode 1 counts are UNCHANGED, which is the cross-check that
+    # the refusal stayed in its lane -- both populations rest on a claim, and a
+    # claim needs a `samples` row to have been raised at all.
+    assert len(keys) == 174891
     assert counts[X.PRE_GATE] == 4553
     assert counts[X.PRE_MODE_1] == 1373
-    assert counts[X.PRE_LINEAGE] == 67898
-    assert counts[X.PRE_UNREACHABLE] == 99449
+    assert counts[X.PRE_LINEAGE] == 67590 == 67898 - 308
+    assert counts[X.PRE_UNREACHABLE] == 99309 == 99449 - 140
     assert counts[X.PRE_COMPAT] == 2066
     assert counts[X.PRE_MODE_3] == 0
     assert sum(counts.values()) == len(keys)
-    # THE INPUT DID NOT MOVE, and the old lineage step's whole population is
-    # still accounted for: this is the identity that says 99,449 proposals were
-    # RECLASSIFIED rather than deleted.
-    assert counts[X.PRE_LINEAGE] + counts[X.PRE_UNREACHABLE] == 167347
+    # THE RECLASSIFICATION MOVED NOTHING OUT, and the old lineage step's whole
+    # population is still accounted for: this is the identity that says 99,309
+    # proposals were RECLASSIFIED rather than deleted. It is 448 short of the
+    # 167,347 it read before the samples-row refusal, and that difference is the
+    # one deletion this pipeline makes -- reported by name in `mode2_census`.
+    assert counts[X.PRE_LINEAGE] + counts[X.PRE_UNREACHABLE] == 166899 \
+        == 167347 - 448
 
     # THE PRECEDENCE IS LOAD-BEARING ON THIS DATA, not only on the fixture
     moved = []
@@ -4156,7 +4315,7 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
         moved.append(sum(1 for e in keys.values()
                          if X.precedence_step(e)
                          != X.precedence_step(e, tuple(wrong))))
-    assert moved == [746, 749, 67898, 0, 0]
+    assert moved == [746, 749, 67590, 0, 0]
     # THE FOURTH ZERO IS STRUCTURAL AND IT IS THE DESIGN ARGUMENT FOR WHERE
     # `PRE_UNREACHABLE` SITS. Swapping it with `PRE_COMPAT` could only move a
     # key carrying a claim that PASSED the gate on a pair the lineage lane calls
@@ -4183,7 +4342,7 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
         r"UNREACHABLE with COMPAT ([\d,]+)", flat)
     assert claim is not None, "the docstring sentence changed shape; re-pin it"
     stated = [int(g.replace(",", "")) for g in claim.groups()]
-    assert stated == [len(keys)] + moved[:4] == [175339, 746, 749, 67898, 0]
+    assert stated == [len(keys)] + moved[:4] == [174891, 746, 749, 67590, 0]
     # ...and so is the five-row swap table beside `PRECEDENCE`, which stated
     # four swaps over a population no test reproduces until this run pinned it.
     table_claim = re.findall(
@@ -4214,13 +4373,16 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
 
     assert census["claims_agreeing_with_a_registration"] == 122011
     assert len(attached) == 130764
-    assert census["rows"] == len(findings) == 170786
+    # 170,338 SINCE 2026-08-31: 448 fewer rows, all of them Mode 2, all of them
+    # proposals about a sample with no `samples` row. Nothing else moved -- the
+    # Mode 1, no-mode and compatibility counts are untouched.
+    assert census["rows"] == len(findings) == 170338 == 170786 - 448
     assert census["rows_mode_1"] == 1373
-    assert census["rows_mode_2"] == 167454 == 167347 + 107
+    assert census["rows_mode_2"] == 167006 == 166899 + 107
     assert census["rows_mode_3"] == 0
     assert census["rows_no_mode"] == 1959
-    assert census["rows_cls_absence_lineage"] == 67898
-    assert census["rows_cls_unreachable"] == 90478
+    assert census["rows_cls_absence_lineage"] == 67590
+    assert census["rows_cls_unreachable"] == 90338
     assert census["rows_cls_bootstrap"] == 8971
     assert census["rows_cls_absence_compat"] == 107
     assert census["rows_cls_alt_label"] == 952
@@ -4242,9 +4404,9 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
     # `CLS_ABSENCE_LINEAGE`. Both totals are pinned, so a row moving between the
     # two lineage populations breaks this rather than reading as a re-split.
     assert (census["rows_cls_unreachable"]
-            + census["rows_cls_bootstrap"]) == 99449
+            + census["rows_cls_bootstrap"]) == 99309
     assert (census["rows_cls_absence_lineage"] + census["rows_cls_unreachable"]
-            + census["rows_cls_bootstrap"]) == 167347
+            + census["rows_cls_bootstrap"]) == 166899
     # ...and every bootstrap row still carries the gate and the step of the
     # population it came out of. Only `classification` moved.
     boot = findings[findings.classification == S.CLS_BOOTSTRAP]
@@ -4280,14 +4442,22 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
     assert len(on_fallback) == 1321
     assert int((on_fallback.classification == S.CLS_BOOTSTRAP).sum()) == 199
 
-    # THE CEILING IS A CEILING, and the precedence takes 5,008 off it -- 4,242
-    # to the gate and 749 to Mode 1, with the remainder split between the two
-    # lineage steps rather than taken off it
-    assert census["lineage_ceiling_offered"] == 172338
+    # THE CEILING IS A CEILING, and the precedence takes 4,991 off what the
+    # LANE offered -- 4,242 to the gate and 749 to Mode 1, with the remainder
+    # split between the two lineage steps rather than taken off it.
+    #
+    # `lineage_ceiling_offered` IS THE LANE'S OFFER AND NOT `mode2_ceiling`'S,
+    # and since 2026-08-31 the two are different numbers: the ungated ceiling is
+    # 172,338 and the lane offers 171,890, the 448 between them being the pairs
+    # whose sample has no `samples` row. Both are pinned here so neither can be
+    # quoted for the other.
+    assert census["lineage_ceiling_offered"] == 171890
+    assert L.mode2_ceiling(children_of, parents_of,
+                           registered)["union_rows"] == 172338
     assert census["lineage_refused_by_the_gate"] == 4242
     assert census["lineage_taken_by_mode_1"] == 749
     assert (census["keys_lineage"] + census["keys_unreachable"]
-            == 172338 - 4242 - 749)
+            == 171890 - 4242 - 749)
     assert census["keys_from_lineage"] == census["lineage_ceiling_offered"]
     assert census["keys_from_a_claim"] == 8753 == 130764 - 122011
 
@@ -4400,7 +4570,8 @@ def test_no_key_the_gate_refuses_is_refused_for_an_INCOHERENT_TERM_alone():
                                         r["assays"])
     children_of, parents_of, uuid_of, _ = L.lineage_index(
         r["edges"], r["samples"], r["membership"])
-    candidates = M2.mode2_candidates(children_of, parents_of, registered)
+    candidates = M2.mode2_candidates(children_of, parents_of, registered,
+                                     projects=X.project_index(r["samples"]))
     keys = X.absence_keys(attached, population=population,
                           registered=registered, candidates=candidates,
                           type_reg=type_reg, types=types, uuid_of=uuid_of)

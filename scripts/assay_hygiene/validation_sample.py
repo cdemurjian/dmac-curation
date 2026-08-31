@@ -15,8 +15,8 @@ nothing it writes is a decision.
         python -m assay_hygiene.validation_sample <artifacts> <extract> \
         <verdicts.csv> <out_dir>
 
-WHY THIS EXISTS. The 2026-08-21 rework reclassified 99,449 of 170,786
-proposals as `CLS_UNREACHABLE` (90,478) or `CLS_BOOTSTRAP` (8,971). The only
+WHY THIS EXISTS. The 2026-08-21 rework reclassified 99,309 of 170,338
+proposals as `CLS_UNREACHABLE` (90,338) or `CLS_BOOTSTRAP` (8,971). The only
 ground truth this package owns is the operator's 128 hand rulings, and
 `tests/test_assay_hygiene_rulings.py` proves those CANNOT validate the
 reachability gate: an unreachable pair has zero type registrations so its
@@ -26,9 +26,13 @@ human validation at all. This module draws the sample that closes that.
 
 THREE STRATA, ONE QUESTION EACH, ONE SITTING:
 
-    A  CLS_UNREACHABLE, non-bootstrap  90,478 rows   is the gate right?
+    A  CLS_UNREACHABLE, non-bootstrap  90,338 rows   is the gate right?
     B  CLS_BOOTSTRAP                    8,971 rows   real gaps, or noise?
-    C  agent-REJECT, still primary     43,604 rows   is the reject side sound?
+    C  agent-REJECT, still primary     43,468 rows   is the reject side sound?
+
+Re-measured 2026-08-31. A and C read 90,478 and 43,604 until the samples-row
+refusal of that date removed 448 proposals about samples with no `samples` row;
+B did not move and no cohort in any stratum was emptied.
 
 THE DRAW IS A HASH ORDER AND NOT AN RNG, and that is the whole integrity of the
 exercise. `random.sample` and `numpy.random.default_rng` are both reproducible
@@ -57,10 +61,10 @@ row-level draw would ask him the same question hundreds of times and weight the
 answer by cohort size, which is exactly the bias a per-cohort rate is meant to
 avoid. Every cohort therefore carries `n_rows`, so Step 6 can report the rate
 both ways -- and they will differ, because the largest stratum-A cohort holds
-10,745 of its 90,470 rows and the median holds 9.
+10,745 of its 90,330 rows and the median holds 9.
 
 AND THAT SKEW IS WHY STRATA A AND B ALSO HAVE A CERTAINTY SLICE. The operator's
-decision is about ROWS -- 99,449 of them -- and a purely random cohort draw
+decision is about ROWS -- 99,309 of them -- and a purely random cohort draw
 bounds the cohort error at 2.6% while leaving the row error bounded at 89.8%,
 which is close to uninformative for the decision being made. So the largest
 cohorts by row count are taken with PROBABILITY 1, and the random draw runs
@@ -181,13 +185,13 @@ TARGET = {STRATUM_A: 100, STRATUM_B: 50, STRATUM_C: 50}
 CERTAINTY_STRATA = (STRATUM_A, STRATUM_B)
 
 # HOW MUCH OF A STRATUM'S ROWS THE CERTAINTY SLICE AIMS TO COVER. Measured
-# 2026-08-24 over the reworked run, cohorts taken largest-first:
+# 2026-08-31 over the reworked run, cohorts taken largest-first:
 #
-#     stratum A (655 cohorts, 90,470 rows)   stratum B (137 cohorts, 8,971)
-#       k=10   34,910   38.6%                  k=3    3,392   37.8%
-#       k=15   41,282   45.6%                  k=4    4,054   45.2%
-#       k=19   45,410   50.2%                  k=5    4,478   49.9%
-#       k=25   50,857   56.2%                  k=6    4,901   54.6%
+#     stratum A (655 cohorts, 90,330 rows)   stratum B (137 cohorts, 8,971)
+#       k=10   34,909   38.6%                  k=3    3,392   37.8%
+#       k=15   41,281   45.7%                  k=4    4,054   45.2%
+#       k=19   45,409   50.3%                  k=5    4,478   49.9%
+#       k=25   50,856   56.3%                  k=6    4,901   54.6%
 #
 # 0.45 RATHER THAN 0.50, AND THE REASON IS THE OPERATOR'S TIME. A 0.50 target
 # needs 19 + 6 = 25 extra cohorts; 0.45 needs 15 + 4 = 19, which is the ~20 the
@@ -549,7 +553,7 @@ def agent_convergence(findings: pd.DataFrame, verdicts: pd.DataFrame,
     IT IS NOT HUMAN VALIDATION AND THE REPORT MUST NOT DRESS IT AS ANY. Fifteen
     agents reading biology in 2026-08 and a reachability gate built in 2026-08
     from membership counts are two different instruments, neither of them a
-    curator. It is the FIRST evidence of any kind bearing on the 99,449 rows,
+    curator. It is the FIRST evidence of any kind bearing on the 99,309 rows,
     which is why it sits beside the power table, and it is labelled for what it
     is.
 
@@ -616,7 +620,7 @@ def check_row_accounting(name: str, blocks: list[dict], population: int,
 
     `build_blocks` selects on `precedent_rate >= floor` and that predicate is
     False on a null, so a row carrying no rate silently reaches no cohort. On
-    the 2026-08-24 run that is 8 of stratum A's 90,478 and 0 of stratum B's
+    the 2026-08-31 run that is 8 of stratum A's 90,338 and 0 of stratum B's
     8,971. Eight rows is small and a silent shortfall is not, so it is stated
     as an equation that fails rather than as a comment that ages.
     """
@@ -743,8 +747,8 @@ def _example_rows(block: dict, rows: pd.DataFrame) -> pd.DataFrame:
     """The findings rows behind the examples the sheet shows.
 
     `(sample_id, proposed_internal_assay_title, action)` is unique inside a
-    classification on this extract -- verified 2026-08-24, 0 duplicate groups
-    over all 90,478 / 8,971 / 67,898 rows of the three classes -- so this is a
+    classification on this extract -- re-verified 2026-08-31, 0 duplicate
+    groups over all 90,338 / 8,971 / 67,590 rows of the three classes -- so this is a
     join and not a heuristic. It is scoped to the cohort's own action for the
     same reason `build_blocks` puts the action in the key: ADD_PARENT and
     ADD_CHILD are two different writes against one pair.
@@ -1246,7 +1250,7 @@ def power_report(stats: list[dict], seed: int = SEED, alpha: float = 0.05,
             "That they were built from entirely different evidence is what "
             "makes their agreement worth anything, and it is also what makes "
             "their disagreement worth more. It is the first evidence of any "
-            "kind bearing on the 99,449 rows this rework moved -- worth "
+            "kind bearing on the 99,309 rows this rework moved -- worth "
             "weighing while you rule, and not a substitute for ruling.",
             "",
         ]

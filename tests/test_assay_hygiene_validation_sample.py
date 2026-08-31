@@ -3,7 +3,7 @@
 WHAT THIS FILE IS PROTECTING. `tests/test_assay_hygiene_rulings.py` proved that
 the operator's 128 hand rulings CANNOT validate the reachability gate -- an
 unreachable pair's precedent rate is structurally 0.0 and the sheet he ruled on
-starts at 0.50, so the two populations are disjoint. The 99,449 rows the rework
+starts at 0.50, so the two populations are disjoint. The 99,309 rows the rework
 moves have never been judged by anyone. `validation_sample.py` draws the sample
 that closes that, and the three properties below are the ones whose failure
 would make the whole sitting worthless rather than merely wrong.
@@ -808,7 +808,7 @@ def test_the_rendered_lede_does_not_pool_the_parts():
 def test_the_power_document_records_the_convergence_and_the_blinding_caveat():
     """Two facts the operator must see beside the table, not in a report to me.
 
-    The convergence is the only evidence of any kind bearing on the 99,449
+    The convergence is the only evidence of any kind bearing on the 99,309
     rows, and it is NOT human validation -- a document that printed the
     agreement without that sentence would be handing him a reason to rule
     quickly. The blinding caveat is the mirror: nobody may later read this
@@ -987,7 +987,7 @@ def test_row_accounting_names_the_rows_that_reach_no_cohort():
     `rate >= floor` is False on a null, so a row with no rate reaches no
     cohort and the population the sample claims to describe is quietly larger
     than the population it was drawn from. On the real extract that is 8 of
-    stratum A's 90,478 -- small, and a silent shortfall is not.
+    stratum A's 90,338 -- small, and a silent shortfall is not.
     """
     blocks = [{"n_rows": 10}, {"n_rows": 5}]
     V.check_row_accounting("A", blocks, population=16, unrated=1)
@@ -1172,16 +1172,22 @@ def reworked(tmp_path_factory) -> pd.DataFrame:
 def test_the_real_extract_draws_the_stratified_sample_it_documents(reworked):
     """Every figure this task reports, re-derived by the suite.
 
-    Measured 2026-08-24 over `assets/RUN1/01-extract`. Populations: stratum
-    A is 655 cohorts over 90,478 rows (8 of which carry no precedent rate and
+    Re-measured 2026-08-31 over `assets/RUN1/01-extract`. Populations: stratum
+    A is 655 cohorts over 90,338 rows (8 of which carry no precedent rate and
     reach no cohort), B is 137 over 8,971, and C is 106 of the 756 agent
-    REJECT cohorts still on a primary surface, over 43,604 rows.
+    REJECT cohorts still on a primary surface, over 43,468 rows.
+
+    THE ROW COUNTS MOVED AND THE COHORT COUNTS DID NOT, which is the shape to
+    expect: the samples-row refusal of 2026-08-31 removed 448 proposals about
+    samples with no `samples` row -- 140 of them in stratum A, 136 in C -- and
+    not one cohort was emptied by it in either. A read 90,478 and C 43,604
+    before that date.
 
     The sitting is **251 cohorts**. The certainty slice takes A's 15 largest
-    (41,282 rows, 45.6%) and B's 4 largest (4,054 rows, 45.2%) with
+    (41,281 rows, 45.7%) and B's 4 largest (4,054 rows, 45.2%) with
     probability 1; C gets none. The random draw then takes 100 of A's
     remaining 640, 50 of B's remaining 133 and 50 of C's 106, and the sampled
-    design ends up looking at 52.2% / 68.5% / 69.1% of each stratum's rows.
+    design ends up looking at 52.3% / 68.5% / 69.0% of each stratum's rows.
 
     On top of that, the declared disagreement slice adds **32 cohorts / 1,578
     rows** an agent ruled APPROVE and the gate removed -- 17 in A and 15 in B,
@@ -1207,11 +1213,11 @@ def test_the_real_extract_draws_the_stratified_sample_it_documents(reworked):
 
     by_name = {s["stratum"]: s for s in stats}
     assert by_name[V.STRATUM_A]["population_cohorts"] == 655
-    assert by_name[V.STRATUM_A]["population_rows"] == 90478
+    assert by_name[V.STRATUM_A]["population_rows"] == 90338
     assert by_name[V.STRATUM_B]["population_cohorts"] == 137
     assert by_name[V.STRATUM_B]["population_rows"] == 8971
     assert by_name[V.STRATUM_C]["population_cohorts"] == 106
-    assert by_name[V.STRATUM_C]["population_rows"] == 43604
+    assert by_name[V.STRATUM_C]["population_rows"] == 43468
 
     assert len(drawn) == 251
     assert [by_name[n]["cohorts_to_rule"] for n in V.STRATA] == [132, 69, 50]
@@ -1220,7 +1226,7 @@ def test_the_real_extract_draws_the_stratified_sample_it_documents(reworked):
     assert by_name[V.STRATUM_A]["disagreement_rows"] == 874
     assert by_name[V.STRATUM_B]["disagreement_rows"] == 704
     assert [by_name[n]["certainty_cohorts"] for n in V.STRATA] == [15, 4, 0]
-    assert by_name[V.STRATUM_A]["certainty_rows"] == 41282
+    assert by_name[V.STRATUM_A]["certainty_rows"] == 41281
     assert by_name[V.STRATUM_B]["certainty_rows"] == 4054
     for name in (V.STRATUM_A, V.STRATUM_B):
         assert by_name[name]["certainty_row_share"] == pytest.approx(
@@ -1230,11 +1236,11 @@ def test_the_real_extract_draws_the_stratified_sample_it_documents(reworked):
     assert [by_name[n]["random_population_cohorts"] for n in V.STRATA] == [
         640, 133, 106]
     assert by_name[V.STRATUM_A]["rows_seen_share"] == pytest.approx(
-        0.522, abs=5e-4)
+        0.523, abs=5e-4)
     assert by_name[V.STRATUM_B]["rows_seen_share"] == pytest.approx(
         0.685, abs=5e-4)
     assert by_name[V.STRATUM_C]["rows_seen_share"] == pytest.approx(
-        0.691, abs=5e-4)
+        0.690, abs=5e-4)
     assert by_name[V.STRATUM_C]["kish_n_eff"] < 3
 
     # the certainty slice cost the operator 19 cohorts and lost him nothing:

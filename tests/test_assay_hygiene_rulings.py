@@ -1,9 +1,11 @@
 """Task 9: the operator's rulings, as a regression suite over the rework.
 
-WHAT THIS FILE IS FOR. The 2026-08-21 rework reclassified 99,449 of the
-170,786 proposals in the real-extract run as `CLS_UNREACHABLE` (90,478) or
-`CLS_BOOTSTRAP` (8,971) -- measured by running `run_evidence` then `run_detect`
-over `assets/RUN1/01-extract` into a scratch directory. That is a large
+WHAT THIS FILE IS FOR. The 2026-08-21 rework reclassified 99,309 of the
+170,338 proposals in the real-extract run as `CLS_UNREACHABLE` (90,338) or
+`CLS_BOOTSTRAP` (8,971) -- re-measured 2026-08-31 by running `run_evidence` then
+`run_detect` over `assets/RUN1/01-extract` into a scratch directory; it read
+99,449 of 170,786 with 90,478 unreachable until the samples-row refusal of that
+date removed 448 proposals outright. That is a large
 claim to put in front of a human, and the only ground truth this package owns
 about house convention is the 111 Mode 2 cohorts and 17 Mode 1 cohorts he ruled
 BY HAND. If the reworked detector drops a cohort he approved, or still proposes
@@ -190,6 +192,59 @@ def _mode1_keys(findings, context) -> set[str]:
     return {R.cohort_key(b) for b in R.build_blocks(findings, context)}
 
 
+def _cohort_keys_per_row(findings, context) -> pd.Series:
+    """One cohort key per Mode 2 sheet row, off `label_mode2` and nothing else.
+
+    THE KEY IS NEVER RECONSTRUCTED HERE, which is this file's standing rule:
+    `review_mode2.label_mode2` derives the six columns and `review.cohort_key`
+    joins them, so a row's cohort and a block's cohort come from one definition.
+    """
+    labelled = M.label_mode2(findings, context)
+    return labelled[list(R.BLOCK_KEY)].astype(str).agg(
+        R.KEY_DELIMITER.join, axis=1)
+
+
+@pytest.fixture(scope="session")
+def cohorts_wholly_on_absent_samples(baseline, context) -> set[str]:
+    """Sheet cohorts EVERY row of which is about a sample MySQL does not have.
+
+    WHY THIS EXEMPTION EXISTS AND WHY IT IS DERIVED RATHER THAN LISTED. On
+    2026-08-31 `mode2.mode2_candidates` began refusing every proposal whose
+    SUBJECT has no row in the `samples` extract -- 448 rows over 185 samples,
+    which the detect census reports as `rows_refused_without_a_samples_row`.
+    Those samples exist as graph nodes and in `membership` and MySQL has no
+    record of them, so there is nothing to register, no project to write into
+    and no metadata the operator could have been ruling on.
+
+    ONE COHORT ON THE SHEET IS MADE ENTIRELY OF SUCH ROWS, 35 of 35, AND THE
+    OPERATOR RULED IT APPROVE. That approval cannot be honoured by any code:
+    `resolve_targets` already excluded all 35 at the far end of the pipeline
+    under "sample belongs to no project", which is how a proposal about a
+    non-existent sample looks once it reaches a project gate. So the cohort is
+    now refused at the front instead, visibly and by name, and the two tests
+    below EXPECT to lose it.
+
+    DERIVED FROM THE BASELINE FRAME, NEVER NAMED. No ruled cohort key may be
+    written into this public source file -- see the module docstring -- and a
+    hard-coded key would in any case exempt one string rather than one
+    condition. This computes the condition, so a cohort that disappears for any
+    OTHER reason still fails the tests below, and this exemption empties itself
+    the day the upstream data is fixed.
+
+    Read off `baseline`, the PRE-refusal artifact, because the reworked frame no
+    longer carries these rows at all: the population has to be counted where it
+    still exists.
+    """
+    known = {int(s) for s in
+             pd.read_parquet(EXTRACT / "samples.parquet").sample_id}
+    labelled = M.label_mode2(baseline, context)
+    keys = _cohort_keys_per_row(baseline, context)
+    absent = ~labelled.sample_id.map(lambda s: int(s) in known)
+    per_key = keys.groupby(keys).size()
+    absent_per_key = keys[absent.values].groupby(keys[absent.values]).size()
+    return {k for k, n in absent_per_key.items() if n == per_key[k]}
+
+
 # --- the fixtures must never become part of this repository ------------------
 
 
@@ -258,22 +313,48 @@ def test_the_real_extract_rework_reclassified_rows_the_pre_rework_run_did_not(
 
 
 def test_the_real_extract_keeps_every_mode2_cohort_the_operator_approved(
-        reworked, context):
-    """No approval may vanish from the Mode 2 sheet. Not one, for any reason.
+        reworked, context, cohorts_wholly_on_absent_samples):
+    """No approval may vanish from the Mode 2 sheet -- with ONE stated exception.
 
     These are the write candidates. A cohort he approved that the reworked
     detector no longer emits is a decision silently discarded, and the operator
     would have no way to notice: the sheet regenerates, the cohort is simply
     not on it, and the ruling file still says APPROVE.
+
+    THE EXCEPTION IS A COHORT THAT COULD NEVER HAVE BEEN WRITTEN, and it is
+    subtracted by CONDITION and not by name -- see
+    `cohorts_wholly_on_absent_samples`. Since 2026-08-31 a proposal about a
+    sample with no `samples` row is refused before any mode runs, and one sheet
+    cohort of 35 rows is made entirely of those. All 35 were already excluded at
+    the other end of the pipeline by `resolve_targets`' project gate, under the
+    milder and misleading reason "sample belongs to no project", so the
+    operator's APPROVE has never had a writable row behind it. The refusal moves
+    that fact from the end of the run to the front, where the census names it.
+
+    THE EXEMPTION IS ASSERTED NON-EMPTY AND EXACT, in both directions. If it
+    were empty this test would silently go back to asserting what it asserted
+    before; if it covered more than the cohorts actually lost it would be
+    licensing losses that have not happened.
     """
     ruled = _keys(_rulings(M2_RULINGS))
     approved = [k for k, r in ruled.items() if r == "APPROVE"]
     emitted = _sheet_keys(reworked, context)
+    expected_gone = cohorts_wholly_on_absent_samples
+    assert expected_gone, (
+        "no sheet cohort rests wholly on samples absent from the `samples` "
+        "frame, so the exemption below excuses nothing and this test would "
+        "pass without measuring the condition it names")
     lost = sorted(k for k in approved if k not in emitted)
-    assert not lost, (
+    assert set(lost) <= expected_gone, (
         f"the rework dropped {len(lost)} of {len(approved)} Mode 2 cohorts "
-        f"the operator APPROVED. Each one is a ruling that no longer has a "
-        f"proposal behind it:\n  " + "\n  ".join(lost))
+        f"the operator APPROVED, and {len(set(lost) - expected_gone)} of them "
+        f"is NOT explained by the samples-row refusal. Each one is a ruling "
+        f"that no longer has a proposal behind it:\n  "
+        + "\n  ".join(sorted(set(lost) - expected_gone)))
+    # ...and the exemption is spent rather than merely available: every cohort
+    # it excuses really is gone, so it cannot quietly grow to cover a future
+    # loss it was not measured against.
+    assert set(lost) == expected_gone & set(approved)
 
 
 def test_the_real_extract_puts_no_approved_cohort_behind_the_gate(
@@ -287,10 +368,12 @@ def test_the_real_extract_puts_no_approved_cohort_behind_the_gate(
     ANY row of a pattern he ruled legitimate, not whether the top of that
     pattern survived.
 
-    Measured on the 2026-08-24 run: 0 of the 100 approved cohorts hold a
-    reclassified row, and the reclassified population is disjoint from the
-    ruled one -- 792 of the 1,114 rated Mode 2 cohorts hold such a row and none
-    of them is on the 111-cohort sheet.
+    Re-measured 2026-08-31: 0 of the 100 approved cohorts hold a reclassified
+    row, and the reclassified population is disjoint from the ruled one -- 792
+    of the 1,113 rated Mode 2 cohorts hold such a row and none of them is on the
+    110-cohort sheet. (1,114 and 111 before the samples-row refusal took one
+    cohort off the sheet; the 792 did not move, the refused rows being
+    reachable-lane and unreachable-lane alike but never on the sheet.)
     """
     ruled = _keys(_rulings(M2_RULINGS))
     approved = {k for k, r in ruled.items() if r == "APPROVE"}
@@ -400,7 +483,7 @@ def test_the_real_extract_drops_every_cohort_the_operator_rejected(
 
 
 def test_the_real_extract_moves_no_cohort_on_either_review_surface(
-        reworked, baseline, context):
+        reworked, baseline, context, cohorts_wholly_on_absent_samples):
     """Before and after, cohort for cohort. The rework's whole visible cost.
 
     A count cannot answer this: the sheet could lose four cohorts and gain four
@@ -410,17 +493,36 @@ def test_the_real_extract_moves_no_cohort_on_either_review_surface(
     Measured 2026-08-24: Mode 1 holds 37 cohorts and Mode 2's sheet 111 over
     9,500 rows, identical before and after. The 99,449 rows the gate
     reclassified are disjoint from both surfaces.
+
+    RE-MEASURED 2026-08-31: Mode 1 is still identical, and the Mode 2 sheet
+    holds 110 cohorts over 9,463 rows -- 37 fewer rows than the 9,500 of
+    2026-08-24, being one 35-row cohort lost whole and 2 rows off a cohort that
+    survives. The one cohort it lost is made entirely
+    of proposals about samples with no `samples` row, which
+    `mode2.mode2_candidates` now refuses; it is subtracted by CONDITION and not
+    by name -- see `cohorts_wholly_on_absent_samples`. NOTHING WAS GAINED on
+    either surface, in either reading, and that half of the assertion is
+    untouched: a refusal may only remove.
     """
-    for mode, before, after in (
+    for mode, before, after, excused in (
             ("MODE_1", _mode1_keys(baseline, context),
-             _mode1_keys(reworked, context)),
+             _mode1_keys(reworked, context), set()),
             ("MODE_2 sheet", _sheet_keys(baseline, context),
-             _sheet_keys(reworked, context))):
-        assert before == after, (
-            f"the {mode} surface moved: {len(before - after)} cohort(s) lost, "
-            f"{len(after - before)} gained.\n  LOST: "
-            + "\n  LOST: ".join(sorted(before - after))
-            + "\n  GAINED: " + "\n  GAINED: ".join(sorted(after - before)))
+             _sheet_keys(reworked, context),
+             cohorts_wholly_on_absent_samples)):
+        assert not (after - before), (
+            f"the {mode} surface GAINED {len(after - before)} cohort(s), which "
+            f"no refusal can do:\n  GAINED: "
+            + "\n  GAINED: ".join(sorted(after - before)))
+        assert (before - after) <= excused, (
+            f"the {mode} surface moved: "
+            f"{len((before - after) - excused)} cohort(s) lost for a reason "
+            f"other than the samples-row refusal.\n  LOST: "
+            + "\n  LOST: ".join(sorted((before - after) - excused)))
+    # THE EXEMPTION IS SPENT, not merely held: the Mode 2 sheet really did lose
+    # every cohort it excuses, so it cannot silently cover a later loss.
+    assert (_sheet_keys(baseline, context) - _sheet_keys(reworked, context)) \
+        == cohorts_wholly_on_absent_samples
 
 
 def test_the_real_extract_reclassifies_no_row_that_could_reach_the_sheet(

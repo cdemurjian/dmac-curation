@@ -706,10 +706,10 @@ def test_the_two_directions_are_scored_and_reported_apart_and_never_pooled():
     """Every cell of the hand-traced table, and what pooling them would say.
 
     The two directions carry different evidential weight, so no figure this
-    module reports may cover both. Measured on the real extract, the demoted
-    direction recovers the curator's assay on 19,270 of 19,337 proposals in the
+    module reports may cover both. Re-measured 2026-08-31, the demoted
+    direction recovers the curator's assay on 19,259 of 19,326 proposals in the
     `[0.95,1.00]` band against 4,143 of 4,151 -- indistinguishable -- while in
-    `[0.00,0.50)` it recovers 210 of 18,996 against 519 of 8,806, five times
+    `[0.00,0.50)` it recovers 210 of 18,949 against 519 of 8,778, five times
     worse. One pooled number would hide both halves of that.
     """
     _, _, out = _run()
@@ -761,16 +761,16 @@ def test_the_two_directions_are_scored_and_reported_apart_and_never_pooled():
 def test_a_band_says_how_much_independent_evidence_its_rows_rest_on():
     """A row count counts affected samples, not distinct precedent.
 
-    Measured on the real extract, the `[0.95,1.00]` ADD_CHILD band's 19,337 rows
+    Re-measured 2026-08-31, the `[0.95,1.00]` ADD_CHILD band's 19,326 rows
     rest on 118 distinct `(n_both, n_child_only, n_parent_only)` triples and its
-    largest keys 5,688 of them; drop that group and the remaining 13,649 rows
+    largest keys 5,677 of them; drop that group and the remaining 13,649 rows
     still recover at 0.996. That is what rules out "one hop is doing all the
     work" as the explanation, so the column has to be on the table rather than
     left to whoever holds the parquet.
 
     A GROUP COUNT IS NOT AN INDEPENDENCE CLAIM, and 118 must not be read as the
-    discount on 19,337. Those groups are heavily unequal -- the top two key
-    10,163 rows, 52.6%, and the top three 11,720, 60.6% -- and the largest is the
+    discount on 19,326. Those groups are heavily unequal -- the top two key
+    10,152 rows, 52.5%, and the top three 11,709, 60.6% -- and the largest is the
     SAME triple `(22615, 0, 34)` that tops the ADD_PARENT band, so the two
     directions' top bands share their biggest single piece of evidence.
     `largest_group_rows` is on the table for exactly this reason: it is what lets
@@ -959,7 +959,7 @@ def test_the_real_extract_reproduces_both_recovery_curves_separately():
 
     THE HEADLINE, AND IT CUTS AGAINST THE SPEC'S DEMOTION OF `A_ADD_CHILD`. In
     the `[0.95,1.00]` band the demoted direction recovers the curator's assay on
-    19,270 of 19,337 proposals, 0.9965; the favoured direction recovers 4,143 of
+    19,259 of 19,326 proposals, 0.9965; the favoured direction recovers 4,143 of
     4,151, 0.9981. At equal precedent rate the two directions are
     indistinguishable, so `reverse_rate` at a given value is as good a guide to
     reading order as `propagation_rate` at that value.
@@ -967,15 +967,21 @@ def test_the_real_extract_reproduces_both_recovery_curves_separately():
     THE GROUP COUNTS -- 118 AND 95 -- ARE NOT A DISCOUNT ON THOSE ROW COUNTS AND
     THAT READING IS WITHDRAWN. They are pinned below because `main` prints them,
     not because they measure independence: the ADD_CHILD band's largest group
-    keys 5,688 of its 19,337 rows and its top three 60.6%, and its largest is the
+    keys 5,677 of its 19,326 rows and its top three 60.6%, and its largest is the
     SAME triple that tops the ADD_PARENT band. What survives is only that neither
     band is ONE hop. See
     `test_a_band_says_how_much_independent_evidence_its_rows_rest_on`.
 
     THE DEMOTION SURVIVES ON THE DIRECTION'S BULK AND NOT ON ITS TOP BAND. In
-    `[0.00,0.50)` the demoted direction recovers 210 of 18,996 against 519 of
-    8,806, five times worse -- and that is where almost all of its 117,331 rows
+    `[0.00,0.50)` the demoted direction recovers 210 of 18,949 against 519 of
+    8,778, five times worse -- and that is where almost all of its 117,026 rows
     sit.
+
+    EVERY FIGURE HERE MOVED ON 2026-08-31 AND BY ONE CAUSE, and none of them
+    moved much: `mode2.mode2_candidates` began refusing the 448 pairs whose
+    sample has no `samples` row, so the cold run makes 409 fewer proposals and
+    recovers 11 fewer held-out registrations of the 36,090 available -- all 11
+    ADD_CHILD. The refusal is not free and this is what it costs, measured.
 
     WHAT THIS DOES NOT MEASURE. The scored population is enriched with the
     registrations the split hid, which the live run would never propose because
@@ -1009,20 +1015,23 @@ def test_the_real_extract_reproduces_both_recovery_curves_separately():
     assert c["held_out_registrations"] == 42829
     assert c["held_out_registrations_with_no_neighbour"] == 6739
     assert c["recovered_add_parent"] == 9500
-    assert c["recovered_add_child"] == 20683
+    # 20,672 SINCE 2026-08-31, and the 11 lost are the whole cost of the
+    # samples-row refusal against ground truth: held-out registrations on
+    # samples the live detector may no longer propose for at all.
+    assert c["recovered_add_child"] == 20672 == 20683 - 11
     assert c["not_recovered_add_parent"] == 1185
-    assert c["not_recovered_add_child"] == 4668
+    assert c["not_recovered_add_child"] == 4679 == 4668 + 11
     assert c["recovered_in_the_other_direction_add_parent"] == 54
     assert c["recovered_in_the_other_direction_add_child"] == 0
 
-    assert c["proposals"] == 174788
-    assert c["proposals_scored"] == 59182
-    assert c["proposals_on_a_kept_sample"] == 115606
+    assert c["proposals"] == 174379
+    assert c["proposals_scored"] == 59086
+    assert c["proposals_on_a_kept_sample"] == 115293
     # the two per-direction views read the direction off DIFFERENT worlds -- the
     # curator's for `recovered_*` and the blinded run's for
     # `proposals_scored_correct_*` -- and differ by exactly the flipped pairs
     assert c["proposals_scored_correct_add_parent"] == 9500
-    assert c["proposals_scored_correct_add_child"] == 20737 == 20683 + 54
+    assert c["proposals_scored_correct_add_child"] == 20726 == 20672 + 54
 
     # BOTH CURVES, apart, with support
     def cell(band, action):
@@ -1034,7 +1043,7 @@ def test_the_real_extract_reproduces_both_recovery_curves_separately():
                  int(cell(b, S.A_ADD_CHILD).correct)) for b in B.BAND_LABELS}
     assert parent == {
         "NO_RATE": (11, 4),
-        "[0.00,0.50)": (8806, 519),
+        "[0.00,0.50)": (8778, 519),
         "[0.50,0.75)": (2869, 1757),
         "[0.75,0.90)": (1814, 1529),
         "[0.90,0.95)": (1626, 1548),
@@ -1042,11 +1051,11 @@ def test_the_real_extract_reproduces_both_recovery_curves_separately():
     }
     assert child == {
         "NO_RATE": (28, 7),
-        "[0.00,0.50)": (18996, 210),
+        "[0.00,0.50)": (18949, 210),
         "[0.50,0.75)": (318, 172),
-        "[0.75,0.90)": (949, 815),
+        "[0.75,0.90)": (939, 815),
         "[0.90,0.95)": (277, 263),
-        "[0.95,1.00]": (19337, 19270),
+        "[0.95,1.00]": (19326, 19259),
     }
 
     # THE 95% BAR, per direction and per band, and the answer is that ONE band
@@ -1064,7 +1073,7 @@ def test_the_real_extract_reproduces_both_recovery_curves_separately():
 
     # ...and it is not one hop doing the work in the direction that wins
     assert int(top_child.rule_groups) == 118
-    assert int(top_child.largest_group_rows) == 5688
+    assert int(top_child.largest_group_rows) == 5677
     rest_rows = int(top_child.rows) - int(top_child.largest_group_rows)
     rest_correct = int(top_child.correct) - int(top_child.largest_group_correct)
     assert rest_rows == 13649
