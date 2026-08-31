@@ -344,20 +344,25 @@ def _pair(row, context, sid_of, twins, children_of, proposed_holders) -> dict:
     }
 
 
-def build_blocks(findings: pd.DataFrame, context: dict,
-                 floor: float = FLOOR) -> list[dict]:
-    """Mode 2 rows at or above `floor`, grouped into review cohorts.
+def label_mode2(findings: pd.DataFrame, context: dict,
+                floor: float = FLOOR) -> pd.DataFrame:
+    """Mode 2 rows at or above `floor`, carrying the six cohort key columns.
 
-    The key is Mode 1's six fields, with the last two carrying what a lineage
-    row has instead of a term: `field` is `(lineage)` and `value` is the ACTION.
-    The action belongs in the key because ADD_PARENT and ADD_CHILD are different
-    writes against the same pair, and a cohort pooling them would take one
-    ruling for two decisions.
+    EXTRACTED SO THE ROW->COHORT ASSIGNMENT HAS ONE DEFINITION. `build_blocks`
+    groups on these columns and returns only aggregates, so a caller needing to
+    know WHICH rows a ruled cohort holds -- the registration set is built per
+    row, not per cohort -- had no way to ask, and the obvious workaround is to
+    re-derive `lab`, `parent_types`, `field` and `value` beside it. That is the
+    second key definition `review.cohort_key` exists to prevent, and it would
+    disagree with the first the day either changes.
+
+    Returns the labelled frame, empty if nothing clears the floor. `build_blocks`
+    groups it; `approved_rows` filters it. Neither spells the derivation itself.
     """
     m2 = findings[(findings["mode"] == S.MODE_2)
                   & (findings.precedent_rate >= floor)].copy()
     if m2.empty:
-        return []
+        return m2
 
     uid = R._uid_columns(m2.uuid)
     m2["lab"] = uid["lab"].values
@@ -370,6 +375,22 @@ def build_blocks(findings: pd.DataFrame, context: dict,
                    for v, a in zip(m2.raw_value, m2.action)]
     m2["band"] = [_band(r) for r in m2.precedent_rate]
     m2["contested_flag"] = m2.contested.fillna(False).astype(bool)
+    return m2
+
+
+def build_blocks(findings: pd.DataFrame, context: dict,
+                 floor: float = FLOOR) -> list[dict]:
+    """Mode 2 rows at or above `floor`, grouped into review cohorts.
+
+    The key is Mode 1's six fields, with the last two carrying what a lineage
+    row has instead of a term: `field` is `(lineage)` and `value` is the ACTION.
+    The action belongs in the key because ADD_PARENT and ADD_CHILD are different
+    writes against the same pair, and a cohort pooling them would take one
+    ruling for two decisions.
+    """
+    m2 = label_mode2(findings, context, floor)
+    if m2.empty:
+        return []
 
     sid_of = _neighbour_index(context)
     twins = context.get("analysis_twins", {})
