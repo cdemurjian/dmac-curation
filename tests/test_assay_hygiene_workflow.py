@@ -52,7 +52,7 @@ def test_the_project_gate_refuses_a_cross_project_row_by_injection():
     assays = pd.DataFrame({"assay_id": [501, 502],
                            "internal_assay_id": [74.0, 74.0],
                            "project_id": [1, 2]})
-    samples = pd.DataFrame({"sample_id": [10], "project_ids": [[1]]})
+    samples = pd.DataFrame({"sample_id": [10], "project_ids": ["1"]})
     rows = pd.DataFrame({"sample_id": [10], "internal_assay_id": [74]})
     manifest, _ = T.resolve(rows, assays, samples)
     assert manifest.write_target_seek_assay_id.tolist() == [501]
@@ -87,7 +87,7 @@ def test_the_happy_path_reaches_preflight_clean(tmp_path):
                               "backup_verified": True})
     assays = pd.DataFrame({"assay_id": [501], "internal_assay_id": [74.0],
                            "project_id": [1]})
-    samples = pd.DataFrame({"sample_id": [10], "project_ids": [[1]]})
+    samples = pd.DataFrame({"sample_id": [10], "project_ids": ["1"]})
     rows = pd.DataFrame({"sample_id": [10], "internal_assay_id": [74]})
     manifest, excluded = T.resolve(rows, assays, samples)
     assert excluded.empty

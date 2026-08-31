@@ -18,15 +18,21 @@ time and `assert_subset` is what `write` uses to prove the sheet never grew a
 row the gate did not see.
 
 EXCLUSION IS NOT REJECTION. A dropped row is an authorised registration with no
-correct target, and it is reported as such rather than silently discarded.
+correct target, and it is reported as such rather than silently discarded. The
+reason must be true of the row it is attached to: `NOT_IN_EXTRACT` and
+`NO_PROJECT` were one reason until 2026-08-31, which told a curator that 179
+RUN2 rows had a sample belonging to no project when those rows have no sample in
+the extract to belong to anything.
 """
 from __future__ import annotations
 
 import pandas as pd
 
+from .classify import project_index
 from .rulings import normalise_id
 
 TARGET_COLUMN = "write_target_seek_assay_id"
+NOT_IN_EXTRACT = "sample not present in the extract"
 NO_PROJECT = "sample belongs to no project"
 NO_CANDIDATE = "no assay with that internal id in the sample's project"
 AMBIGUOUS = "internal assay exists in more than one of the sample's projects"
@@ -43,14 +49,41 @@ def resolve(rows: pd.DataFrame, assays: pd.DataFrame,
     for a in assays.itertuples():
         by_project[(normalise_id(a.internal_assay_id), int(a.project_id))] = int(a.assay_id)
 
-    projects = {int(s.sample_id): list(s.project_ids)
-                for s in samples.itertuples()}
+    # PARSED THROUGH `classify.project_index`, NEVER ITERATED. `extract.py`
+    # builds this column with `GROUP_CONCAT(ps.project_id)`, so on the real
+    # extract it is a COMMA-JOINED STRING -- and null, not empty, for a sample
+    # in no project. `list("10")` is `["1", "0"]`, which resolves a sample in
+    # project 10 against projects 1 and 0 and, where either holds the internal
+    # assay, writes a WRONG TARGET carrying `project_ok=True`. That is the
+    # unrecoverable cross-project write this module exists to prevent, reached
+    # through the gate meant to stop it. `project_index` is the package's one
+    # reader of the column: it splits on `,`, dedupes the `2,2` GROUP_CONCAT
+    # spelling, sorts numerically and maps null to no projects at all.
+    projects = {sid: [p for p in ids.split(";") if p]
+                for sid, ids in project_index(samples).items()}
 
     kept, dropped = [], []
     for row in rows.itertuples():
         sample_id = int(row.sample_id)
         internal = normalise_id(row.internal_assay_id)
-        owned = projects.get(sample_id) or []
+        # TWO ABSENCES, TWO REASONS, AND ONLY ONE OF THEM IS ABOUT PROJECTS.
+        # `project_index` keys EVERY sample in the extract, mapping to the empty
+        # string where the sample is in no project, so a missing key and an
+        # empty list are different findings. A missing key means there is no
+        # `samples` row at all -- on the real data a Neo4j node with nothing
+        # behind it in MySQL -- and "belongs to no project" then asserts
+        # something about a sample that was never read. An empty list is the
+        # sample being there and genuinely in nothing. On the RUN2 approved rows
+        # the one old reason covered 242: 63 projectless and 179 absent. The
+        # curator's next move differs (fix the membership, versus find out why
+        # the sample is missing from the extract), so the two are reported
+        # apart. Neither is kept: both still lack a resolvable target.
+        if sample_id not in projects:
+            dropped.append({"sample_id": sample_id,
+                            "internal_assay_id": internal,
+                            "reason": NOT_IN_EXTRACT})
+            continue
+        owned = projects[sample_id] or []
         if not owned:
             dropped.append({"sample_id": sample_id,
                             "internal_assay_id": internal,

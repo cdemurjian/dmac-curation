@@ -83,7 +83,7 @@ def test_a_sample_in_two_projects_holding_the_assay_is_excluded_not_guessed():
     assays = pd.DataFrame({"assay_id": [501, 502],
                            "internal_assay_id": [74.0, 74.0],
                            "project_id": [1, 2]})
-    samples = pd.DataFrame({"sample_id": [10], "project_ids": [[1, 2]]})
+    samples = pd.DataFrame({"sample_id": [10], "project_ids": ["1,2"]})
     rows = pd.DataFrame({"sample_id": [10], "internal_assay_id": [74]})
     manifest, excluded = T.resolve(rows, assays, samples)
     assert manifest.empty, "an ambiguous target must not reach the manifest"
@@ -94,7 +94,7 @@ def test_a_sample_in_two_projects_where_only_one_holds_it_still_resolves():
     """Multi-project is not itself ambiguous; two candidates are."""
     assays = pd.DataFrame({"assay_id": [501], "internal_assay_id": [74.0],
                            "project_id": [2]})
-    samples = pd.DataFrame({"sample_id": [10], "project_ids": [[1, 2]]})
+    samples = pd.DataFrame({"sample_id": [10], "project_ids": ["1,2"]})
     rows = pd.DataFrame({"sample_id": [10], "internal_assay_id": [74]})
     manifest, excluded = T.resolve(rows, assays, samples)
     assert manifest.write_target_seek_assay_id.tolist() == [501]
