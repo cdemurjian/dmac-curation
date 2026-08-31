@@ -6,7 +6,8 @@ every proposal in front of a human, and writes the approved ones to production.
 
 ## The run model
 
-Runs are numbered at `assets/RUN<n>/` and hold eight tiers:
+Runs are numbered at `assets/RUN<n>/` and hold eight protected tiers, plus two
+the relabel stage adds:
 
 ```
 assets/
@@ -20,7 +21,14 @@ assets/
     04-artifacts/         read-only   -- everything the drivers write
     05-review/            read-only
     06-findings/          read-only
-    07-process/           WRITABLE    -- the only tier that is not chmodded
+    07-process/           WRITABLE    -- the only ORIGINAL tier not chmodded
+    08-extract-post-write/ WRITABLE   -- the post-write extract relabel plans from
+    09-relabel/           WRITABLE    -- relabel's backup, manifest and row file
+
+`08` and `09` exist because `00`-`06` are chmod 0o555 from run creation and the
+relabel stage runs AFTER them. Its inputs and outputs are not part of the
+immutable baseline the run was detected from, and writing them into
+`03-stage0-applied` — which an earlier draft of the command did — fails outright.
 ```
 
 Tiers `00`–`06` are chmodded `0o555`/`0o444` **at creation**, not at the end of a
@@ -140,34 +148,107 @@ The vocabulary gate runs before every mode. Only `GATE_UNREACHABLE` and
 | `curate-assay-detect` | evidence + detection into the run's own out_dir | run artifacts |
 | `curate-assay-review` | serve surfaces, ingest rulings, auto-backup | ruling store |
 | `curate-assay-resolve` | internal → SEEK targets behind the project gate | run artifacts |
-| `curate-assay-write` | preflight (8 refusals), chunk, **operator posts by hand**, reconcile | **production** |
+| `curate-assay-write` | build the sheet, preflight (8 refusals), submit, reconcile against the DB | **production** |
+| `curate-assay-relabel` | repair the DERIVED_FROM labels the write invalidated | **the graph** |
 | `curate-assay-status` | read the lockfile, report position | nothing |
 | `curate-assay-backup` | dated, verified tarball of the store | backup dir |
 
+**`relabel` is the closing stage of a run, not an optional extra.** A
+`DERIVED_FROM` edge's assay label is `parent_assays ∩ child_assays` computed over
+`assay_assets`, and it is a STORED PROPERTY, not a view. Every successful write
+therefore invalidates the edges touching the written samples and nothing
+notices. A run that stops at `write` leaves the graph disagreeing with the
+database it was derived from. Measured on RUN2: the 740-row write left 1,641
+edges dark that should not have been.
+
 ## What is not built yet
 
-The command table is a design, not a closed loop. Three joints have no code, and
-a run has to bridge each of them by hand. Check this list before planning a run.
+The command table is a design, not a closed loop. **One joint has no code**;
+the other two are closed as of 2026-08-31, when RUN2 ran the whole chain
+end to end for the first time. Check this list before planning a run.
 
-**Review → the ruling store.** `ingest.ingest` requires a literal `cohort_key`
-column and refuses the whole file without it (`scripts/assay_hygiene/ingest.py:28`,
-`:39-44`), but no review surface emits that column: `review_mode2.to_csv` writes
-the six key fields separately (`review_mode2.py:443-472`) and uses `cohort_key`
-only as a preset lookup. You must build the `{cohort_key: pair_key}` map the
-ingest snippet takes as `cohorts` yourself, from `review.cohort_key`
-(`review.py:587`) — the one definition, never re-derive it.
+**Review → the ruling store — HALF CLOSED.** The sheet now emits the column
+`ingest` joins on. `review.EXPORT_COLUMNS` leads with `cohort_key`
+(`review.py:130`), the page's export writes it from the `data-k` it already
+carries, and `review_mode2.to_csv` emits it as column 1 (`review_mode2.py:485`)
+— all from `review.cohort_key` (`review.py:606`), the one definition. A sheet
+straight out of `main` ingests with no hand edit, and `load_presets` still reads
+a sheet exported before the column existed.
+
+What is still yours to build is `ingest`'s **second** argument: the
+`{cohort_key: pair_key}` map, `cohort_key → (sample_type, internal_assay_id,
+action)`. Resolve the assay title through `migrate_rulings.title_index`, which
+refuses an ambiguous title rather than picking. Never re-derive the key itself.
 
 **Review → resolve.** `curate-assay-resolve` reads
 `$RUN/04-artifacts/approved-rows.csv` (`commands/curate-assay-resolve.md:19`).
 **Nothing writes it.** Expanding the pair-keyed store into a row-level
 `(sample_id, internal_assay_id)` frame is manual work today.
 
-**Resolve → write.** No module builds the `UPDATE_ASSAY` sheet
-(`sample_id, assay_id, uid, current_pair, new_pair`), and there is no HTTP client
-anywhere in `scripts/assay_hygiene/`. `preflight.check` and `chunker.reconcile`
-are a library the operator must remember to call on either side of a submission
-made by hand; nothing enforces that either ran. `curate-assay-write.md:8` mentions
-a `--confirm` flag — it does not exist; there is no CLI in this mode at all.
+**Resolve → write — HALF CLOSED.** `update_assay_sheet` now builds the workbook
+from a run's `MANIFEST.csv` and its own extract:
+
+```bash
+PYTHONPATH=scripts uv run --with pandas --with pyarrow --with openpyxl \
+  python -m assay_hygiene.update_assay_sheet
+```
+
+**Read that module's docstring before touching the sheet.** The five headers are
+exact (`seek/sample/upload.py:818`) and a missing one fails the whole file with
+error 701, not a row. And the Current/New "pairs" `preflight` names are COLUMN
+pairs — `(Assay ID, Assay Direction)` — not `sample:assay`. The sample reaches
+the endpoint only through `getSampleID(dici['Sample UID'])`. A sheet built to the
+other reading passes all eight refusals and registers every row against the
+wrong assay.
+
+**Resolve → write, the submitter — CLOSED.** `submit_update_assay.py` is the
+submitter that performed RUN1's 25,765-row write, recovered from that session
+and vendored unchanged in logic. Dry run unless `--confirm`; runs on the box;
+carries its own delete-safety, project-consistency and **live uid-uniqueness**
+gates. `--confirm` is real here, whatever `curate-assay-write.md` says about the
+mode's other commands.
+
+Still open: `preflight.check` and `chunker.reconcile` remain a library the
+operator must call on either side of a submission; nothing enforces that either
+ran, and there is no CLI for the mode as a whole.
+
+## Resuming a run that was closed early
+
+`close` releases the lock, and `create` allocates a NEW run number and refuses
+while anything is open — so for a while there was no way back into a run that
+had been closed before it finished, and resuming meant editing the lockfile by
+hand. `runstate.reopen(root, run)` is that path:
+
+```bash
+PYTHONPATH=scripts uv run python -c "
+from pathlib import Path
+from assay_hygiene.runstate import reopen
+print(reopen(Path('assets'), run=2))"
+```
+
+It takes the run number as an argument rather than reopening whatever the
+lockfile holds — reopening a run you have misidentified re-submits its rows. It
+re-stamps the pid, does not touch `step`, refuses while a different run is open,
+and is a no-op on a run already open.
+
+## Production defects this mode has hit, and has not fixed
+
+**`samples.uuid` has no unique constraint, and duplicate-uuid samples exist.**
+Created by an upload that inserted each row twice. A duplicated uuid resolves to
+`None` in `_retrieveSampleByUID` exactly as a missing one does, which 500s a
+whole submission mid-write. RUN1 lost chunk 06 to four of them; RUN2's manifest
+carries four as well. Registrations for those samples are unwritable until
+someone deduplicates them, which means choosing which of two identical rows
+survives — not a decision to fold into a run.
+
+**The same missing-constraint pattern** is why `assay_assets` idempotency rests
+on `storeOneRecord`'s application-level read-before-write rather than on the
+database: there is no unique index on `(assay_id, asset_id, asset_type)` either.
+
+**A sample in no project has no correct registration target.** 242 of RUN2's
+1,043 approved rows (23%) belong to no project at all, against RUN1's 1.4%. That
+is an upstream data problem; `resolve` excludes them rather than papering over
+it.
 
 ## The carry-forward split — designed, not yet operational
 

@@ -18,6 +18,36 @@ was 46%. After the repair, 98%. It took 30 seconds.
 
 This is the closing stage of a run, not an optional extra.
 
+## The extract must be POST-WRITE. This is the trap.
+
+`$RUN/01-extract/` is the snapshot the run was *detected* from, taken before the
+write. Backing up from it records labels the graph no longer has, so the undo
+manifest it produces would, if ever applied, re-dark every edge the write and a
+previous repair already lit — 416,355 of them on the 2026-08-28 run.
+
+**So every command below reads `$EXTRACT`, never `$RUN/01-extract`.** Pull a
+fresh one after the write lands:
+
+```bash
+RUN=assets/RUN2
+EXTRACT=$RUN/08-extract-post-write        # NOT 01-extract
+OUT=$RUN/09-relabel                       # NOT 03-stage0-applied, which is 0o555
+mkdir -p $EXTRACT $OUT
+
+scp scripts/assay_hygiene/driver_extract.py fairdata:/tmp/
+ssh fairdata 'docker cp /tmp/driver_extract.py nextseek:/tmp/'
+ssh fairdata 'docker exec -i nextseek uv run manage.py shell' \
+    < scripts/assay_hygiene/driver_extract.py
+# then copy the eight parquet frames back into $EXTRACT and remove them
+# from the box -- they carry sample identifiers.
+```
+
+**Two tiers outside `00`–`06`, both deliberate.** `00`–`06` are chmod 0o555 from
+the moment the run is created, so neither the post-write extract nor this
+stage's own artifacts can live there — and neither belongs in the immutable
+baseline the run was detected from anyway. Writing into `03-stage0-applied`
+fails outright; it is stage 0's record, not this stage's.
+
 ## Step 1 is the backup. There is no step 0.
 
 ```bash
@@ -26,8 +56,8 @@ PYTHONPATH=scripts uv run --with pandas --with pyarrow python -c "
 import pandas as pd
 from pathlib import Path
 from assay_hygiene.relabel import back_up_edges
-edges = pd.read_parquet(f'$RUN/01-extract/edges.parquet')
-print('backed up ->', back_up_edges(edges, Path('$RUN/03-stage0-applied/relabel-before.csv.gz')))
+edges = pd.read_parquet(f'$EXTRACT/edges.parquet')
+print('backed up ->', back_up_edges(edges, Path('$OUT/relabel-before.csv.gz')))
 "
 ```
 
@@ -35,7 +65,9 @@ It writes **every** edge's current label, not just the ones about to change, the
 re-reads the file and refuses unless the row count matches. A backup of the
 write set alone cannot restore an edge some other writer changed inside the
 window, and taking the whole graph costs one pass over a frame already in
-memory — about 2.5MB compressed.
+memory — **6.9MB compressed** for 802,231 edges, measured 2026-08-31. (An
+earlier draft of this file said 2.5MB. It is not; do not use that to
+sanity-check your own run.)
 
 `BackupUnverified` means stop. Nothing has been written to the graph.
 
@@ -47,15 +79,15 @@ import pandas as pd, json
 from pathlib import Path
 from assay_hygiene.relabel import plan_relabel, write_set, census, to_rows
 RUN = Path('$RUN')
-read = lambda n: pd.read_parquet(RUN/'01-extract'/f'{n}.parquet')
+read = lambda n: pd.read_parquet(Path('$EXTRACT')/f'{n}.parquet')
 plan = plan_relabel(read('edges'), read('samples'), read('membership'),
                     read('assays'), read('sops'))
 for bucket, n in census(plan).items():
     print(f'  {bucket:<14} {n:>9,}')
 rows = to_rows(write_set(plan), half='after')
-out = RUN/'03-stage0-applied'/'relabel-rows.jsonl'
+out = Path('$OUT')/'relabel-rows.jsonl'
 out.write_text('\n'.join(json.dumps(r) for r in rows) + '\n')
-plan.to_csv(RUN/'03-stage0-applied'/'relabel-manifest.csv.gz', index=False,
+plan.to_csv(Path('$OUT')/'relabel-manifest.csv.gz', index=False,
             compression='gzip')
 print(f'\n  {len(rows):,} rows queued -> {out}')
 "
@@ -73,9 +105,15 @@ repair. Report the count; do not act on it without a ruling.
 
 ## Write
 
+**The extract step's cleanup deleted the package this step needs.** Pulling the
+extract ends by removing `/tmp/assay_hygiene` and the parquet beside it from the
+box — correct, because the extract output carries sample identifiers — but the
+write below needs that same package back. Re-copying is the first line, not an
+oversight you can skip because you copied it twenty minutes ago.
+
 ```bash
 scp -r ./scripts/assay_hygiene fairdata:/tmp/
-scp $RUN/03-stage0-applied/relabel-rows.jsonl fairdata:/tmp/relabel-rows.jsonl
+scp $OUT/relabel-rows.jsonl fairdata:/tmp/relabel-rows.jsonl
 ssh fairdata 'docker exec nextseek mkdir -p /tmp/scripts'
 ssh fairdata 'docker cp /tmp/assay_hygiene nextseek:/tmp/scripts/assay_hygiene'
 ssh fairdata 'docker cp /tmp/relabel-rows.jsonl nextseek:/tmp/'
@@ -106,7 +144,7 @@ PYTHONPATH=scripts uv run --with pandas python -c "
 import pandas as pd, json
 from pathlib import Path
 from assay_hygiene.relabel import to_rows
-plan = pd.read_csv('$RUN/03-stage0-applied/relabel-manifest.csv.gz')
+plan = pd.read_csv('$OUT/relabel-manifest.csv.gz')
 written = plan[plan.disposition.isin(['GAIN','CHANGE'])]
 rows = to_rows(written, half='before')
 Path('/tmp/relabel-undo.jsonl').write_text('\n'.join(json.dumps(r) for r in rows) + '\n')

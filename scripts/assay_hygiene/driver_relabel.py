@@ -1,13 +1,16 @@
 """Piped into `manage.py shell` on the box to perform the relabel write.
 
-Reads a row file the laptop produced and the operator reviewed. Contains no
+Reads a row file the laptop produced and the operator reviewed. NOT from
+`03-stage0-applied`, which is 0o555 from run creation and is stage 0's record --
+this stage writes to `09-relabel`, and the extract it plans from must be a
+POST-WRITE one, never the run's own `01-extract`. Contains no
 logic: the plan, the diff and the five bucket counts were computed, reported and
 approved before this runs, and the chunking lives in `relabel.apply_rows` where
 tests cover it. Nothing here recomputes a label, so what reaches the graph is
 exactly what the dry-run report described.
 
     scp -r ./scripts/assay_hygiene fairdata:/tmp/
-    scp <run>/03-stage0-applied/relabel-rows.jsonl fairdata:/tmp/relabel-rows.jsonl
+    scp <run>/09-relabel/relabel-rows.jsonl fairdata:/tmp/relabel-rows.jsonl
     ssh fairdata 'docker exec nextseek mkdir -p /tmp/scripts'
     ssh fairdata 'docker cp /tmp/assay_hygiene nextseek:/tmp/scripts/assay_hygiene'
     ssh fairdata 'docker cp /tmp/relabel-rows.jsonl nextseek:/tmp/'
