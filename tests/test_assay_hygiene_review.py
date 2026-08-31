@@ -633,20 +633,69 @@ def test_every_storage_call_is_guarded_and_the_page_says_when_it_is_not():
         "the page never tells a curator their rulings are not being kept")
 
 
-def test_the_export_contract_is_the_eight_columns_and_the_script_emits_them():
+def test_the_export_contract_is_the_nine_columns_and_the_script_emits_them():
     """Requirement 6's second half, pinned on BOTH sides.
 
     The header the script writes and the tuple this module publishes have to be
-    the same eight names in the same order, or a ruling file exported from the
+    the same nine names in the same order, or a ruling file exported from the
     page cannot be read back by anything that trusts `EXPORT_COLUMNS`.
+
+    `cohort_key` LEADS, and the six components still travel beside it. The key
+    is what `ingest` joins on; the components are what a human reads. Dropping
+    either one breaks a different reader.
     """
-    assert R.EXPORT_COLUMNS == ("lab", "sample_type", "parent_types", "assay",
-                                "field", "value", "ruling", "note")
+    assert R.EXPORT_COLUMNS == ("cohort_key", "lab", "sample_type",
+                                "parent_types", "assay", "field", "value",
+                                "ruling", "note")
     js = _script(_html())
     header = re.search(r'var rows = \[\[(.*?)\]\.join', js, re.S)
     assert header, "the export builder does not start from a header row"
     names = re.findall(r'"([a-z_]+)"', header.group(1))
     assert tuple(names) == R.EXPORT_COLUMNS
+
+
+def test_the_legacy_export_is_the_nine_without_the_key():
+    """What sheets exported BEFORE the key column carried, kept nameable.
+
+    RUN2's rulings are a file in this shape and they are a human's judgement on
+    62 cohorts. A reader that can only parse the new shape cannot read them.
+    """
+    assert R.LEGACY_EXPORT_COLUMNS == ("lab", "sample_type", "parent_types",
+                                       "assay", "field", "value", "ruling",
+                                       "note")
+    assert R.EXPORT_COLUMNS == (R.KEY_COLUMN,) + R.LEGACY_EXPORT_COLUMNS
+
+
+def test_the_column_the_page_emits_is_the_column_the_ingester_joins_on():
+    """Pinned on BOTH sides, because the two modules cannot import each other.
+
+    `ingest` is deliberately minimal -- it imports `rulings` and nothing else,
+    because it is the one place a mistake registers rows nobody approved. So
+    the name is declared twice and this test is what stops the two drifting.
+    A rename on either side alone makes every ingest refuse whole-file.
+    """
+    from assay_hygiene import ingest as I
+    assert R.KEY_COLUMN == I.KEY_COLUMN == "cohort_key"
+
+
+def test_the_exported_row_carries_the_key_itself_and_not_only_its_parts():
+    """The key is already in the DOM as `data-k`; the export used to split it.
+
+    `_notes_html` writes `data-k="<cohort_key>"`, and the builder took that
+    string, split it on the delimiter, and emitted the six pieces -- throwing
+    away the one value `ingest` needs and no other reader can rebuild without
+    a second definition of the key.
+    """
+    js = _script(_html())
+    build = re.search(r"function build\(\)\{(.*?)\n\}", js, re.S)
+    assert build, "the script has no build() to export from"
+    body = build.group(1)
+    assert re.search(r"\[\s*d\.dataset\.k\s*\]", body), (
+        "the exported row never emits `d.dataset.k` whole, so it carries no "
+        "cohort_key column and every ingest of this sheet refuses whole-file")
+    assert "d.dataset.k.split" in body, (
+        "the six key components no longer travel; a human reading the export "
+        "gets one opaque delimited string and nothing to sort or filter on")
 
 
 def test_a_ruling_key_round_trips_to_exactly_one_emitted_cohort():

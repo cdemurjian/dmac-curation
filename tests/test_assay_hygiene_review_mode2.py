@@ -249,6 +249,85 @@ def test_the_csv_carries_the_key_the_evidence_and_empty_ruling_columns():
     assert list(frame.ruling) == [""] and list(frame.note) == [""]
 
 
+def test_the_csv_carries_the_cohort_key_the_ingester_joins_on():
+    """The defect RUN2 hit: the sheet could not be ingested by its own ingester.
+
+    `to_csv` computed `R.cohort_key(b)` to look up presets and then discarded
+    it, so every operator ruling refused with "the sheet has no 'cohort_key'
+    column". The key is emitted from the ONE definition, never rebuilt here.
+    """
+    blocks = _blocks([_m2(900, "TIS-240101ENG-900")])
+    frame = M.to_csv(blocks)
+    assert frame.columns[0] == R.KEY_COLUMN, (
+        "the key is not the first column; ingest does not care about position "
+        "but a human scanning the sheet for what a row IS does")
+    assert list(frame[R.KEY_COLUMN]) == [R.cohort_key(b) for b in blocks]
+
+
+def test_the_csv_this_sheet_writes_ingests_without_a_hand_edit():
+    """End to end, because each half passed on its own while the join did not.
+
+    This is the whole property: what `main` writes, an operator fills in, and
+    `ingest` reads back, with nothing assembled by hand in between.
+    """
+    from assay_hygiene import ingest as I
+
+    blocks = _blocks([_m2(900, "TIS-240101ENG-900")])
+    edited = M.to_csv(blocks)
+    edited.loc[:, "ruling"] = "APPROVE"
+    cohorts = {R.cohort_key(b): (b["sample_type"], 7, "TERM") for b in blocks}
+
+    rulings = I.ingest(edited, cohorts, ruled_on="2026-08-31")
+    assert [r.verdict for r in rulings] == ["APPROVE"]
+    assert [r.key for r in rulings] == [cohorts[R.cohort_key(blocks[0])]]
+
+
+def test_load_presets_still_reads_an_export_written_before_the_key_column(
+        tmp_path):
+    """RUN2's 62 rulings are a file in the old shape and cannot be regenerated.
+
+    A stricter reader would refuse them and the judgement would be stranded in
+    a file no stage can open.
+    """
+    path = tmp_path / M.PRESET_NAME
+    pd.DataFrame(
+        [("ENG", "D.IMG", "TIS", "Flow Cytometry", "(lineage)",
+          "ADD_PARENT_TO_ASSAY", "APPROVE", "a note")],
+        columns=list(R.LEGACY_EXPORT_COLUMNS)).to_csv(
+            path, sep="\t", index=False)
+    assert M.load_presets(path) == {
+        "ENG|D.IMG|TIS|Flow Cytometry|(lineage)|ADD_PARENT_TO_ASSAY":
+        ("APPROVE", "a note")}
+
+
+def test_load_presets_reads_the_export_that_carries_the_key(tmp_path):
+    path = tmp_path / M.PRESET_NAME
+    key = "ENG|D.IMG|TIS|Flow Cytometry|(lineage)|ADD_PARENT_TO_ASSAY"
+    pd.DataFrame(
+        [(key, "ENG", "D.IMG", "TIS", "Flow Cytometry", "(lineage)",
+          "ADD_PARENT_TO_ASSAY", "APPROVE", "a note")],
+        columns=list(R.EXPORT_COLUMNS)).to_csv(path, sep="\t", index=False)
+    assert M.load_presets(path) == {key: ("APPROVE", "a note")}
+
+
+def test_load_presets_refuses_a_key_that_disagrees_with_its_own_row(tmp_path):
+    """Two statements of identity in one row, so they are checked against each
+    other rather than one being picked.
+
+    A hand-edited component with the key left alone -- or the reverse -- reads
+    as a ruling on a cohort nobody ruled, and picking either side silently
+    files it against the wrong pair.
+    """
+    path = tmp_path / M.PRESET_NAME
+    pd.DataFrame(
+        [("ENG|D.IMG|TIS|Flow Cytometry|(lineage)|ADD_CHILD_TO_ASSAY",
+          "ENG", "D.IMG", "TIS", "Flow Cytometry", "(lineage)",
+          "ADD_PARENT_TO_ASSAY", "APPROVE", "")],
+        columns=list(R.EXPORT_COLUMNS)).to_csv(path, sep="\t", index=False)
+    with pytest.raises(ValueError, match="disagrees"):
+        M.load_presets(path)
+
+
 def test_the_page_says_nothing_here_writes():
     """The same boundary Mode 1's callout states, because it is the same one."""
     page = M.render(_blocks([_m2(900, "TIS-240101ENG-900")]))
@@ -577,8 +656,15 @@ def test_a_sample_with_no_children_says_so_rather_than_rendering_nothing():
 
 
 def _preset_file(tmp_path, rows):
+    """`rows` are the six key fields then ruling and note; the key is derived.
+
+    Derived with `R.cohort_key` and not joined here, so the fixture cannot be
+    the thing that disagrees with the module under test.
+    """
     path = tmp_path / M.PRESET_NAME
-    frame = pd.DataFrame(rows, columns=list(R.EXPORT_COLUMNS))
+    keyed = [(R.cohort_key(dict(zip(R.BLOCK_KEY, r))),) + tuple(r)
+             for r in rows]
+    frame = pd.DataFrame(keyed, columns=list(R.EXPORT_COLUMNS))
     frame.to_csv(path, sep="\t", index=False)
     return path
 

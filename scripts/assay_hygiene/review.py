@@ -107,8 +107,27 @@ UNTYPED = "UNTYPED"
 BLOCK_KEY = ("lab", "sample_type", "parent_types", "assay", "field", "value")
 KEY_DELIMITER = "|"
 
-# The exported ruling row: the six key fields, then what the human decided.
-EXPORT_COLUMNS = BLOCK_KEY + ("ruling", "note")
+# The name `ingest` joins an operator's edited sheet on. DECLARED HERE BECAUSE
+# THIS IS THE SIDE THAT EMITS IT, and repeated in `ingest.KEY_COLUMN` because
+# that module imports `rulings` and nothing else on purpose -- it is the one
+# place a mistake registers rows nobody approved, and it does not take this
+# module's whole import chain for one string. The suite pins the two equal.
+KEY_COLUMN = "cohort_key"
+
+# What sheets exported before `KEY_COLUMN` was emitted: the six key fields,
+# then what the human decided. Named rather than deleted because RUN2's rulings
+# are a file in this shape -- a human's judgement on 62 cohorts, which no run
+# regenerates -- and a reader that cannot parse it strands them.
+LEGACY_EXPORT_COLUMNS = BLOCK_KEY + ("ruling", "note")
+
+# The exported ruling row: the key, then the six fields it is joined from, then
+# what the human decided. BOTH THE KEY AND ITS COMPONENTS TRAVEL. The key is
+# what `ingest` joins on and what nothing downstream can rebuild without a
+# second definition of it; the components are what a human sorts and filters
+# the sheet by. Emitting only one of the two breaks a different reader, and
+# emitting only the components is the defect that made RUN2's sheet
+# un-ingestible by the ingester its own mode documents.
+EXPORT_COLUMNS = (KEY_COLUMN,) + LEGACY_EXPORT_COLUMNS
 
 # Caps. Each one is RENDERED WITH ITS DENOMINATOR wherever it bites, which is
 # the same rule `run_detect._more` keeps: a cohort of 400 showing 5 and not
@@ -844,12 +863,12 @@ function count(){
   cnt.style.color = STORE ? "" : "#b45309";
 }
 function build(){
-  var rows = [["lab","sample_type","parent_types","assay","field","value","ruling","note"].join("\t")];
+  var rows = [["cohort_key","lab","sample_type","parent_types","assay","field","value","ruling","note"].join("\t")];
   widgets().forEach(function(w){
     var d = w.querySelector(".dec"), n = w.querySelector(".note");
     if (!d || !n) return;
     if (!d.value && !n.value.trim()) return;
-    rows.push(d.dataset.k.split("|").concat([d.value, n.value.replace(/\s+/g, " ").trim()]).join("\t"));
+    rows.push([d.dataset.k].concat(d.dataset.k.split("|"), [d.value, n.value.replace(/\s+/g, " ").trim()]).join("\t"));
   });
   return rows.length > 1 ? rows.join("\n") : "(nothing ruled on yet)";
 }

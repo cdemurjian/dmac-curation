@@ -11,6 +11,11 @@ reason. The **CSV** carries one row per cohort with a blank `ruling` column.
 The operator edits the CSV and hands it back. Judgement therefore lives in a
 diffable, greppable file a later reader can audit.
 
+Both surfaces emit `cohort_key` as column 1, which is what `ingest` joins on, so
+a sheet straight out of `main` ingests unedited. Do not add the column by hand;
+if it is missing, the sheet predates the fix and the six key fields are still
+there to rebuild it from — through `review.cohort_key`, never a local join.
+
 `assay_hygiene.review_mode2` already builds both for Mode 2 — `build_blocks`,
 `to_csv`, and the `REVIEW_NAME` / `CSV_NAME` constants. Use them. Do not write a
 second surface builder, and above all do not construct the cohort key locally:

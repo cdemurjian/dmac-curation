@@ -195,20 +195,41 @@ def load_presets(path) -> dict[str, tuple[str, str]]:
     if not path.exists():
         return {}
     frame = pd.read_csv(path, sep="\t", dtype=str).fillna("")
-    expected = list(R.EXPORT_COLUMNS)
-    if list(frame.columns) != expected:
+    columns = list(frame.columns)
+    # BOTH SHAPES ARE READ. The sheet gained a `cohort_key` column; the rulings
+    # exported before it did not carry one, and those files are a human's
+    # judgement that no run regenerates. Refusing them to keep one code path
+    # would strand the only copy of that judgement.
+    if columns not in (list(R.EXPORT_COLUMNS), list(R.LEGACY_EXPORT_COLUMNS)):
         raise ValueError(
-            f"{path} has columns {list(frame.columns)}; the sheet exports "
-            f"{expected}. The preset file IS an export -- paste it unchanged.")
+            f"{path} has columns {columns}; the sheet exports "
+            f"{list(R.EXPORT_COLUMNS)}, or {list(R.LEGACY_EXPORT_COLUMNS)} if "
+            "it was exported before the sheet carried the key. The preset "
+            "file IS an export -- paste it unchanged.")
     known = {value for value, _label in R.RULING_OPTIONS}
     bad = sorted({r for r in frame.ruling if r not in known})
     if bad:
         raise ValueError(
             f"{path} carries ruling(s) the sheet cannot render: {bad}. "
             f"RULING_OPTIONS is {sorted(known)}.")
-    return {R.KEY_DELIMITER.join(row[c] for c in R.BLOCK_KEY):
-            (row["ruling"], row["note"])
-            for _i, row in frame.iterrows()}
+
+    out = {}
+    for i, row in frame.iterrows():
+        # ONE DEFINITION: the key is `R.cohort_key` over the row's own six
+        # fields, here as everywhere else. When the file also carries the key
+        # the two are CHECKED AGAINST EACH OTHER rather than one being picked
+        # -- a row edited on one side only is a ruling on a cohort nobody
+        # ruled, and either choice files it silently against the wrong pair.
+        key = R.cohort_key(row)
+        if R.KEY_COLUMN in columns and row[R.KEY_COLUMN] != key:
+            raise ValueError(
+                f"{path} row {i}: the {R.KEY_COLUMN} column says "
+                f"{row[R.KEY_COLUMN]!r} and the row's own six key fields join "
+                f"to {key!r}. The key disagrees with the row it sits on, so "
+                "one of the two was hand-edited; filing this ruling against "
+                "either would record it on a cohort nobody ruled.")
+        out[key] = (row["ruling"], row["note"])
+    return out
 
 
 def _children_index(context: dict) -> dict[int, set]:
@@ -469,7 +490,15 @@ def to_csv(blocks: list[dict], presets: dict | None = None) -> pd.DataFrame:
     per-sample examples on purpose: this is the triage pass, and the examples
     are what the html is for.
     """
+    presets = presets or {}
     return pd.DataFrame([{
+        # THE KEY LEADS, and it is `R.cohort_key` and never a join written
+        # here. `ingest` refuses whole-file without this column, so a sheet
+        # that omits it cannot be read back by the ingester this mode
+        # documents -- which is exactly what RUN2 hit, and worked around by
+        # hand. A second join written locally is the other half of that
+        # failure: one edit away from keying rulings differently from storage.
+        R.KEY_COLUMN: (key := R.cohort_key(b)),
         "band": b["band"],
         "lab": b["lab"], "sample_type": b["sample_type"],
         "parent_types": b["parent_types"], "assay": b["assay"],
@@ -488,8 +517,8 @@ def to_csv(blocks: list[dict], presets: dict | None = None) -> pd.DataFrame:
                                else ""),
         "tiers": b["tiers"], "gates": b["gates"], "dates": b["dates"],
         "example_uuids": ";".join(c["uuid"] for c in b["children"]),
-        "ruling": (presets or {}).get(R.cohort_key(b), ("", ""))[0],
-        "note": (presets or {}).get(R.cohort_key(b), ("", ""))[1],
+        "ruling": presets.get(key, ("", ""))[0],
+        "note": presets.get(key, ("", ""))[1],
     } for b in blocks])
 
 
