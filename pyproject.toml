@@ -21,3 +21,10 @@ dev = ["pytest>=8.0", "numpy>=1.26"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Extract-backed tests are DESELECTED BY DEFAULT. They load production dumps
+# (166k samples, 802k edges, a 106MB findings.csv) and OOM-killed this machine
+# twice on 2026-09-01; the suite is serial, so this was never a CPU problem.
+# `tests/conftest.py` additionally blocks the reads outright, so this is the
+# convenience half and that is the guarantee. Run them deliberately, on an idle
+# machine, with:  uv run pytest -k "real_extract" -p no:cacheprovider
+addopts = "-k 'not real_extract'"

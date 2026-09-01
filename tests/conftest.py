@@ -5,6 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pathlib
+
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
@@ -156,3 +158,53 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         "primary surface still proposes. Skipped, it reports nothing.")
     for nodeid in missed:
         tr.write_line(f"    - {nodeid}")
+
+
+# --- NO TEST READS PRODUCTION DATA. EVER. ------------------------------------
+#
+# WHY THIS IS A HARD BLOCK AND NOT A CONVENTION. The extract tiers under
+# `assets/RUN*/` hold real production dumps -- 166k-row `samples`, 802k-row
+# `edges`, a 106MB `findings.csv`. Loading them inside a test run twice drove
+# this machine into the OOM killer and forced a restart on 2026-09-01. The
+# suite is SERIAL (no xdist, one core of sixteen), so this was never a CPU
+# problem and no CPU cap would have helped: it is resident memory, on a box
+# that is routinely at 26 of 30 GB before pytest starts.
+#
+# A naming convention could not hold this. `..._real_extract_...` catches the
+# tests someone remembered to name that way; this catches the path, so a new
+# test cannot reintroduce the hazard by being called something else.
+#
+# The ruling store (`assets/rulings/`) is deliberately NOT blocked: it is a few
+# hundred rows of human judgement, not a production dump, and it is what the
+# store-integrity tests exist to check.
+PRODUCTION_TIERS = ("01-extract", "04-artifacts", "06-findings",
+                    "08-extract-post-write", "09-relabel")
+
+
+def _is_production_data(path) -> bool:
+    try:
+        parts = pathlib.Path(str(path)).resolve().parts
+    except (TypeError, ValueError, OSError):
+        return False
+    return any(tier in parts for tier in PRODUCTION_TIERS)
+
+
+@pytest.fixture(autouse=True)
+def _no_production_data_in_tests(monkeypatch):
+    """Refuse a read of any production extract tier, before it allocates."""
+    import pandas as pd
+
+    for name in ("read_parquet", "read_csv", "read_excel"):
+        real = getattr(pd, name)
+
+        def guarded(path, *args, _real=real, _name=name, **kwargs):
+            if _is_production_data(path):
+                raise RuntimeError(
+                    f"pd.{_name}({path!r}) reads a production extract tier. "
+                    "Tests must not load production data: it is hundreds of "
+                    "megabytes resident and has OOM-killed this machine. Build "
+                    "a synthetic frame of the shape you need instead -- the "
+                    "shapes are documented in `assay_hygiene._schema`.")
+            return _real(path, *args, **kwargs)
+
+        monkeypatch.setattr(pd, name, guarded)

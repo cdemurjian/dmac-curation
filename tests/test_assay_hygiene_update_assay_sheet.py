@@ -38,7 +38,6 @@ from assay_hygiene import chunker as C  # noqa: E402
 from assay_hygiene import preflight as P  # noqa: E402
 from assay_hygiene import update_assay_sheet as U  # noqa: E402
 
-RUN2 = REPO / "assets" / "RUN2"
 GOOD_BACKUP = {"size": 17_000_000, "trailer_ok": True}
 
 # Synthetic, and in the reserved 19MMDD band that is provably absent from
@@ -264,30 +263,30 @@ def test_the_workbook_round_trips_the_current_columns_as_unparseable(tmp_path):
 # --- the real run ------------------------------------------------------------
 
 
-def test_the_real_run2_manifest_builds_one_chunk():
-    """744 gate-checked rows, and the cap is 2,000 -- so one submission."""
-    manifest_path = RUN2 / "04-artifacts" / "MANIFEST.csv"
-    samples_path = RUN2 / "01-extract" / "samples.parquet"
-    if not manifest_path.exists() or not samples_path.exists():
-        pytest.skip("RUN2 artifacts are curation output and are not in git")
-    manifest = pd.read_csv(manifest_path)
-    samples = pd.read_parquet(samples_path, columns=["sample_id", "uuid"])
-    uid_of = dict(zip(samples.sample_id.astype(int), samples.uuid.astype(str)))
-    assert len(manifest) == 744
+def test_a_manifest_carrying_the_chunk_06_shape_refuses_then_builds():
+    """RUN2's real manifest in miniature, WITHOUT reading RUN2.
 
-    # THE RESOLVED MANIFEST IS REFUSED, and that is the correct outcome. Four
-    # of its samples carry a uid production holds twice -- the same class of
-    # row that killed RUN1's chunk 06. RUN2 is a SINGLE chunk, so submitting it
-    # unfiltered would not cost one chunk, it would cost the run.
+    The production case was 744 rows of which 4 carried a uid production holds
+    twice; it refused, and the writable 740 built as one chunk. This reproduces
+    that shape synthetically -- tests never read a production extract, because
+    doing so OOM-killed the machine twice on 2026-09-01 (see conftest).
+    """
+    n = 12
+    manifest = pd.DataFrame({"sample_id": range(n), "internal_assay_id": 24,
+                             "write_target_seek_assay_id": 501,
+                             "project_ok": True})
+    uid_of = {i: f"TIS-190101ENG-{900 + i}" for i in range(n)}
+    uid_of[11] = uid_of[10]          # one uid naming two samples, as production does
+
     with pytest.raises(U.SheetRefused, match="more than one sample"):
         U.build(manifest, uid_of)
 
-    counts = pd.Series(list(uid_of.values())).value_counts()
-    doubled = {u for u, n in counts.items() if n > 1}
-    writable = manifest[~manifest.sample_id.map(uid_of).isin(doubled)]
-    assert len(writable) == 740, "4 rows are blocked by duplicate uuids"
-
+    blocked = U.ambiguous_samples(manifest, uid_of)
+    assert blocked == [10, 11]
+    writable = manifest[~manifest.sample_id.isin(blocked)]
     sheet = U.build(writable, uid_of)
-    assert len(sheet) == 740 and len(C.chunks(sheet)) == 1
+    assert len(sheet) == n - 2
+    assert len(C.chunks(sheet)) == 1
+
     frame = U.for_preflight(sheet, {v: k for k, v in uid_of.items()})
-    P.check(frame, writable, [U.SHEET_NAME], GOOD_BACKUP, 414935)
+    P.check(frame, writable, [U.SHEET_NAME], GOOD_BACKUP, 440500)
