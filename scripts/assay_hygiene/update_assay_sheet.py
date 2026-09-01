@@ -257,7 +257,7 @@ def ambiguous_samples(manifest: pd.DataFrame,
                    if counts.get(uid_of.get(int(r.sample_id)), 0) > 1})
 
 
-def main(run_dir="assets/RUN2", out=None, artifacts="assay-hygiene",
+def main(run_dir=None, out=None, artifacts="assay-hygiene",
          drop_ambiguous=False) -> int:
     """Build the workbook for a run from its manifest and its own extract.
 
@@ -267,6 +267,20 @@ def main(run_dir="assets/RUN2", out=None, artifacts="assay-hygiene",
     directory, as every other `main` in this package does. Copy it into the run
     deliberately, or pass `out`.
     """
+    # REQUIRED, AND IT USED TO DEFAULT TO "assets/RUN2". The write command
+    # documents running this module bare, so on RUN3 the default would have
+    # silently rebuilt a workbook from RUN2's manifest and RUN2's extract --
+    # rows already in production. `assert_subset` would pass (they ARE a subset
+    # of RUN2's own manifest) and preflight would pass; the first thing to
+    # notice would be `chunker.reconcile`, after up to 2,000 rows had been
+    # re-submitted.
+    if not run_dir:
+        raise SheetRefused(
+            "run_dir is required. It previously defaulted to a specific run, "
+            "which meant a later run rebuilt the earlier one's workbook from "
+            "the earlier one's extract -- rows already written to production, "
+            "and nothing before `reconcile` would have caught it. Pass the "
+            "run you are building, e.g. main('assets/RUN3').")
     run = Path(run_dir)
     manifest = pd.read_csv(run / "04-artifacts" / "MANIFEST.csv")
     samples = pd.read_parquet(run / "01-extract" / "samples.parquet",
@@ -296,7 +310,13 @@ def main(run_dir="assets/RUN2", out=None, artifacts="assay-hygiene",
     # IS THE SHIM'S, NOT resolve_targets': the shim joins (uid, New Assay ID)
     # because those are the only two identifying columns the workbook carries.
     # Written beside the workbook so the pair travels together to the box.
-    companion = target.with_name("MANIFEST.csv")
+    # NAMED DISTINCTLY ON PURPOSE. `resolve_targets` already writes a
+    # MANIFEST.csv -- `sample_id, internal_assay_id, write_target_seek_assay_id,
+    # project_ok` -- which is what `preflight.assert_subset` reads. THIS one is
+    # the submitter's, keyed on `uid, assay_id, project_ok`, because the
+    # workbook carries no sample_id. Two different files under one name, feeding
+    # two gates in the same command, is a swap waiting to happen.
+    companion = target.with_name("SUBMIT-MANIFEST.csv")
     pd.DataFrame({"uid": sheet["Sample UID"],
                   "assay_id": sheet["New Assay ID"],
                   "project_ok": True}).to_csv(companion, index=False)

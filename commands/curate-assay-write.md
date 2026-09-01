@@ -7,6 +7,42 @@ The user wants this run's registrations written to production.
 **This is the only command that touches production.** It writes nothing without
 `--confirm`.
 
+## The endpoint that will replace this — NOT YET
+
+`POST /nextseek_api/assay-registrations/` is the purpose-built batch registration
+endpoint. It is **additive** — it writes through `batch_insert_assay_assets`, which
+contains no DELETE and has a test asserting so — which is the exact property this
+sheet was chosen for.
+
+**It is not deployed on production.** Verified 2026-09-01:
+`docker exec nextseek ls /app/nextseek_api/assay_registration/` returns 0 there;
+production runs a commit predating the merge. The dev box has it.
+
+So **keep using the sheet for production writes.** `assay_hygiene.registration_api`
+is the client, built and testable against dev now, and `check_target` refuses a
+production base URL outright rather than letting a 404 be misread as "nothing to do".
+
+**Before switching, all four must hold:**
+
+1. production rebuilt and `ls /app/nextseek_api/assay_registration/` non-empty
+2. re-verified against production, not just dev
+3. the **asynchronous** path built and exercised — at or above 5,000 rows the
+   endpoint answers 202 with a durable job. It was verified at 1,000 rows on the
+   synchronous path only, and a full ~26,000-row run crosses that threshold
+4. rollback reworked: capture the per-row `assay_assets_id` from the response
+   (**not** a `MAX(id)` range — a range deletes another writer's rows if one
+   interleaves) and treat the graph recompute as step 2, not an afterthought.
+   See `rollback_plan` and `/curate-assay-relabel`; those should become one
+   procedure
+
+The data gates do **not** move. `registration_api.build_payload` goes through
+`update_assay_sheet.build`, so a payload refuses exactly what a sheet refuses —
+including a sample whose uid production holds more than once, which is a property
+of the data and not of the transport.
+
+The account needs `is_superuser=1`, not merely SEEK admin — the same gate the
+attributes API uses.
+
 ## The mechanism, and why this one
 
 An `UPDATE_ASSAY` sheet posted to `/seek/sampleupload/`, one row per
@@ -35,9 +71,20 @@ silently if that code path changed and nothing in the schema would catch it.
 SELECT MAX(id) FROM seek_production.assay_assets;
 ```
 
-Record it in the lockfile. Undo for the whole run is
+Record it in the lockfile. The row-level undo is
 `DELETE FROM seek_production.assay_assets WHERE id > <handle>;` — no FKs, no
 triggers, monotonic id.
+
+**That DELETE is only half an undo once `/curate-assay-relabel` has run.** The
+relabel rewrites `DERIVED_FROM` labels from post-write `assay_assets` (RUN2:
+1,673 edges). Deleting the rows afterwards leaves those labels asserting
+memberships that no longer exist, and nothing reports it.
+
+Worse, the relabel command **will not repair it at its defaults**: those edges
+become `WOULD_CLEAR`, which `write_set` excludes unless `allow_clear=True`. So a
+rollback after a relabel needs a deliberate `allow_clear` pass, ruled on
+explicitly. Roll back BEFORE relabelling if you can; if you cannot, treat the
+graph repair as a second, ruled step rather than an afterthought.
 
 ```bash
 PYTHONPATH=scripts uv run python -c "
@@ -72,11 +119,17 @@ carried four. Dropping them is explicit and logged:
 ```bash
 PYTHONPATH=scripts uv run --with pandas --with pyarrow --with openpyxl python -c "
 from assay_hygiene.update_assay_sheet import main
-main(drop_ambiguous=True)"
+main('assets/RUN<n>', drop_ambiguous=True)"
 ```
 
-It writes `UPDATE_ASSAY.xlsx` and the companion `MANIFEST.csv` the submitter's
-project gate reads, side by side, so the pair travels to the box together.
+It writes `UPDATE_ASSAY.xlsx` and `SUBMIT-MANIFEST.csv` side by side, so the pair
+travels to the box together.
+
+**`SUBMIT-MANIFEST.csv` is not `04-artifacts/MANIFEST.csv`.** Two different files:
+the submitter's is `uid, assay_id, project_ok` (the workbook carries no sample_id);
+`resolve`'s is `sample_id, internal_assay_id, write_target_seek_assay_id,
+project_ok` and is what `preflight`'s subset check reads. Passing one where the
+other is wanted is a `KeyError` in either direction.
 
 **The New pair is `(New Assay ID, New Assay Direction)` — not `sample:assay`.**
 `preflight` checks a pair's shape and never its meaning, so a sheet built to the
@@ -123,10 +176,16 @@ SELECT assay_id, COUNT(*) AS n FROM assay_assets
 ## Preflight — all eight, before any row
 
 ```bash
-PYTHONPATH=scripts uv run --with pandas --with pyarrow python -c "
-from assay_hygiene.preflight import check
-check(update_assay_sheet.for_preflight(sheet, sample_id_of),
-      manifest, sheet_names, backup, rollback_id)
+RUN=assets/RUN<n>
+PYTHONPATH=scripts uv run --with pandas --with pyarrow --with openpyxl python -c "
+import pandas as pd
+from assay_hygiene import update_assay_sheet as U, preflight as P
+sheet   = pd.read_excel('assay-hygiene/UPDATE_ASSAY.xlsx', sheet_name=U.SHEET_NAME, dtype=object)
+samples = pd.read_parquet('$RUN/01-extract/samples.parquet', columns=['sample_id','uuid'])
+sid_of  = dict(zip(samples.uuid.astype(str), samples.sample_id.astype(int)))
+manifest = pd.read_csv('$RUN/04-artifacts/MANIFEST.csv')   # resolve's, NOT SUBMIT-MANIFEST
+P.check(U.for_preflight(sheet, sid_of), manifest, [U.SHEET_NAME],
+        {'size': <backup bytes>, 'trailer_ok': True}, <rollback handle>)
 print('preflight clean')
 "
 ```
@@ -151,11 +210,11 @@ sheets — the runner globs `UPDATE_ASSAY-*.xlsx` and will pick up whatever it
 finds. A dated directory (`~/ah_write_<YYYYMMDD>/`) is the cheap way.
 
 ```bash
-scp UPDATE_ASSAY.xlsx MANIFEST.csv \
+scp UPDATE_ASSAY.xlsx SUBMIT-MANIFEST.csv \
     scripts/assay_hygiene/submit_update_assay.py fairdata:~/ah_write_<date>/
 
 uv run --no-project --with requests --with openpyxl python submit_update_assay.py \
-    --sheet UPDATE_ASSAY.xlsx --manifest MANIFEST.csv \
+    --sheet UPDATE_ASSAY.xlsx --manifest SUBMIT-MANIFEST.csv \
     --username <seek-username> --max-rows <rows+buffer>
                                           # add --confirm to actually send
 ```

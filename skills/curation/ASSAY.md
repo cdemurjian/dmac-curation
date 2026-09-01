@@ -231,6 +231,24 @@ lockfile holds — reopening a run you have misidentified re-submits its rows. I
 re-stamps the pid, does not touch `step`, refuses while a different run is open,
 and is a no-op on a run already open.
 
+## The write path is changing, but not yet
+
+`POST /nextseek_api/assay-registrations/` is additive — no DELETE in its insert
+path — which removes the reason this mode chose the legacy `UPDATE_ASSAY` sheet
+over `PATCH /assays/{uid}/` and batch-upload, both of which are complete-list
+writes that would silently drop other memberships.
+
+**It is dev-only as of 2026-09-01.** `ls /app/nextseek_api/assay_registration/`
+returns 0 on production. `assay_hygiene.registration_api` is the client;
+`check_target` refuses a production URL. `/curate-assay-write` keeps the sheet.
+
+Two things that must be built before the switch, both recorded in
+`curate-assay-write.md`: the **asynchronous** path (202 + durable job at or above
+5,000 rows — a full run crosses it and only 1,000 rows have been exercised), and
+**id-based rollback with the graph recompute as step 2** rather than a `MAX(id)`
+range. The endpoint recomputes DERIVED_FROM labels as part of the write, and
+deleting the rows does not revert them.
+
 ## Production defects this mode has hit, and has not fixed
 
 **`samples.uuid` has no unique constraint, and duplicate-uuid samples exist.**

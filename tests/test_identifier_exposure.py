@@ -113,7 +113,11 @@ PROTOCOL_OCCURRENCES = 26          # case-tolerant; the case-sensitive count is 
 # block a sheet. All three sit in the reserved 19MMDD band and the REALITY tier
 # below confirms none resolves to a real sample. Constants, referred to
 # thereafter, so the module costs three occurrences and not one per use.
-UID_PATTERN_OCCURRENCES = 452      # all synthetic
+# 452 -> 454 on 2026-09-01: `test_assay_hygiene_registration_api.py` defines
+# two synthetic uids as module constants, the same pair the sheet-builder suite
+# uses, for the payload the API client builds. Both in the reserved 19MMDD band;
+# the REALITY tier below confirms neither resolves to a real sample.
+UID_PATTERN_OCCURRENCES = 454      # all synthetic
 # 439 -> 440 on 2026-08-27: the prerequisites plan under docs/superpowers/plans/
 # cites one 19MMDD-band uid as the example new fixtures must follow. Verified
 # absent from all 177,393 production uids, and no 19xx-band uid is real for any
