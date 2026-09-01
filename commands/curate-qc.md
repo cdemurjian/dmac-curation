@@ -67,15 +67,16 @@ both; run this one last.
    curation. Get explicit per-type agreement. Never patch as a side effect of QC.
 
 6. Hand off the agreed patches to `/curate-sampletype apply <TYPE> --add <FIELD>`,
-   which drives `scripts/sampletype_attr.py`. That command owns the write; this one
-   only diagnoses. Read the current state first:
+   which drives the attributes API. That command owns the write; this one only
+   diagnoses. Read the current state first:
 
    ```bash
-   uv run --script <PLUGIN>/scripts/sampletype_attr.py list <TYPE>
+   uv run --script <PLUGIN>/scripts/nextseek_api.py sampletype-get <TYPE>
    ```
 
-   Note the `samples=` count it prints. Any non-zero count is why the REST route
-   cannot work (see below) and why the native editor is used instead.
+   If the type already has samples, that is why the `sample_types` PATCH route
+   cannot work (see below) — it is not why the write fails, because the attributes
+   API is not subject to that constraint.
 
 7. Re-run step 1 to confirm the fix took and nothing else broke.
 
@@ -85,8 +86,8 @@ The authoritative source is the server, not the bundled catalog. Read one type
 directly:
 
 ```bash
-uv run --script <PLUGIN>/scripts/nextseek_api.py sampletype-get A.TITR   # REST, read-only
-uv run --script <PLUGIN>/scripts/sampletype_attr.py list A.TITR          # same, plus sample count
+uv run --script <PLUGIN>/scripts/nextseek_api.py sampletype-get A.TITR   # read-only
+uv run --script <PLUGIN>/scripts/nextseek_api.py attributes-list --sample-type A.TITR
 ```
 
 To test many candidate fields at once, build a throwaway flat file with one row per
@@ -118,49 +119,40 @@ next session does not re-probe.
   rejection list while the row still failed on `Lab` and `Name` — that is progress,
   and it should be reported as such rather than as a failed patch.
 
-## After ANY schema change: NExtSEEK must be restarted
+## Schema changes are visible immediately (fixed 2026-08-31)
 
-**A newly added sample-type attribute is invisible to `/curate-qc` and to the upload
-until the NExtSEEK app workers are restarted.** This is not a delay you can wait out.
+**A newly added sample-type attribute is visible to `/curate-qc` and to the upload
+straight away. No worker restart is required.** If you have older notes saying
+otherwise, they described real behaviour that no longer exists.
 
-`nextseek_api/batch_upload/prefetch.py::prefetch_sample_type_attributes` caches
-`sample_type_id -> {attribute titles}` in a plain module-level dict:
+The bug: `nextseek_api/batch_upload/prefetch.py::prefetch_sample_type_attributes`
+cached `sample_type_id -> {attribute titles}` in a module-level dict with no TTL and
+no invalidation on write, and gunicorn runs four workers. The symptom was a rejection
+count that **oscillated between runs on an unchanged file** — you were being served
+by a different worker each time.
 
-```python
-uncached = [sid for sid in sample_type_ids if sid not in _SAMPLE_TYPE_ATTRIBUTES_CACHE]
-```
+The fix is a database-side generation stamp: `SELECT COUNT(*), MAX(updated_at) FROM
+sample_attributes`, compared against a per-process stamp and read **once per batch**
+from the single path that `validate` and `upload` share. Every worker reads it from
+the one thing they all share, so there is nothing left to go stale.
 
-There is no TTL and no invalidation on write. `_trim_cache` evicts only on size
-(`attribute_cache_max`, default 1000, against ~101 sample types, so never). `clear_caches()`
-exists but is called only mid-insert every N batches and in tests: no endpoint, no management
-command, no env var reaches it.
+It is **writer-agnostic** — it equally catches writes made through the attributes API,
+through the `/seek/samples/attributes/` web page, or by hand in SQL.
 
-Consequences worth recognising:
+Proven on production against a control: an attribute was created through the API with
+no restart, a row using it validated, and a row using a never-created attribute failed
+down the same path. Same code path, opposite outcomes.
 
-- Every worker holds its own cache, so requests round-robin across differing views. The symptom
-  is a rejection count that **oscillates** between runs on an unchanged file (observed:
-  15 -> 14 -> 15 -> 14 distinct gaps). A single type appearing to "clear" is just a request
-  landing on a worker that happens to be cold for it.
-- **The upload is affected identically.** `validate` and `start` both call the shared
-  `_run_pre_insert_stages` (`validation.py:179` and `orchestrator.py:584`), which runs
-  `build_insertable` and therefore the same cached lookup. `/curate-qc` is a dry run of the
-  exact code the upload executes, so a stale rejection there means a real rejection on upload.
-- Uploading anyway is worse than waiting: there is no rollback or atomic block in `insert.py`,
-  so you get a PARTIAL upload - the valid rows land, the rest do not.
+**If validation still rejects a field you just added**, it is not the cache. Check that
+the write actually landed (`sampletype-get <TYPE>`) and that the title matches exactly,
+case included.
 
-**Confirm the DB is right, then ask for a restart.** The web attributes page and
-`sampletype_attr.py list` read the `sample_attributes` table live, so they will show the new
-attribute while `/curate-qc` still denies it. That disagreement is the signature of this bug,
-not evidence the write failed.
+## Why the `sample_types` PATCH route cannot do this (root-caused 2026-07-31)
 
-Verified 2026-07-31: after adding 14 attributes across 10 sample types, validation sat at 14
-distinct gaps across 8 polling attempts. A manual worker restart took it to
-`213/213, failed=0` on the next run with no other change.
-
-Worth fixing upstream: invalidate `_SAMPLE_TYPE_ATTRIBUTES_CACHE` when `sampleAttributeSave`
-writes (it already knows the `sample_type_id`), or give the cache a short TTL.
-
-## Why the REST schema-patch route does not work (root-caused 2026-07-31)
+**Read this as "why the obvious route fails", not as "no REST route works".** The
+attributes API — `POST /nextseek_api/attributes/batch-create/`, used by
+`/curate-sampletype apply` — is a different, purpose-built route and it works. This
+section explains why the *sample_types proxy* is not that route and never can be.
 
 `PATCH /nextseek_api/sample_types/{id}/` returns `502 {"errors":[{"title":"Invalid
 upstream response"}]}` for essentially every real sample type. This is NOT a payload
@@ -190,11 +182,10 @@ Note the narrowing: that model validation enforces only TWO things, adding an at
 and removing one that holds data. Edits to EXISTING attributes are likely more permissive
 over REST than through the SEEK web form — untested.
 
-**The working route** is `scripts/sampletype_attr.py`, which drives NExtSEEK's own native
-editor (`/seek/attribute/save/` → Django ORM), bypassing Rails entirely. See
-`/curate-sampletype` for the full procedure, the safety guards, and the wire-format
-gotchas. `nextseek_api.py sampletype-add-attribute` is retired and now fails with a
-pointer to it.
+**The working route** is the attributes API — `POST /nextseek_api/attributes/batch-create/`,
+wrapped by `nextseek_api.py sampletype-add-attribute`. It is a purpose-built endpoint, not a
+proxy, so `allow_new_attribute?` never enters into it. See `/curate-sampletype` for the full
+procedure, the permission model and the error codes.
 
 Two related NExtSEEK defects worth fixing if you are in that code:
 

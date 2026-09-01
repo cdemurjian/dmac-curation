@@ -52,126 +52,113 @@ from `/curate-qc` after the server rejected a field that genuinely ought to exis
 adding `Notes` to `A.TITR` changes that type for every project and every existing
 `A.TITR` record across NExtSEEK. Treat it accordingly.
 
+### The route
+
+`POST /nextseek_api/attributes/batch-create/`, live on production since 2026-08-31.
+Wrapped by `scripts/nextseek_api.py sampletype-add-attribute`.
+
+**Not** `PATCH /nextseek_api/sample_types/{id}/`. That one is a 1:1 pass-through to
+SEEK, which enforces `allow_new_attribute? = !samples?` and returns 422 for any type
+that already has samples — surfacing as a generic `502`. That is still true and is
+why this command does not use it. The attributes API is a different, purpose-built
+route and is not subject to the constraint. See `/curate-qc` for the root cause.
+
+Mutations require the SEEK login's Django user to have **`is_superuser=1`**. This is
+not the same population as a SEEK admin and the two are not nested: a SEEK admin who
+is not a Django superuser gets `403 permission_denied` ("Superuser access required").
+Reads need only a SEEK login.
+
 ### Steps
 
-The REST route does not work for this. `PATCH /nextseek_api/sample_types/{id}/` is a
-1:1 pass-through to SEEK, and SEEK enforces
-
-```ruby
-# lib/seek/samples/sample_type_editing_constraints.rb
-def allow_new_attribute?
-  !samples?
-end
-```
-
-so it returns 422 for any sample type that already has samples — which is nearly all
-of them. NExtSEEK's proxy does not check the upstream status, so it surfaces as a
-generic `502 "Invalid upstream response"`. No payload shape works around it.
-
-Use `scripts/sampletype_attr.py`, which drives NExtSEEK's OWN native editor
-(`/seek/attribute/save/` → Django ORM → `sample_attributes`), never invoking Rails
-and therefore never hitting the constraint. It also calls `updateSampleType` to
-reconcile existing samples' `json_metadata`.
-
-1. Read the current state. Note the sample count — that is what blocks the REST route:
+1. Read the current state:
 
    ```bash
-   uv run --script <PLUGIN>/scripts/sampletype_attr.py list <TYPE>
+   uv run --script <PLUGIN>/scripts/nextseek_api.py sampletype-get <TYPE>
    ```
 
-2. Dry run. Prints the exact record and sends nothing:
+2. Dry run. **The server plans it and writes nothing** — this is its answer, not a
+   client-side guess:
 
    ```bash
-   uv run --script <PLUGIN>/scripts/sampletype_attr.py \
-     add <TYPE> --title <FIELD> --type Text
+   uv run --script <PLUGIN>/scripts/nextseek_api.py \
+     sampletype-add-attribute <TYPE> --name <FIELD> --type Text
    ```
 
-3. **Rehearse on dev before touching production.** `A.TITR` and friends exist there in
-   the same shape:
+3. **Rehearse on dev before touching production.**
 
    ```bash
-   uv run --script <PLUGIN>/scripts/sampletype_attr.py \
-     --base-url https://nextseek-dev.mit.edu add <TYPE> --title <FIELD> --type Text --apply
+   uv run --script <PLUGIN>/scripts/nextseek_api.py \
+     sampletype-add-attribute <TYPE> --name <FIELD> --type Text \
+     --base-url https://nextseek-dev.mit.edu --apply
    ```
 
 4. **Get explicit confirmation for this specific type and field**, stating the blast
-   radius. Then apply. Production requires `--yes-production` in addition to `--apply`;
-   the tool refuses otherwise.
+   radius. Then apply:
 
    ```bash
-   uv run --script <PLUGIN>/scripts/sampletype_attr.py \
-     add <TYPE> --title <FIELD> --type Text --apply --yes-production
+   uv run --script <PLUGIN>/scripts/nextseek_api.py \
+     sampletype-add-attribute <TYPE> --name <FIELD> --type Text \
+     --apply --yes-production
    ```
 
-5. Verify with `list`, then re-run `/curate-qc` to confirm the failing rows now validate.
+   **Production requires `--yes-production` in addition to `--apply`.** The tool
+   refuses otherwise; prose is not the gate.
+
+5. Re-run `/curate-qc` to confirm the failing rows now validate. **No worker restart
+   is needed** — see below.
 
 6. Do one type first and verify end to end before batching.
 
-### This is a stopgap, not the intended interface
+### What the server enforces, so you do not have to
 
-`sampletype_attr.py` drives the admin UI's own endpoint because there is currently no REST
-write path that works. That makes it a deliberate workaround with real limitations:
+The endpoint validates title uniqueness and the single-title-attribute rule itself,
+and returns structured JSON rather than an HTML page:
 
-- it is **superuser-only**
-- it is a **GET with JSON in query params**, shaped for a datagrid rather than for tooling
-- it **bypasses every Rails validation** (see below), so its three client-side guards are the
-  only thing standing in
-- a change is **invisible until the NExtSEEK workers restart** (see `/curate-qc`)
+| status | meaning |
+|---|---|
+| 401 `authentication_failed` | bad or missing credentials |
+| 403 `permission_denied` | authenticated, but not a Django superuser |
+| 422 `request_validation_error` | names the offending field |
+| 409 | per-target error document, e.g. `sample_type_not_found` carrying `submitted_identifier` |
 
-The intended replacement is a proper `nextseek_api` REST write endpoint wrapping
-`DBtable_sampleattribute` plus `DBtable_sample.updateSampleType`. When that lands, this tool
-should become a thin client of it and these caveats mostly disappear.
+`sample_type` and `sample_attribute_type` are **Identifiers**: a database id, a
+numeric string, or the exact title.
 
-**If you are the one building that endpoint:** port the three guards from
-`sampletype_attr.py::_validate`, call `updateSampleType` so existing samples' `json_metadata`
-is reconciled, invalidate `_SAMPLE_TYPE_ATTRIBUTES_CACHE` on write so no restart is needed, and
-do NOT proxy to SEEK or the `allow_new_attribute?` editing constraint comes straight back.
+### Read `automatic_changes` in the dry run before you apply
 
-Until then, prefer this tool over hand-editing through the web page: the page offers none of
-the validation.
+A request that adds ONE attribute can emit dozens of side effects. Measured on
+production: creating one attribute on `BLD` produced **68 `position_changed`
+automatic changes**, renumbering every definition from position 8 down.
 
-### Why this path is dangerous, and what protects you
+**Deleting the attribute afterwards does not undo them.** The count is in the
+dry-run response and the command prints it as `AUTOMATIC CHANGES`. Read it. A
+number far above the number of attributes you asked for is the signal to stop
+and check what else the type holds.
 
-Because the write goes through the Django ORM, **every SEEK model validation is
-bypassed**. `sampletype_attr.py::_validate` re-implements the three that matter —
-`validate_attribute_title_unique`, `validate_attribute_accessor_names_unique`, and
-`validate_one_title_attribute_present`. Those guards are the ONLY protection on this
-path. Anyone using the `/seek/samples/attributes/` web page directly gets none.
+### Undoing a rehearsal
 
-Three wire-format gotchas, all easy to get wrong and all already handled by the tool:
+Step 3 writes to dev for real, so the rehearsal leaves an attribute behind:
 
-- The numeric attribute-type id travels in the key named `sample_attribute_type_title`,
-  because the grid combobox uses `sample_attribute_type_id` as its `valueField`.
-- `id` must be OMITTED for a new attribute. Any `id > 0` means update.
-- `sample_controlled_vocab_id` is silently dropped and never written.
+```bash
+uv run --script <PLUGIN>/scripts/nextseek_api.py \
+    sampletype-remove-attribute <TYPE> --name <FIELD> \
+    --base-url https://nextseek-dev.mit.edu --apply
+```
 
-A partial `records` list is safe: the save path only touches the records passed and has
-no delete-missing pass.
+**Destructive and global** — it removes the field from every record of the type,
+with no undo through this API, and it renumbers positions again. Same
+`--yes-production` requirement against production.
 
-**Open question, unverified:** the ORM path skips the Rails callbacks that trigger Solr
-reindexing, so a newly added attribute may not be searchable in SEEK until a reindex.
+### No restart is required, and that is new
 
-### Verified end to end (2026-07-31)
+Adding an attribute used to be invisible to validation until the NExtSEEK workers
+restarted, because `_SAMPLE_TYPE_ATTRIBUTES_CACHE` had no TTL and no invalidation and
+gunicorn runs four of them. That was fixed on 2026-08-31 with a database-side
+generation stamp — `SELECT COUNT(*), MAX(updated_at) FROM sample_attributes`, read
+once per batch — so every worker sees the write through the one thing they share.
 
-`Notes` was added to `A.TITR` on dev then production, and the change was confirmed to
-have the intended effect:
-
-| | dev (id 35) | production (id 99) |
-|---|---|---|
-| before | 10 attributes | 10 attributes |
-| after | 11, `Notes` id 2651 | 11, `Notes` id 3603 |
-| originals | intact, ids 1324-1333 | intact, ids 2238-2980 |
-| existing samples | reconciled, `total: 7` | reconciled, `total: 7` |
-
-Server validation then stopped rejecting `Notes` on `A.TITR` while every other
-rejection stayed put — a clean, targeted change.
-
-**`--yes-production` may appear anywhere on the command line.** It is stripped from
-argv before parsing precisely so it does not have to precede the subcommand.
-
-**Expect the row count NOT to move after a single patch.** A row fails if any one of
-its fields is undefined, so `A.TITR` rows kept failing on `Lab` and `Name`. Judge
-progress by the distinct (type, field) rejection list.
+It is **writer-agnostic**: it equally catches writes made through this API, through
+the `/seek/samples/attributes/` web page, or by hand in SQL.
 
 ### When NOT to apply
 
@@ -179,6 +166,10 @@ If the server rejected a field because *we* got it wrong — invented it, mis-ca
 (`Bead_coating_vendor` vs `Bead_coating_Vendor`), or copied a typo out of
 `sampletypes_db.json` (`QuanitifcationMethod`) — **fix the build script instead**.
 Patching the schema to accommodate our own error pollutes a shared vocabulary.
+
+**Expect the row count NOT to move after a single patch.** A row fails if any one of
+its fields is undefined, so `A.TITR` rows kept failing on `Lab` and `Name`. Judge
+progress by the distinct (type, field) rejection list.
 
 ## The loop
 

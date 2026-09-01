@@ -59,7 +59,7 @@ entry-point commands, a reference doc loaded on demand, and optionally its own s
 
 | command | does |
 |---|---|
-| `/curate-sampletype` | propose or bolster a NExtSEEK sample type; writes a `<TYPE>.review.md` for a human to apply. The explicit `apply` verb can also **write the change to a live server** via `scripts/sampletype_attr.py` |
+| `/curate-sampletype` | propose or bolster a NExtSEEK sample type; writes a `<TYPE>.review.md` for a human to apply. The explicit `apply` verb can also **write the change to a live server** via the attributes API (`scripts/nextseek_api.py sampletype-add-attribute`) |
 
 **`assay`** (reference: `ASSAY.md`)
 
@@ -127,7 +127,6 @@ dmac-curation/
 ├── commands/{curate-*.md, fdh-*.md}   # 26 slash commands, grouped by mode
 ├── scripts/                           # PEP 723 inline-deps, uv-runnable
 │   ├── nextseek_api.py                # assay-id cache, server-side validate, sample-type reads
-│   ├── sampletype_attr.py             # add attributes to a live sample type (native editor)
 │   ├── consolidate_to_flat.py         # 4-sheet -> flat upload file + _review.xlsx
 │   ├── build_sample_tree_html.py      # sample_tree.json -> interactive SAMPLE_TREE.html
 │   ├── assay_hygiene/                 # assay mode: extract, detect, rule, resolve, write

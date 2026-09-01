@@ -185,6 +185,95 @@ class NExtSEEKClient:
             raise NExtSEEKError(resp.status_code, url,
                                 f"Non-JSON response: {resp.text[:500]}")
 
+    def _write(self, method: str, path: str, payload: dict) -> dict:
+        """POST/PATCH JSON to /nextseek_api{path}, with CSRF primed.
+
+        Shared by the attribute endpoints. Django enforces CSRF on unsafe
+        methods regardless of auth mode, and the /nextseek_api/* views do not
+        issue the cookie themselves -- see `_prime_csrf`.
+        """
+        csrf = self._prime_csrf()
+        headers = {"Content-Type": "application/json"}
+        if csrf:
+            headers["X-CSRFToken"] = csrf
+            headers["Referer"] = self.base_url
+        url = f"{self.base_url}/nextseek_api{path}"
+        resp = self.session.request(method, url, json=payload, headers=headers,
+                                    timeout=self.timeout)
+        if not resp.ok:
+            raise NExtSEEKError(resp.status_code, url, resp.text)
+        try:
+            return resp.json()
+        except ValueError:
+            raise NExtSEEKError(resp.status_code, url,
+                                f"Non-JSON response: {resp.text[:500]}")
+
+    # ── Sample-type attributes ──────────────────────────────────────────────
+    #
+    # THE REAL WRITE PATH, live on production since 2026-08-31. It replaces
+    # `scripts/sampletype_attr.py`, which drove the admin UI's own
+    # `GET /seek/attribute/save/?records=<json>` because no REST write path
+    # existed. That is no longer true, and the differences are not cosmetic:
+    #
+    #   * `dry_run` is planned SERVER-SIDE, so the preview is the server's own
+    #     answer rather than the client's guess at it
+    #   * errors are structured JSON (409 per-target documents carrying
+    #     `submitted_identifier`, 422 naming the offending field) instead of an
+    #     HTML page scraped for a success string
+    #   * the server enforces title uniqueness and the single-title-attribute
+    #     rule, so the client does not re-implement validation it cannot keep
+    #     in step with
+    #
+    # Identifiers (`sample_type`, `sample_attribute_type`) accept a database
+    # id, a numeric string, or the exact title.
+    #
+    # MUTATIONS REQUIRE A DJANGO SUPERUSER (is_superuser), which is NOT the
+    # same population as a SEEK admin -- the two are not nested. Reads need
+    # only a SEEK login. A SEEK admin who is not a Django superuser gets 403
+    # `permission_denied` with "Superuser access required."
+
+    ATTRIBUTES_PATH = "/attributes/"
+
+    def list_attributes(self, sample_type=None) -> dict:
+        """GET /attributes/ — reads, open to any SEEK-authenticated user."""
+        params = {"sample_type": sample_type} if sample_type else None
+        return self._get(self.ATTRIBUTES_PATH, params=params)
+
+    @staticmethod
+    def _targets(sample_type, attributes: list) -> dict:
+        return {"targets": [{"sample_type": sample_type,
+                             "attributes": attributes}]}
+
+    def create_attributes(self, sample_type, attributes: list,
+                          dry_run: bool = True) -> dict:
+        """POST /attributes/batch-create/ — add attributes to a sample type.
+
+        GLOBAL, SHARED-SCHEMA WRITE. Sample types are not project-scoped:
+        adding a field changes that type for every project and every existing
+        record of it across NExtSEEK.
+        """
+        payload = self._targets(sample_type, attributes) | {"dry_run": dry_run}
+        return self._write("POST", f"{self.ATTRIBUTES_PATH}batch-create/",
+                           payload)
+
+    def patch_attributes(self, sample_type, attributes: list,
+                         dry_run: bool = True) -> dict:
+        """PATCH /attributes/batch-patch/ — amend existing attributes."""
+        payload = self._targets(sample_type, attributes) | {"dry_run": dry_run}
+        return self._write("PATCH", f"{self.ATTRIBUTES_PATH}batch-patch/",
+                           payload)
+
+    def delete_attributes(self, sample_type, attributes: list,
+                          dry_run: bool = True) -> dict:
+        """POST /attributes/batch-delete/ — remove attributes.
+
+        DESTRUCTIVE AND GLOBAL. Deleting an attribute removes it from every
+        record of the type. There is no undo through this API.
+        """
+        payload = self._targets(sample_type, attributes) | {"dry_run": dry_run}
+        return self._write("POST", f"{self.ATTRIBUTES_PATH}batch-delete/",
+                           payload)
+
     def _prime_csrf(self) -> Optional[str]:
         """GET /login/ to populate the csrftoken cookie, then return its value.
 
@@ -451,39 +540,159 @@ def cmd_sampletype_get(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_sampletype_add_attribute(args: argparse.Namespace) -> int:
-    """RETIRED. This route cannot add an attribute to a sample type that has samples.
+# Hosts where an --apply is a production write. The retired shim refused these
+# without a second flag (`_confirm_production`), and dropping that guard when it
+# was replaced left prose as the only thing between a curator and a global
+# shared-schema write. A machine refusal is this plugin's house style for a
+# production write -- `/curate-assay-write` sits behind eight of them.
+PRODUCTION_HOSTS = ("nextseek.mit.edu",)
 
-    Root-caused 2026-07-31. PATCH /nextseek_api/sample_types/{id}/ is a 1:1
-    pass-through to SEEK (services/sample_types.py), and SEEK enforces
+
+def _confirm_production(base_url: str, yes: bool) -> None:
+    """Raise unless a production --apply carries --yes-production too."""
+    host = str(base_url).split("//")[-1].split("/")[0].split(":")[0].lower()
+    if host.rstrip(".") in PRODUCTION_HOSTS and not yes:
+        raise SystemExit(
+            f"REFUSED: {host} is production and --apply was given without "
+            f"--yes-production.\n"
+            f"  This is a GLOBAL, SHARED-SCHEMA write: it changes the type for "
+            f"every project and every existing record of it.\n"
+            f"  Rehearse on dev first:  --base-url https://nextseek-dev.mit.edu "
+            f"(after the subcommand)")
+
+
+def _report_automatic_changes(result: dict) -> None:
+    """Print the side effects a request that 'adds one attribute' also made.
+
+    MEASURED ON PRODUCTION: creating ONE attribute on BLD emitted 68
+    `position_changed` automatic changes, renumbering every definition from
+    position 8 down. Deleting the attribute again does NOT undo them. The count
+    is in the response and is not obvious from the request, so it is surfaced
+    rather than left for a reader to notice in the JSON.
+    """
+    changes = result.get("automatic_changes") or []
+    if not isinstance(changes, list) or not changes:
+        return
+    kinds: dict[str, int] = {}
+    for c in changes:
+        kinds[str(c.get("type", "?")) if isinstance(c, dict) else "?"] = \
+            kinds.get(str(c.get("type", "?")) if isinstance(c, dict) else "?", 0) + 1
+    print(f"\n  AUTOMATIC CHANGES: {len(changes)} "
+          f"({', '.join(f'{k}={v}' for k, v in sorted(kinds.items()))})",
+          file=sys.stderr)
+    print("  These are side effects of the request, not things you asked for, "
+          "and a later delete does NOT undo them.", file=sys.stderr)
+
+
+def cmd_attributes_list(args: argparse.Namespace) -> int:
+    """GET /attributes/ — read the attributes the server actually holds.
+
+    READS NEED ONLY A SEEK LOGIN, not a superuser. This is the authoritative
+    answer to "what does this type accept"; the bundled catalog is a snapshot.
+    """
+    client = _client_from_args(args)
+    try:
+        result = client.list_attributes(args.sample_type)
+    except NExtSEEKError as exc:
+        print(f"FAILED ({exc.status}): {exc.body[:600]}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_sampletype_remove_attribute(args: argparse.Namespace) -> int:
+    """Remove an attribute from a live sample type.
+
+    EXISTS BECAUSE THE REHEARSAL LOOP NEEDS IT. Step 3 of `/curate-sampletype
+    apply` writes to dev for real; without a remove verb every rehearsal leaves
+    a permanent attribute on dev's shared schema and the loop never closes.
+
+    DESTRUCTIVE AND GLOBAL: it removes the field from every record of the type,
+    and there is no undo through this API. Same production refusal as `add`.
+    """
+    client = _client_from_args(args)
+    dry = not args.apply
+    if not dry:
+        _confirm_production(args.base_url, getattr(args, "yes_production", False))
+
+    print(f"{'PLAN' if dry else 'APPLY'}: REMOVE {args.name!r} from sample type "
+          f"{args.sampletype}", file=sys.stderr)
+    if not dry:
+        print("  This deletes the field from every existing record of this "
+              "type. There is no undo.", file=sys.stderr)
+    try:
+        result = client.delete_attributes(args.sampletype,
+                                          [{"title": args.name}], dry_run=dry)
+    except NExtSEEKError as exc:
+        print(f"REFUSED ({exc.status}): {exc.body[:600]}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    _report_automatic_changes(result)
+    if dry:
+        print("\nDRY RUN -- nothing removed. Re-run with --apply to commit.",
+              file=sys.stderr)
+    return 0
+
+
+def cmd_sampletype_add_attribute(args: argparse.Namespace) -> int:
+    """Add an attribute to a live sample type through the attributes API.
+
+    THIS USED TO BE A DEAD END. `PATCH /nextseek_api/sample_types/{id}/` is a
+    1:1 pass-through to SEEK, and SEEK enforces
 
         # lib/seek/samples/sample_type_editing_constraints.rb
         def allow_new_attribute?
           !samples?
-        end
 
-    so SEEK returns 422 for any type that already has samples. NExtSEEK's proxy
-    never checks the upstream status, so the 422 surfaces as a generic
-    502 "Invalid upstream response". No payload shape can work around it.
+    so it returns 422 for any type that already has samples, which NExtSEEK's
+    proxy surfaces as a generic 502. That is still true of THAT route and is
+    why this command no longer uses it. `POST /attributes/batch-create/` is a
+    different, purpose-built route and is not subject to the constraint.
 
-    Use `scripts/sampletype_attr.py`, which drives NExtSEEK's own native editor
-    (/seek/attribute/save/ -> Django ORM), bypassing Rails and therefore the
-    constraint. Kept here only so the failure explains itself.
+    DRY RUN BY DEFAULT. `--apply` is required to write, and the preview is the
+    server's own plan rather than this client's guess at one.
     """
-    print(__doc__ and "" or "", end="")
-    print(
-        "RETIRED: this route cannot add an attribute to a sample type that has samples.\n"
-        "\n"
-        "PATCH /nextseek_api/sample_types/{id}/ passes straight through to SEEK, and SEEK\n"
-        "enforces allow_new_attribute? = !samples?, returning 422. NExtSEEK's proxy does not\n"
-        "check the upstream status, so it surfaces as 502 'Invalid upstream response'.\n"
-        "\n"
-        "Use the native-editor client instead:\n"
-        "  uv run --script <PLUGIN>/scripts/sampletype_attr.py list <TYPE>\n"
-        "  uv run --script <PLUGIN>/scripts/sampletype_attr.py add <TYPE> --title <NAME> --type Text\n"
-        "  (add --apply, and on production also --yes-production)\n",
-        file=sys.stderr)
-    return 2
+    client = _client_from_args(args)
+    attribute = {"title": args.name, "sample_attribute_type": args.type}
+    if args.required:
+        attribute["required"] = True
+
+    dry = not args.apply
+    if not dry:
+        _confirm_production(args.base_url, getattr(args, "yes_production", False))
+    if args.debug:
+        print(json.dumps(client._targets(args.sampletype, [attribute])
+                         | {"dry_run": dry}, indent=2), file=sys.stderr)
+
+    print(f"{'PLAN' if dry else 'APPLY'}: add {args.name!r} ({args.type}) "
+          f"to sample type {args.sampletype}", file=sys.stderr)
+    if not dry:
+        print("  GLOBAL, SHARED-SCHEMA WRITE: this changes the type for every "
+              "project and every existing record of it.", file=sys.stderr)
+
+    try:
+        result = client.create_attributes(args.sampletype, [attribute],
+                                          dry_run=dry)
+    except NExtSEEKError as exc:
+        # The API answers in structured JSON; surface it rather than a status.
+        print(f"REFUSED ({exc.status}): {exc.body[:600]}", file=sys.stderr)
+        if exc.status == 403:
+            print("  Mutations need a Django SUPERUSER. A SEEK admin who is "
+                  "not one is refused here -- the two populations are not "
+                  "nested.", file=sys.stderr)
+        return 1
+
+    print(json.dumps(result, indent=2))
+    _report_automatic_changes(result)
+    if dry:
+        print("\nDRY RUN -- nothing written. Re-run with --apply to commit.",
+              file=sys.stderr)
+        print("  Read AUTOMATIC CHANGES above before you do.", file=sys.stderr)
+    else:
+        print("\nWritten. No worker restart is required: the attribute cache "
+              "is invalidated by a database-side generation stamp read once "
+              "per batch.", file=sys.stderr)
+    return 0
 
 
 def _cmd_sampletype_add_attribute_dead(args: argparse.Namespace) -> int:
@@ -873,9 +1082,21 @@ def main(argv=None) -> int:
     stg.add_argument("--base-url", default=DEFAULT_BASE_URL)
     stg.set_defaults(func=cmd_sampletype_get)
 
+    al = sub.add_parser(
+        "attributes-list",
+        help="Read sample-type attributes from the server (read-only)")
+    al.add_argument("--sample-type", default=None,
+                    help="Restrict to one type: id, numeric string, or exact title")
+    al.add_argument("--username", default=None)
+    al.add_argument("--password", default=None)
+    al.add_argument("--token", default=None)
+    al.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    al.set_defaults(func=cmd_attributes_list)
+
     sta = sub.add_parser(
         "sampletype-add-attribute",
-        help="RETIRED - cannot work. Use scripts/sampletype_attr.py instead.")
+        help="Add an attribute to a live sample type (attributes API; "
+             "dry run unless --apply)")
     sta.add_argument("sampletype", help="Short code or numeric id, e.g. A.TITR")
     sta.add_argument("--name", required=True, help="Attribute title, e.g. Notes")
     sta.add_argument("--type", default="Text",
@@ -885,12 +1106,34 @@ def main(argv=None) -> int:
     sta.add_argument("--debug", action="store_true",
                      help="Print the exact JSON payload before sending.")
     sta.add_argument("--apply", action="store_true",
-                     help="Actually PATCH. Without this the command only prints the plan.")
+                     help="Actually write. Without this the server plans the "
+                          "change and writes nothing (dry_run).")
+    sta.add_argument("--yes-production", action="store_true",
+                     help="Required IN ADDITION to --apply when the target is "
+                          "production. Rehearse on dev first.")
     sta.add_argument("--username", default=None)
     sta.add_argument("--password", default=None)
     sta.add_argument("--token", default=None)
     sta.add_argument("--base-url", default=DEFAULT_BASE_URL)
     sta.set_defaults(func=cmd_sampletype_add_attribute)
+
+    strm = sub.add_parser(
+        "sampletype-remove-attribute",
+        help="Remove an attribute from a live sample type "
+             "(DESTRUCTIVE; dry run unless --apply)")
+    strm.add_argument("sampletype", help="Short code or numeric id, e.g. A.TITR")
+    strm.add_argument("--name", required=True, help="Attribute title to remove")
+    strm.add_argument("--apply", action="store_true",
+                      help="Actually remove. Without this the server plans it "
+                           "and removes nothing (dry_run).")
+    strm.add_argument("--yes-production", action="store_true",
+                      help="Required IN ADDITION to --apply when the target is "
+                           "production.")
+    strm.add_argument("--username", default=None)
+    strm.add_argument("--password", default=None)
+    strm.add_argument("--token", default=None)
+    strm.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    strm.set_defaults(func=cmd_sampletype_remove_attribute)
 
     args = p.parse_args(argv)
     return args.func(args)

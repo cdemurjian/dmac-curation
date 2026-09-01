@@ -326,58 +326,64 @@ comes from Tags, observed values and sibling types.
 
 Everything above produces artifacts a human applies by hand. `/curate-sampletype
 apply <TYPE> --add <FIELD>` is the one exception: it adds an attribute to a live
-sample type through `scripts/sampletype_attr.py`, normally as the handoff from
+sample type through the **attributes API**, normally as the handoff from
 `/curate-qc` after the server rejected a field that genuinely ought to exist.
 `commands/curate-sampletype.md` is the authority; this is what a reader of
 SCHEMA.md needs to know before they get there.
 
-**Why a bespoke tool.** `PATCH /nextseek_api/sample_types/{id}/` is a 1:1
+**The route.** `POST /nextseek_api/attributes/batch-create/`, live on production
+since 2026-08-31, wrapped by `scripts/nextseek_api.py sampletype-add-attribute`.
+It replaced `scripts/sampletype_attr.py`, which existed only because no REST write
+path worked; that script is gone.
+
+**Not the sample_types proxy.** `PATCH /nextseek_api/sample_types/{id}/` is a 1:1
 pass-through to SEEK, and SEEK's `allow_new_attribute?` refuses any sample type
-that already has samples — nearly all of them — surfacing through NExtSEEK's
-proxy as a generic `502 "Invalid upstream response"`. `sampletype_attr.py`
-instead drives NExtSEEK's own native editor (`GET /seek/attribute/save/` → Django
-ORM → `sample_attributes`) and calls `updateSampleType` to reconcile existing
-samples' `json_metadata`.
+that already has samples — nearly all of them — surfacing through NExtSEEK's proxy
+as a generic `502 "Invalid upstream response"`. That is still true of that route.
+The attributes API is a different, purpose-built one.
 
 **This is a GLOBAL, SHARED-SCHEMA WRITE.** Sample types are not project-scoped:
 adding `Notes` to `A.TITR` changes that type for every project and every existing
 `A.TITR` record across NExtSEEK.
 
-**The guards, exactly.** The ORM path bypasses Rails, and therefore bypasses every
-SEEK model validation. Four things stand in:
+**What protects you now.** The guards moved server-side, which is the substantive
+improvement — a client cannot drift out of step with validation it does not own:
 
-1. `sampletype_attr.py::_validate` (`scripts/sampletype_attr.py:180-206`)
-   re-implements the three validations that matter —
-   `validate_attribute_title_unique`, `validate_attribute_accessor_names_unique`,
-   `validate_one_title_attribute_present`. These are the ONLY protection on this
-   path; the `/seek/samples/attributes/` web page offers none of them.
-2. **Dry run is the default.** `add`, `remove` and `selftest` print the exact
-   record and send nothing unless `--apply` is passed.
-3. **Production needs a second flag.** `_confirm_production`
-   (`scripts/sampletype_attr.py:290-317`) refuses `--apply` against
-   `nextseek.mit.edu` (`PRODUCTION_HOSTS`, `:63`) unless `--yes-production` is
-   given too. `--yes-production` is stripped from `argv` before parsing, so it may
-   appear anywhere on the command line.
-4. **Rehearse on dev.** `--base-url https://nextseek-dev.mit.edu` (or
-   `NEXTSEEK_BASE_URL`) targets dev, where the same types exist in the same shape.
-   `DEFAULT_BASE_URL` is production (`:62`).
+1. **The server enforces** title uniqueness and the single-title-attribute rule.
+   The old client re-implemented these; it no longer has to, and one of its three
+   guards (accessor-name uniqueness) was in fact unreachable — it duplicated the
+   title check.
+2. **`dry_run` is planned server-side.** The preview is the server's own answer,
+   not the client's guess at one. Dry run is the default; `--apply` is required.
+3. **Mutations require a Django superuser** (`is_superuser=1`). Not the same
+   population as a SEEK admin, and the two are not nested — a SEEK admin without
+   it gets `403 permission_denied`. Reads need only a SEEK login.
+4. **Rehearse on dev.** `--base-url https://nextseek-dev.mit.edu`, where the same
+   types exist in the same shape. The default base URL is production.
 
 ```bash
-uv run --script <PLUGIN>/scripts/sampletype_attr.py list <TYPE>
-uv run --script <PLUGIN>/scripts/sampletype_attr.py add <TYPE> --title <FIELD> --type Text
-uv run --script <PLUGIN>/scripts/sampletype_attr.py --base-url https://nextseek-dev.mit.edu \
-    add <TYPE> --title <FIELD> --type Text --apply
-uv run --script <PLUGIN>/scripts/sampletype_attr.py \
-    add <TYPE> --title <FIELD> --type Text --apply --yes-production
+uv run --script <PLUGIN>/scripts/nextseek_api.py sampletype-get <TYPE>
+uv run --script <PLUGIN>/scripts/nextseek_api.py \
+    sampletype-add-attribute <TYPE> --name <FIELD> --type Text
+uv run --script <PLUGIN>/scripts/nextseek_api.py \
+    sampletype-add-attribute <TYPE> --name <FIELD> --type Text \
+    --base-url https://nextseek-dev.mit.edu --apply
+uv run --script <PLUGIN>/scripts/nextseek_api.py \
+    sampletype-add-attribute <TYPE> --name <FIELD> --type Text --apply
 ```
 
-**Two things that will bite.** A change is invisible to `/curate-qc` and to batch
-upload until the NExtSEEK app workers restart —
-`prefetch_sample_type_attributes` caches sample_type_id → attribute titles in a
-module-level dict with no TTL and no invalidation on write, so the web page shows
-your attribute while validation still denies it. And the ORM path skips the Rails
-callbacks that trigger Solr reindexing, so a new attribute may not be searchable
-in SEEK until a reindex (unverified).
+Errors are structured JSON: 401 `authentication_failed`, 403 `permission_denied`,
+422 `request_validation_error` naming the offending field, 409 with a per-target
+document such as `sample_type_not_found` carrying `submitted_identifier`.
+
+**No restart is needed.** A change used to be invisible to `/curate-qc` and to
+batch upload until the workers restarted, because the attribute cache had no
+invalidation and gunicorn runs four. A database-side generation stamp read once
+per batch replaced it on 2026-08-31, and it catches writes from any source.
+
+**Still unverified:** whether the write triggers Solr reindexing, so a new
+attribute may not be *searchable* in SEEK until a reindex. This was open against
+the old path and nothing has confirmed it either way for the new one.
 
 **When NOT to apply.** If the server rejected a field because *we* got it wrong —
 invented it, mis-cased it, or copied a typo out of `sampletypes_db.json` — fix the
@@ -387,11 +393,11 @@ pollutes a shared vocabulary.
 ## Open question
 
 **What "apply" means beyond adding an attribute.** Adding an attribute to an
-existing type is settled, tooled and verified end to end (`Notes` on `A.TITR`,
-dev then production, 2026-07-31). Still unsettled: how a human applies a *whole
+existing type is settled, tooled and verified end to end through the attributes
+API on production, 2026-08-31, against a control. (The older `Notes` on `A.TITR`
+verification, 2026-07-31, was the RETIRED shim's and does not carry over.) Still unsettled: how a human applies a *whole
 proposed sample type record* — NExtSEEK's admin UI, a SQL update, or a PR against
 a schema repo. Confirm with the NExtSEEK admin before telling a curator to create
-a type; `<TYPE>.review.md` says exactly that. `sampletype_attr.py` is itself a
-declared stopgap — superuser-only, a GET with JSON in query params — expected to
-be superseded by a proper `nextseek_api` REST write endpoint wrapping
-`DBtable_sampleattribute` + `DBtable_sample.updateSampleType`.
+a type; `<TYPE>.review.md` says exactly that. Adding an attribute is now a real
+API call rather than a stopgap driving an admin-UI endpoint, so that half of the
+question is closed; applying a whole proposed type is not.

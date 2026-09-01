@@ -17,7 +17,7 @@ history; it does not keep them off disk.
 | credential | source | consumed by |
 |---|---|---|
 | `FDH_API` (`{"user": "token"}`) or `FDH_TOKEN` | shell environment, or a `.env` in the **curation project** cwd | `scripts/fdh/fdh_api.py`, `scripts/fdh/submit.py`. `FDH_TOKEN` is checked first and wins |
-| `NEXTSEEK_USERNAME` / `NEXTSEEK_PASSWORD`, or `NEXTSEEK_TOKEN` | shell environment, or project cwd `.env` | `scripts/nextseek_api.py`, and `scripts/sampletype_attr.py` — **the one script that writes a production sample-type schema**. `sampletype_attr.py` also honours the legacy name `NEXTSEEK_USER` and `NEXTSEEK_BASE_URL` |
+| `NEXTSEEK_USERNAME` / `NEXTSEEK_PASSWORD`, or `NEXTSEEK_TOKEN` | shell environment, or project cwd `.env` | `scripts/nextseek_api.py` — **the one script that writes a production sample-type schema**, through the attributes API. Mutations additionally require the SEEK login's Django user to have `is_superuser=1`; a SEEK admin who is not one is refused with 403. |
 | `MIT_USER` / `MIT_PASS` | shell environment, or project cwd `.env` | `scripts/smb_pull.py` |
 | `OMERO_USER` / `OMERO_PASSWORD`, or `OMERO_SESSIONID` / `OMERO_CSRFTOKEN` | shell environment; the password is prompted for if unset | `scripts/omero_pull.py` |
 | `NCFTP_*` | shell environment, or project cwd `.env` | `scripts/upload_geo_ncftp.sh` |

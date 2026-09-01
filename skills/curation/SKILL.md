@@ -202,15 +202,20 @@ marker, and a blank there fails silently.
 - **`PATCH /nextseek_api/sample_types/{id}/` can never add an attribute** to a sample type
   that has samples. It proxies straight to SEEK, which enforces
   `allow_new_attribute? = !samples?` and returns 422; the proxy discards the status and
-  surfaces a generic `502 "Invalid upstream response"`. Use `scripts/sampletype_attr.py`,
-  which drives NExtSEEK's own native editor and bypasses Rails.
-- **After adding a sample-type attribute, NExtSEEK must be RESTARTED before `/curate-qc` or
-  the upload can see it.** `prefetch_sample_type_attributes` caches attribute titles per worker
-  process with no TTL and no invalidation on write. Symptom: the web attributes page and
-  `sampletype_attr.py list` show the new field while validation still rejects it, and the
-  rejection count oscillates between runs on an unchanged file. Waiting does not help.
-- **`sampletype_attr.py` is a stopgap** driving an admin-UI endpoint, expected to be replaced by
-  a proper `nextseek_api` REST write endpoint. Superuser-only, no Rails validation.
+  surfaces a generic `502 "Invalid upstream response"`. Use the attributes API instead —
+  `scripts/nextseek_api.py sampletype-add-attribute` — which is a purpose-built route and
+  not subject to the constraint.
+- **A new sample-type attribute is visible immediately; no restart is needed** (fixed
+  2026-08-31). `prefetch_sample_type_attributes` used to cache titles per worker with no
+  invalidation, and gunicorn runs four — the symptom was a rejection count that oscillated
+  between runs on an unchanged file. A database-side generation stamp read once per batch
+  replaced it, and it is writer-agnostic: API, web page or raw SQL all invalidate it. If a
+  field you just added is still rejected, the cache is not the cause — check the write
+  landed and the title matches case-exactly.
+- **Attribute mutations need a Django SUPERUSER, which is not a SEEK admin.** The two
+  populations are not nested: a SEEK admin without `is_superuser=1` is refused with 403
+  `permission_denied`, and a Django superuser who is not a SEEK admin is allowed. Reads need
+  only a SEEK login. (`is_staff` gates nothing — every SEEK user gets it at login.)
 - **A schema patch fixes a row only if EVERY field on that row is valid.** Adding one
   attribute may leave `success`/`failed` unchanged. Judge progress by the distinct
   (sample type, field) rejection list.
