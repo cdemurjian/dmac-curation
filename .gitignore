@@ -110,6 +110,10 @@ assay-hygiene/
 # strip 1,570 sample identifiers. A prefix glob, so a future `-bak2` or `-old` is
 # covered by construction rather than by someone remembering to add a line.
 assay-hygiene-*/
+# ...and anything else with that stem, FILES included. Both patterns above end in
+# `/` and so match directories only: `assay-hygiene.tar.gz`, a 21 MB archive of the
+# extract, sat untracked and unignored in the repository root on 2026-09-10.
+assay-hygiene*
 
 # ============================================================
 # Run assets. assets/RUN<N>/ holds a complete curation run: the
@@ -142,6 +146,14 @@ assets/
 # ============================================================
 *rulings*.tsv
 *verdicts*.csv
+
+# ============================================================
+# Browser-automation captures. `.playwright-mcp/` holds page snapshots from
+# driving NExtSEEK's admin pages (2026-08-31, 2026-09-01), and screenshots land
+# in the repository root. Both sat untracked and unignored on 2026-09-10.
+# ============================================================
+.playwright-mcp/
+/*.png
 
 # ============================================================
 # Session state and handoff reports. `.claude/reports/*.json` carry protocol
