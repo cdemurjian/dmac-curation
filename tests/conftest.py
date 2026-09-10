@@ -180,13 +180,25 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 PRODUCTION_TIERS = ("01-extract", "04-artifacts", "06-findings",
                     "08-extract-post-write", "09-relabel")
 
+# `assay-hygiene/` (and any `assay-hygiene-*` sibling) holds real copies of
+# RUN1's tiers under names that are not tier names. It was a symlink tree into
+# `assets/RUN1/` until 2026-09-10, so `.resolve()` used to land on a tier and
+# the check above covered it for free; once the links became copies, nothing in
+# the resolved path said "production" and eight tests went back to loading the
+# real extract. So it is refused by name -- except its rulings file, a few
+# hundred rows of human judgement, exempt for the reason the ruling store is
+# (as a link it resolved into `02-agent-runs`, which was never guarded).
+COPIED_RUN_PREFIX = "assay-hygiene"
+
 
 def _is_production_data(path) -> bool:
     try:
         parts = pathlib.Path(str(path)).resolve().parts
     except (TypeError, ValueError, OSError):
         return False
-    return any(tier in parts for tier in PRODUCTION_TIERS)
+    return (any(tier in parts for tier in PRODUCTION_TIERS)
+            or (any(p.startswith(COPIED_RUN_PREFIX) for p in parts)
+                and "rulings" not in parts[-1]))
 
 
 @pytest.fixture(autouse=True)

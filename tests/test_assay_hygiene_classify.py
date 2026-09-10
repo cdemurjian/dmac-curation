@@ -4515,7 +4515,7 @@ def test_the_real_extract_reproduces_the_precedence_split_and_mode_3s_emptiness(
     assert not (k24 & emitted), "not one of the 24 reaches a row"
 
 
-def test_no_key_the_gate_refuses_is_refused_for_an_INCOHERENT_TERM_alone():
+def test_no_key_the_gate_refuses_is_refused_for_an_INCOHERENT_TERM_alone_on_the_real_extract():
     """THE MEASUREMENT THAT CLOSED THE `PRE_GATE` SPLIT AS WON'T-FIX.
 
     THE PROPOSED DEFECT. `PRE_GATE` is first in the precedence and is the only
@@ -4956,7 +4956,7 @@ def test_the_multi_project_denominator_is_the_same_at_every_site_that_states_it(
     assert right in flat["mode2.py"]
 
 
-def test_the_multi_project_share_is_measured_and_its_denominator_is_the_right_one():
+def test_the_multi_project_share_is_measured_and_its_denominator_is_the_right_one_on_the_real_extract():
     """Six figures re-derived from the parquet. The scan above proves consistency.
 
     NOTHING PINNED ANY OF THEM. The sentence pairing 75 with the MAP's count was

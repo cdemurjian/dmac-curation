@@ -925,7 +925,7 @@ _PRECEDENCE_TESTS = {
     #    and the family is now coherent. So the split is not made -- it would
     #    add a step, a lane and a precedence swap to move zero rows -- and the
     #    measurement is pinned by
-    #    `test_no_key_the_gate_refuses_is_refused_for_an_INCOHERENT_TERM_alone`,
+    #    `test_no_key_the_gate_refuses_is_refused_for_an_INCOHERENT_TERM_alone_on_the_real_extract`,
     #    which FAILS if an incoherent family a lineage key also names ever
     #    returns. That failure is the signal to re-open this decision.
     PRE_GATE: lambda e: e.claim and not e.claim_reaches,

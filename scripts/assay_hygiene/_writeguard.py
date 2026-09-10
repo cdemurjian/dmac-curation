@@ -4,9 +4,12 @@
 """Refuse to write through a symlink into a preserved run.
 
 WHY THIS EXISTS. `run_evidence.main` and `run_detect.main` default
-`out_dir="assay-hygiene"`, and that directory is 33 symlinks into
-`assets/RUN1/`. Writing `findings.csv` there follows the link and destroys the
-baseline every before/after measurement in this package is compared against.
+`out_dir="assay-hygiene"`, and until 2026-09-10 that directory was 33 symlinks
+into `assets/RUN1/`. Writing `findings.csv` there followed the link and
+destroyed the baseline every before/after measurement in this package is
+compared against. The folder now holds real copies, so this guard no longer
+fires for it; it still protects any other link into a preserved run (a
+worktree's `assets/` is one).
 Four separate files claimed `chmod a-w` protected this; nothing applied it, and
 the tiers that ARE read-only are the ones the pipeline never writes to.
 

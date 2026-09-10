@@ -1032,7 +1032,7 @@ def test_the_census_counts_only_rows_a_finding_could_actually_be_written_for():
 @pytest.mark.skipif(not (EXTRACT / "membership.parquet").exists()
                     or not (ARTIFACTS / "claims.parquet").exists(),
                     reason="the extract and stage B outputs are gitignored")
-def test_the_census_reproduces_the_figures_that_justified_the_two_columns():
+def test_the_census_reproduces_the_figures_that_justified_the_two_columns_on_the_real_extract():
     """2,827 / 1,209 / 217 / 20, and the 408-row defect that is no longer here.
 
     These four numbers are why `co_reg_alt_label_internal_assay_id` and

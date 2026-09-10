@@ -1,8 +1,9 @@
 """A run must never write through a symlink into the preserved baseline.
 
-`assay-hygiene/` is 33 symlinks into `assets/RUN1/`. Writing `findings.csv`
-there does not create a file -- it follows the link and overwrites the RUN1
-artifact that every before/after measurement is compared against. The tiers
+`assay-hygiene/` was 33 symlinks into `assets/RUN1/` until 2026-09-10, and a
+worktree's `assets/` still is a link. Writing `findings.csv` through such a link
+does not create a file -- it overwrites the RUN1 artifact that every
+before/after measurement is compared against. The tiers
 that hold rulings are chmod a-w and resist; `04-artifacts` is writable and does
 not.
 """

@@ -954,7 +954,7 @@ def test_the_defect_file_routes_to_vocabulary_curation_and_never_to_a_mode():
 # --- the real extract --------------------------------------------------------
 
 
-def test_the_24_flowjo_and_mass_spectra_rows_are_all_rejected_by_the_gate():
+def test_the_24_flowjo_and_mass_spectra_rows_are_all_rejected_by_the_gate_on_the_real_extract():
     """The acceptance test for this task, on today's real data.
 
     24 rows of increment 1's 866 are vocabulary defects that lineage precedence

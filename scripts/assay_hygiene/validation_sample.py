@@ -1434,12 +1434,11 @@ def main(artifacts="assay-hygiene", extract=None, verdicts=None, out_dir=None,
          seed: int = SEED) -> int:
     """Draw the sample, write the four files, print the power statement.
 
-    `out_dir` DEFAULTS TO `artifacts` AND SHOULD NOT BE LEFT THERE on this
-    tree: `assay-hygiene/` is a directory of symlinks into `assets/RUN1/`, whose
-    first four tiers are `chmod a-w`, so a default-path run fails with
-    Permission denied rather than writing through the links and destroying the
-    baseline. That
-    friction is deliberate; pass a scratch directory.
+    `out_dir` DEFAULTS TO `artifacts` AND SHOULD NOT BE LEFT THERE. Until
+    2026-09-10 `assay-hygiene/` was symlinks into `assets/RUN1/`'s read-only
+    tiers, so a default-path run failed with Permission denied. It now holds
+    real, writable copies, and a default-path run overwrites them without
+    complaint. Pass a scratch directory.
     """
     a = Path(artifacts)
     e = Path(extract) if extract else a / "extract"

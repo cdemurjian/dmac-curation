@@ -410,7 +410,7 @@ def test_a_registration_in_an_unknown_assay_is_not_dropped_silently():
 EXTRACT = REPO / "assay-hygiene" / "extract"
 
 
-def test_the_fallback_id_space_does_not_collide_with_the_internal_one():
+def test_the_fallback_id_space_does_not_collide_with_the_internal_one_on_the_real_extract():
     """The guard the fallback rests on, and it holds only by luck of numbering.
 
     A junction-less assay is keyed on its own seek `assays.id`, in a column

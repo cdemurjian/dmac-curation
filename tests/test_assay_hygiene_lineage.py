@@ -727,7 +727,7 @@ def test_the_real_extract_reproduces_the_integrity_figures_this_module_documents
     assert integrity["membership_without_sample_rows"] == 368
 
 
-def test_every_ambiguous_neighbour_is_named_by_a_uuid_the_samples_frame_carries():
+def test_every_ambiguous_neighbour_is_named_by_a_uuid_the_samples_frame_carries_on_the_real_extract():
     """The measurement that overturned `min()`, re-derived rather than restated.
 
     For all 79 ambiguous sample_ids exactly ONE of the two uuids is that id's own
@@ -766,7 +766,7 @@ def test_every_ambiguous_neighbour_is_named_by_a_uuid_the_samples_frame_carries(
     assert sum(1 for s in amb if min(seen[s]) != own[s]) == 74
 
 
-def test_dropping_the_unresolved_endpoints_would_delete_registered_neighbours():
+def test_dropping_the_unresolved_endpoints_would_delete_registered_neighbours_on_the_real_extract():
     """The measurement behind the decision to KEEP them, not the decision restated.
 
     182 of the 243 edge endpoints with no `samples` row are registered in
@@ -907,7 +907,7 @@ def test_the_mode_2_ceiling_counts_one_row_per_sample_and_assay_in_each_directio
 
 @pytest.mark.skipif(not (EXTRACT / "edges.parquet").exists(),
                     reason="the extract is gitignored and is not always present")
-def test_the_two_published_ceilings_differ_only_by_the_definition_of_registered():
+def test_the_two_published_ceilings_differ_only_by_the_definition_of_registered_on_the_real_extract():
     """55,007 / 117,463 is right. 54,780 / 116,365 dropped 17 assays' rows.
 
     Two independent computations of this number were published over the same

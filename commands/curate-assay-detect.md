@@ -6,11 +6,11 @@ The user wants this run's proposals generated.
 
 ## Never write to the default paths
 
-`run_evidence` and `run_detect` default `out_dir` to `assay-hygiene/`, which is
-33 symlinks into `assets/RUN1/`. A default-path run follows those links and
-overwrites the baseline every measurement is compared against — 27 of 33
-artifacts are reachable that way. `assay_hygiene._writeguard` now refuses it
-outright, but pass the run's own directory rather than relying on the refusal:
+`run_evidence` and `run_detect` default `out_dir` to `assay-hygiene/`, a folder
+of real copies of RUN1's artifacts (a symlink tree into `assets/RUN1/` until
+2026-09-10). Nothing refuses a default-path run any more: `_writeguard` only
+catches symlinks, so the run silently overwrites those copies and leaves you
+comparing against whatever it wrote. Pass the run's own directory:
 
 ```bash
 RUN=assets/RUN2
