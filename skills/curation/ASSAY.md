@@ -189,9 +189,12 @@ refuses an ambiguous title rather than picking. Never re-derive the key itself.
 from a run's `MANIFEST.csv` and its own extract:
 
 ```bash
-PYTHONPATH=scripts uv run --with pandas --with pyarrow --with openpyxl \
-  python -m assay_hygiene.update_assay_sheet
+PYTHONPATH=scripts uv run --with pandas --with pyarrow --with openpyxl python -c "
+from assay_hygiene.update_assay_sheet import main
+main('assets/RUN<n>')"
 ```
+
+It writes into `assets/RUN<n>/07-process/`. Run bare, it refuses: `run_dir` is required.
 
 **Read that module's docstring before touching the sheet.** The five headers are
 exact (`seek/sample/upload.py:818`) and a missing one fails the whole file with
@@ -295,8 +298,10 @@ not evidence that it did.
 ## Four things that will bite
 
 **Never run a driver on default paths.** `run_evidence` and `run_detect`
-default `out_dir` to `assay-hygiene/`, which is 33 symlinks into
-`assets/RUN1/`. `_writeguard` refuses it, but pass the run directory anyway.
+default `out_dir` to `assay-hygiene/`, which holds real copies of RUN1's
+artifacts (it was a symlink tree until 2026-09-10, so `_writeguard` no longer
+catches it). A default-path run silently overwrites those copies. Pass the run
+directory.
 
 **Nothing regenerates a human ruling.** The store is gitignored and its only
 protection is a verified tarball outside the working tree. `git clean -xdf` lists

@@ -103,9 +103,12 @@ written a 0-byte file on 2026-08-27; only an `ls` caught it.
 ## Build the sheet
 
 ```bash
-PYTHONPATH=scripts uv run --with pandas --with pyarrow --with openpyxl \
-  python -m assay_hygiene.update_assay_sheet
+PYTHONPATH=scripts uv run --with pandas --with pyarrow --with openpyxl python -c "
+from assay_hygiene.update_assay_sheet import main
+main('assets/RUN<n>')"
 ```
+
+It writes into `assets/RUN<n>/07-process/`. Run bare, it refuses: `run_dir` is required.
 
 `update_assay_sheet.build` takes the run's `MANIFEST.csv` and its extract's
 `samples.parquet` and emits the five headers the endpoint requires, with both
@@ -122,7 +125,7 @@ from assay_hygiene.update_assay_sheet import main
 main('assets/RUN<n>', drop_ambiguous=True)"
 ```
 
-It writes `UPDATE_ASSAY.xlsx` and `SUBMIT-MANIFEST.csv` side by side, so the pair
+It writes `UPDATE_ASSAY.xlsx` and `SUBMIT-MANIFEST.csv` side by side in `$RUN/07-process/`, so the pair
 travels to the box together.
 
 **`SUBMIT-MANIFEST.csv` is not `04-artifacts/MANIFEST.csv`.** Two different files:
@@ -180,7 +183,7 @@ RUN=assets/RUN<n>
 PYTHONPATH=scripts uv run --with pandas --with pyarrow --with openpyxl python -c "
 import pandas as pd
 from assay_hygiene import update_assay_sheet as U, preflight as P
-sheet   = pd.read_excel('assay-hygiene/UPDATE_ASSAY.xlsx', sheet_name=U.SHEET_NAME, dtype=object)
+sheet   = pd.read_excel('$RUN/07-process/UPDATE_ASSAY.xlsx', sheet_name=U.SHEET_NAME, dtype=object)
 samples = pd.read_parquet('$RUN/01-extract/samples.parquet', columns=['sample_id','uuid'])
 sid_of  = dict(zip(samples.uuid.astype(str), samples.sample_id.astype(int)))
 manifest = pd.read_csv('$RUN/04-artifacts/MANIFEST.csv')   # resolve's, NOT SUBMIT-MANIFEST
@@ -210,7 +213,7 @@ sheets — the runner globs `UPDATE_ASSAY-*.xlsx` and will pick up whatever it
 finds. A dated directory (`~/ah_write_<YYYYMMDD>/`) is the cheap way.
 
 ```bash
-scp UPDATE_ASSAY.xlsx SUBMIT-MANIFEST.csv \
+scp assets/RUN<n>/07-process/UPDATE_ASSAY.xlsx assets/RUN<n>/07-process/SUBMIT-MANIFEST.csv \
     scripts/assay_hygiene/submit_update_assay.py fairdata:~/ah_write_<date>/
 
 uv run --no-project --with requests --with openpyxl python submit_update_assay.py \

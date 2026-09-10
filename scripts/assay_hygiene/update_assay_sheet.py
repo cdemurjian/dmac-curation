@@ -257,15 +257,16 @@ def ambiguous_samples(manifest: pd.DataFrame,
                    if counts.get(uid_of.get(int(r.sample_id)), 0) > 1})
 
 
-def main(run_dir=None, out=None, artifacts="assay-hygiene",
+def main(run_dir=None, out=None, artifacts=None,
          drop_ambiguous=False) -> int:
     """Build the workbook for a run from its manifest and its own extract.
 
-    IT DOES NOT DEFAULT INTO THE RUN'S OWN TIERS. `04-artifacts` is chmod 0o555
-    from the moment the run is created -- a tier writable for the duration of a
-    run is a tier the run can destroy -- so the workbook lands in the working
-    directory, as every other `main` in this package does. Copy it into the run
-    deliberately, or pass `out`.
+    IT LANDS IN THE RUN'S `07-process/`, the one tier left writable by design,
+    never in `04-artifacts` (chmod 0o555 from the moment the run is created).
+    It used to default to `assay-hygiene/`, a folder every run shared: RUN2's
+    posted workbook sat there as the only local copy of what was written, one
+    RUN3 build from being overwritten. `out` still overrides; `artifacts`, if
+    given, is a directory to write into instead.
     """
     # REQUIRED, AND IT USED TO DEFAULT TO "assets/RUN2". The write command
     # documents running this module bare, so on RUN3 the default would have
@@ -302,7 +303,9 @@ def main(run_dir=None, out=None, artifacts="assay-hygiene",
             print(f"  DROPPED them; {len(manifest):,} row(s) remain writable")
 
     sheet = build(manifest, uid_of)
-    target = Path(out) if out else Path(artifacts) / "UPDATE_ASSAY.xlsx"
+    target = (Path(out) if out else
+              Path(artifacts) / "UPDATE_ASSAY.xlsx" if artifacts else
+              run / "07-process" / "UPDATE_ASSAY.xlsx")
     target.parent.mkdir(parents=True, exist_ok=True)
     names = write_workbook(sheet, target)
 

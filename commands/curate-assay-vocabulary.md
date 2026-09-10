@@ -34,7 +34,7 @@ print(u.groupby('source_field').size().sort_values(ascending=False).to_string())
 ## Prereqs
 
 - Run everything below from the directory holding `scripts/` and
-  `assay-hygiene/`. Unlike the pipeline-mode commands this stage is not
+  `assets/`. Unlike the pipeline-mode commands this stage is not
   project-scoped; every path here is relative to that one root.
 - `$RUN/04-artifacts/vocabulary-unresolved.csv` and `$RUN/04-artifacts/vocabulary.csv`
   exist. If either is missing or stale, regenerate both with:
