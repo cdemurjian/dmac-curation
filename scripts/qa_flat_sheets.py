@@ -129,7 +129,10 @@ def main(upload_path, cfg):
     except ValueError as e:
         print(f"✗ Required column missing: {e}")
         sys.exit(2)
+    # assay_ids is optional: older sheets predate it, and check 8 is skipped then.
+    assay_idx = headers.index("assay_ids") if "assay_ids" in headers else None
 
+    assays_per_uid = {}            # uid -> set(assay_id)  [issue #8]
     rows_per_uid = {}              # uid -> (row_n, sampletype)
     parents_referenced = []        # (row_n, uid, sampletype, parent_string)
     sampletype_counts = Counter()
@@ -148,6 +151,9 @@ def main(upload_path, cfg):
         st = r[st_idx]
         jm_str = r[jm_idx]
         parent_cell = r[parent_idx]
+        if assay_idx is not None and uid:
+            assays_per_uid[uid] = {
+                t.strip() for t in str(r[assay_idx] or "").split(",") if t.strip()}
 
         sampletype_counts[st] += 1
 
@@ -332,10 +338,56 @@ def main(upload_path, cfg):
         if not allow_updates:
             blocker_count += len(collided)
 
+    # ── 8. assay membership covers both ends of every edge (issue #8) ──────
+    # NExtSEEK can only put an assay label on a DERIVED_FROM edge when parent
+    # and child are BOTH members of that assay. A row whose assay set is
+    # disjoint from its parent's yields an unlabelled edge — invisible until
+    # the connection map comes up short weeks later. Catch it at phase 9A.
+    # A check that quietly does nothing is worse than no check, so every reason it
+    # cannot run says so, and when it does run it reports how many edges it looked
+    # at. The blocker lines themselves come from the `blocker_keys` loop below —
+    # printing them here too would report one defect twice.
+    edges_checked = 0
+    if assay_idx is None:
+        print("\n  [SKIP] assay-membership check: sheet has no 'assay_ids' column")
+    elif not assays_per_uid:
+        # This check and check 3 both key on UID. A sheet that leaves UID blank
+        # for server-side generation has nothing to key on, so say so rather than
+        # passing vacuously.
+        print("\n  [SKIP] assay-membership check: no row carries a UID, so parent "
+              "tokens cannot be matched to rows in this sheet")
+    else:
+        for row_n, uid, st, parent_string in parents_referenced:
+            child = assays_per_uid.get(uid, set())
+            # Only parents this sheet can speak for. One outside the workbook
+            # (another arm, a prior batch) is not checkable here; `assay` mode
+            # owns that residue.
+            tokens = [t.strip() for t in str(parent_string).split(";") if t.strip()]
+            local = [t for t in tokens if t in assays_per_uid]
+            if not local:
+                continue
+            edges_checked += len(local)
+            if not child:
+                # Once per ROW, not once per parent token: the row's own assay set
+                # is missing, which is one defect however many parents it names.
+                issues["row_has_no_assay"].append(
+                    f"row {row_n} ({uid}, {st}) has no assay_ids, so every edge "
+                    f"into it uploads unlabelled")
+                continue
+            for token in local:
+                parent_set = assays_per_uid[token]
+                if not (child & parent_set):
+                    issues["assay_membership_gap"].append(
+                        f"row {row_n}: {uid} ({st}) assays={sorted(child) or '-'} "
+                        f"but parent {token} assays={sorted(parent_set) or '-'} "
+                        "- no shared assay, so this edge uploads unlabelled")
+        print(f"\n  [INFO] assay-membership: {edges_checked} parent-child edge(s) "
+              f"checked within this sheet (issue #8)")
+
     blocker_keys = [
         "duplicate_uid", "missing_uid", "unknown_sampletype", "bad_json",
         "missing_json_metadata", "parent_uid_not_found", "duplicate_name",
-        "blank_parent_nonroot",
+        "blank_parent_nonroot", "assay_membership_gap", "row_has_no_assay",
     ]
     for k in blocker_keys:
         if k in issues:
