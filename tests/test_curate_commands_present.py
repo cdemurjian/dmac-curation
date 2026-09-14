@@ -58,6 +58,10 @@ CONTRACTS = [
      ["--write", "--gse-bulk", "--gsm-csv"]),
     ("curate-deposit.md", "scripts/apply_omero_ids.py", ["--write"]),
     ("curate-resolve-assays.md", "scripts/nextseek_api.py", ["--project-id"]),
+    ("curate-protocols.md", "scripts/build_protocols.py",
+     ["--only", "--force", "--coverage-only"]),
+    ("curate-protocols.md", "scripts/upload_sops.py",
+     ["--project-id", "--write", "--confirmed"]),
 ]
 
 # (command file, script path, flag, owning task) -- not promised by any doc
@@ -77,6 +81,12 @@ UNDOCUMENTED_BUT_PRESENT = [
     ("scripts/build_retrieve.py", "--assay-sheets"),
     ("scripts/build_retrieve.py", "--output"),
     ("scripts/apply_omero_ids.py", "--omero-csv"),
+    ("scripts/build_protocols.py", "--project-root"),
+    ("scripts/build_protocols.py", "--manifest"),
+    ("scripts/build_protocols.py", "--methods"),
+    ("scripts/build_protocols.py", "--sample-tree"),
+    ("scripts/upload_sops.py", "--protocols-dir"),
+    ("scripts/upload_sops.py", "--license"),
 ]
 
 DOC_SCRIPT_PAIRS = sorted(

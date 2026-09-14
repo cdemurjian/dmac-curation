@@ -89,7 +89,10 @@ STAMP_RE = re.compile(r"[0-9]{6}[A-Z]{2,5}")
 # ratchets on SHAPE: a suite about uid grammar legitimately needs well-formed
 # uids, and every one of these is now synthetic. The REALITY tiers below are
 # not ratchets -- they assert zero.
-PROTOCOL_OCCURRENCES = 26          # case-tolerant; the case-sensitive count is 21
+PROTOCOL_OCCURRENCES = 42          # case-tolerant; the case-sensitive count is 21.
+                                   # +16 over the 0.5.0 baseline of 26: /curate-protocols
+                                   # ships doc examples and test fixtures, all synthetic.
+                                   # (No identifier is written here - see the docstring.)
 # 440 -> 445 on 2026-08-27: the assay-hygiene mode-commands plan carries five
 # occurrences of one synthetic example uid in its preflight and workflow test
 # code. Its date component is in the reserved 19MMDD band, which is provably

@@ -15,17 +15,17 @@ import _lockfile  # noqa: E402
 
 CANONICAL_DESCRIPTION = (
     "Curator's workbench for NExtSEEK / FairDomHub metadata. Human-in-the-loop, "
-    "PI-facing. Modes are pipeline (14 commands, 12 phases from inventory through "
-    "sample tree, build, consolidate, QA, server-side QC, deposit, retrieve, to "
-    "email PI), fdh (FairDomHub upload and direct API), schema (sample type "
-    "authoring and controlled vocabulary), report (GEO / SRA / PRIDE submission "
-    "artifacts), assay (house-scoped assay hygiene - 9 commands that find "
-    "unregistered sample-assay pairs, put every proposal in front of a human, and "
-    "write the approved ones to production). Activate when working in a directory "
-    "containing files/, manuscript/, previous_metadata/, assets/assay-run.json, or "
-    "any .dmac-curation.json lockfile, or when the user mentions NExtSEEK, "
-    "FairDomHub, curation, sample types, assay hygiene, assay registration, or a "
-    "GEO/SRA/PRIDE submission."
+    'PI-facing. Modes are pipeline (15 commands, 13 phases from inventory '
+    'through sample tree, protocols, build, consolidate, QA, server-side QC, '
+    'deposit, retrieve, to email PI), fdh (FairDomHub upload and direct API), '
+    'schema (sample type authoring and controlled vocabulary), report (GEO / '
+    'SRA / PRIDE submission artifacts), assay (house-scoped assay hygiene - 9 '
+    'commands that find unregistered sample-assay pairs, put every proposal in '
+    'front of a human, and write the approved ones to production). Activate '
+    'when working in a directory containing files/, manuscript/, '
+    'previous_metadata/, assets/assay-run.json, or any .dmac-curation.json '
+    'lockfile, or when the user mentions NExtSEEK, FairDomHub, curation, sample '
+    'types, assay hygiene, assay registration, or a GEO/SRA/PRIDE submission.'
 )
 
 
@@ -96,7 +96,7 @@ def test_versions_agree_across_plugin_marketplace_and_lockfile():
 
 
 def test_version_is_the_toolkit_release():
-    assert _plugin_json()["version"] == "0.5.0"
+    assert _plugin_json()["version"] == "0.6.0"
 
 
 def test_description_names_every_mode():
