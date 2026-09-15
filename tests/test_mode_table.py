@@ -115,7 +115,7 @@ def test_phase_table_carries_the_9a_9b_split():
     labels = _phase_table_labels()
     assert "9a" in labels and "9b" in labels, labels
     assert "9" not in labels, "9 is split; it should not also appear undifferentiated"
-    assert len(labels) == 12, f"12 phases across 11 numbers, got {labels}"
+    assert len(labels) == 13, f"13 phases across 11 numbers, got {labels}"
 
 
 def test_fdh_is_no_longer_disclaimed_as_not_part_of_the_pipeline():
