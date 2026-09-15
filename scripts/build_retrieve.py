@@ -50,8 +50,12 @@ def _preferred_files(assay_sheets_dir: Path) -> list[Path]:
     return [path for _, path in best.values()]
 
 
-def _read_rows(path: Path) -> list[tuple[str, str]]:
-    """Return (uid, parent) pairs from a workbook's Samples sheet."""
+def _read_rows(path: Path) -> list[tuple[str, list[str]]]:
+    """Return (uid, parents) pairs from a workbook's Samples sheet.
+
+    `parent` is semicolon-joined when a sample derives from several others, the
+    same convention consolidate_to_flat and qa_flat_sheets split on.
+    """
     wb = load_workbook(path, read_only=True, data_only=True)
     try:
         if "Samples" not in wb.sheetnames:
@@ -65,17 +69,17 @@ def _read_rows(path: Path) -> list[tuple[str, str]]:
         if uid_col is None:
             return []
         parent_col = cols.get("parent")
-        out: list[tuple[str, str]] = []
+        out: list[tuple[str, list[str]]] = []
         for row in rows_iter:
             if uid_col >= len(row) or not row[uid_col]:
                 continue
             uid = str(row[uid_col]).strip()
             if "-" not in uid:
                 continue
-            parent = ""
+            parents: list[str] = []
             if parent_col is not None and parent_col < len(row) and row[parent_col]:
-                parent = str(row[parent_col]).strip()
-            out.append((uid, parent))
+                parents = [t.strip() for t in str(row[parent_col]).split(";") if t.strip()]
+            out.append((uid, parents))
         return out
     finally:
         wb.close()
@@ -83,7 +87,7 @@ def _read_rows(path: Path) -> list[tuple[str, str]]:
 
 def collect_uids(assay_sheets_dir: Path, include_parents: bool) -> list[str]:
     """Walk assay_sheets/, dedupe + sort UIDs, drop parents that have children."""
-    pairs: list[tuple[str, str]] = []
+    pairs: list[tuple[str, list[str]]] = []
     for path in _preferred_files(assay_sheets_dir):
         pairs.extend(_read_rows(path))
 
@@ -92,7 +96,7 @@ def collect_uids(assay_sheets_dir: Path, include_parents: bool) -> list[str]:
 
     # A parent-type row is redundant only if something else derives from it;
     # a leaf keeps its place in the list whatever its sample type.
-    has_child = {parent for _, parent in pairs if parent}
+    has_child = {parent for _, parents in pairs for parent in parents}
     return sorted({
         uid for uid, _ in pairs
         if uid.split("-", 1)[0] not in PARENT_TYPES or uid not in has_child

@@ -136,6 +136,26 @@ def test_build_retrieve_keeps_parent_type_leaf(tmp_path):
     assert "PAV-190914JON-1" not in uids
 
 
+def test_build_retrieve_splits_semicolon_joined_parents(tmp_path):
+    """A row deriving from several samples names them all in one `parent` cell.
+
+    Treating the raw cell as one key makes every uid but the first look
+    childless, so each would be emitted as a leaf.
+    """
+    sheets = tmp_path / "assay_sheets"
+    sheets.mkdir()
+    _write_samples(sheets / "ArmB-upload.xlsx", [
+        ("CEL-190914JON-1", ""),
+        ("CEL-190914JON-2", ""),
+        ("CEL-190914JON-3", ""),
+        # derives from all three above
+        ("CEL-190914JON-4", "CEL-190914JON-1;CEL-190914JON-2;CEL-190914JON-3"),
+        ("D.PCR-190914JON-1", "CEL-190914JON-4"),
+    ])
+    uids = _run_retrieve(sheets, tmp_path / "RETRIEVE.TXT")
+    assert uids == ["D.PCR-190914JON-1"], "a co-parent was mistaken for a leaf"
+
+
 def test_build_retrieve_include_parents_keeps_everything(tmp_path):
     """The override is unchanged: every UID, children or not."""
     sheets = tmp_path / "assay_sheets"
