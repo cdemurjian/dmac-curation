@@ -8,7 +8,7 @@ Parse `$ARGUMENTS`: optional `--include-parents`.
 
 ## Prereqs
 
-- `assay_sheets/*-upload-new.xlsx` (or `-upload.xlsx`) exists. `/curate-consolidate` writes `Arm{X}-upload.xlsx` directly, so a fresh consolidation is already retrievable with no rename.
+- A consolidated workbook exists in `assay_sheets/`. `/curate-consolidate` writes `Arm{X}-upload.xlsx` per arm, and `--all-in-one NAME` writes exactly `NAME.xlsx`; both are picked up with no rename. The `*_review.xlsx` companion is skipped — it is never uploaded, so it is never retrieved from.
 
 ## Steps
 
@@ -18,6 +18,18 @@ Parse `$ARGUMENTS`: optional `--include-parents`.
 
 ## Behavioral rules
 
-- Default excludes MUS/TIS/DNA/RNA/PAT/PAV/CHM/CEL (auto-pulled by retrieve).
+- Default excludes a MUS/TIS/DNA/RNA/PAT/PAV/CHM/CEL row **only when something
+  derives from it** — those are auto-pulled by retrieve's lineage walk. A row of
+  one of those types with no child is a leaf and is always emitted: it is the
+  only handle on its branch. Branches that dead-end in a parent type are real
+  (`PAT -> PAV -> TIS` for a tissue microarray core with no assay downstream),
+  and excluding by type alone loses them silently.
 - `--include-parents` only for explicit override (rare).
-- Prefer `-upload-new.xlsx` over `-upload.xlsx` (latest curation).
+- File preference per basename: `-upload-new.xlsx` > `-upload.xlsx` > bare `.xlsx`.
+
+## Verifying the round trip
+
+Reconcile the returned UIDs against the workbook before `/curate-validate`. Any
+uploaded UID that does not come back is a gap in `RETRIEVE.TXT`, not a gap on the
+server — group the missing ones by sample type, because a whole missing branch
+points at the leaf rule above.

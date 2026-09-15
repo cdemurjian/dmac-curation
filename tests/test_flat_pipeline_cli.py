@@ -49,6 +49,122 @@ def test_build_retrieve_empty_dir(tmp_path):
     assert out.read_text() == "\n"  # empty file with trailing newline
 
 
+# ─── build_retrieve: file discovery and leaf retention ─────────────────────
+#
+# Two defects found curating a single-project study (Jones, study 88):
+#   1. the glob only matched `-upload`, so `--all-in-one NAME` output (NAME.xlsx)
+#      produced an empty RETRIEVE.TXT and still exited 0;
+#   2. parent-type rows were excluded by TYPE, so a branch terminating in a
+#      parent type (PAT -> PAV -> TIS) was never requested and never retrieved.
+
+
+def _write_samples(path, rows):
+    """Write a flat-format upload workbook: uid/sampletype/name/parent."""
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Samples"
+    ws.append(["uid", "sampletype", "name", "parent"])
+    for uid, parent in rows:
+        ws.append([uid, uid.split("-", 1)[0], uid, parent])
+    wb.save(path)
+
+
+def _run_retrieve(sheets_dir, out, *extra):
+    script = SCRIPTS_DIR / "build_retrieve.py"
+    result = subprocess.run(
+        ["uv", "run", "--script", str(script),
+         "--assay-sheets", str(sheets_dir), "--output", str(out), *extra],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    return [line for line in out.read_text().split("\n") if line]
+
+
+# The chain every case below draws from: a normal branch whose TIS has a D.SEQ
+# child, and a branch that dead-ends at a TIS leaf.
+CHAIN = [
+    ("MUS-190914JON-1", ""),
+    ("TIS-190914JON-1", "MUS-190914JON-1"),
+    ("D.SEQ-190914JON-1", "TIS-190914JON-1"),
+    ("PAT-190914JON-1", ""),
+    ("PAV-190914JON-1", "PAT-190914JON-1"),
+    ("TIS-190914JON-2", "PAV-190914JON-1"),  # leaf: nothing derives from it
+]
+
+
+def test_build_retrieve_reads_all_in_one_output(tmp_path):
+    """`--all-in-one NAME` writes NAME.xlsx, with no `-upload` in the name."""
+    sheets = tmp_path / "assay_sheets"
+    sheets.mkdir()
+    _write_samples(sheets / "Jones_spatial.xlsx", CHAIN)
+    uids = _run_retrieve(sheets, tmp_path / "RETRIEVE.TXT")
+    assert "D.SEQ-190914JON-1" in uids
+
+
+def test_build_retrieve_skips_review_companion(tmp_path):
+    """The `_review` workbook is never uploaded, so it is never retrieved from."""
+    sheets = tmp_path / "assay_sheets"
+    sheets.mkdir()
+    _write_samples(sheets / "ArmA-upload.xlsx", CHAIN)
+    _write_samples(sheets / "ArmA_review.xlsx", [("D.SEQ-190914JON-99", "")])
+    uids = _run_retrieve(sheets, tmp_path / "RETRIEVE.TXT")
+    assert "D.SEQ-190914JON-99" not in uids
+
+
+def test_build_retrieve_prefers_upload_new_then_upload_then_bare(tmp_path):
+    """Ranking is per basename: the freshest curation of ArmA wins outright."""
+    sheets = tmp_path / "assay_sheets"
+    sheets.mkdir()
+    _write_samples(sheets / "ArmA.xlsx", [("D.SEQ-190914JON-1", "")])
+    _write_samples(sheets / "ArmA-upload.xlsx", [("D.SEQ-190914JON-2", "")])
+    _write_samples(sheets / "ArmA-upload-new.xlsx", [("D.SEQ-190914JON-3", "")])
+    uids = _run_retrieve(sheets, tmp_path / "RETRIEVE.TXT")
+    assert uids == ["D.SEQ-190914JON-3"]
+
+
+def test_build_retrieve_keeps_parent_type_leaf(tmp_path):
+    """A TIS that nothing derives from is the only way to reach its branch."""
+    sheets = tmp_path / "assay_sheets"
+    sheets.mkdir()
+    _write_samples(sheets / "ArmE-upload.xlsx", CHAIN)
+    uids = _run_retrieve(sheets, tmp_path / "RETRIEVE.TXT")
+    assert "TIS-190914JON-2" in uids, "leaf TIS dropped — its branch is unreachable"
+    assert "TIS-190914JON-1" not in uids, "TIS with a child is pulled by lineage"
+    assert "MUS-190914JON-1" not in uids
+    assert "PAT-190914JON-1" not in uids
+    assert "PAV-190914JON-1" not in uids
+
+
+def test_build_retrieve_splits_semicolon_joined_parents(tmp_path):
+    """A row deriving from several samples names them all in one `parent` cell.
+
+    Treating the raw cell as one key makes every uid but the first look
+    childless, so each would be emitted as a leaf.
+    """
+    sheets = tmp_path / "assay_sheets"
+    sheets.mkdir()
+    _write_samples(sheets / "ArmB-upload.xlsx", [
+        ("CEL-190914JON-1", ""),
+        ("CEL-190914JON-2", ""),
+        ("CEL-190914JON-3", ""),
+        # derives from all three above
+        ("CEL-190914JON-4", "CEL-190914JON-1;CEL-190914JON-2;CEL-190914JON-3"),
+        ("D.PCR-190914JON-1", "CEL-190914JON-4"),
+    ])
+    uids = _run_retrieve(sheets, tmp_path / "RETRIEVE.TXT")
+    assert uids == ["D.PCR-190914JON-1"], "a co-parent was mistaken for a leaf"
+
+
+def test_build_retrieve_include_parents_keeps_everything(tmp_path):
+    """The override is unchanged: every UID, children or not."""
+    sheets = tmp_path / "assay_sheets"
+    sheets.mkdir()
+    _write_samples(sheets / "ArmE-upload.xlsx", CHAIN)
+    uids = _run_retrieve(sheets, tmp_path / "RETRIEVE.TXT", "--include-parents")
+    assert sorted(uids) == sorted(uid for uid, _ in CHAIN)
+
+
 # ─── Delete-loop guard: never operate inside the plugin checkout ────────────
 #
 # consolidate_to_flat.py DELETES every underscore-free .xlsx from its target

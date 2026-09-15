@@ -274,11 +274,65 @@ def build_arm_flat(arm_name, source_files, out_dir, lookup, synonyms, out_name):
         cell.fill = HDR_FILL
         cell.font = HDR_FONT
 
+    # ── Per-row assay membership (issue #8) ────────────────────────────────
+    # A row carries its OWN assay plus every assay it is a PARENT to. NExtSEEK
+    # can only label a DERIVED_FROM edge when parent and child are both members
+    # of that assay, so registering only the output leaves every edge into the
+    # assay unlabelled. The 4-sheet schema has one assay per file and cannot
+    # express this; the flat format carries assay_ids per row, which is why it
+    # exists. Three passes below.
+    #
+    # Closure note: the union only closes over parents present in THIS workbook.
+    # A parent minted in another arm stays unregistered here and is left to
+    # `assay` mode to repair — a deliberate, documented residue, not an oversight.
+
+    # Pass 1 — each sample type's own assay.
+    assay_of_type = {}
+    for sampletype, parent_assay, _records in source_files:
+        assay_of_type[sampletype] = resolve_assay_id(parent_assay, lookup, synonyms)
+
+    # Pass 1b — every spelling of a record maps to the ONE key the emission loop
+    # looks it up by. A record is addressable as its UID or its Name (NExtSEEK
+    # resolves a physical parent by Name), but it is emitted under `uid or name`.
+    # Accumulating against the raw parent token instead silently drops the
+    # pushed-up assay whenever a row that HAS a UID is referenced by Name, which
+    # is most of them.
+    ident_of_identity = {}             # any spelling -> canonical ident
+    for _sampletype, _parent_assay, records in source_files:
+        for rec in records:
+            uid_key = str(rec.get("UID") or "").strip()
+            name_key = str(rec.get("Name") or "").strip()
+            canonical = uid_key or name_key
+            if not canonical:
+                continue
+            for key in (uid_key, name_key):
+                if key:
+                    ident_of_identity[key] = canonical
+
+    # Pass 2 — seed each row with its own assay, then push that assay up to
+    # every parent it names. Parent tokens are ';'-separated, names or UIDs.
+    row_assays = defaultdict(set)      # canonical ident -> {(title, id)}
+    for sampletype, _parent_assay, records in source_files:
+        own = assay_of_type.get(sampletype)
+        if not (own and own[0]):
+            continue
+        for rec in records:
+            ident = str(rec.get("UID") or rec.get("Name") or "").strip()
+            if not ident:
+                continue
+            row_assays[ident].add(own)
+            for token in str(rec.get("Parent", "")).split(";"):
+                token = token.strip()
+                # A parent outside this workbook is not ours to register; the
+                # closure note above says who owns that residue.
+                parent_ident = ident_of_identity.get(token)
+                if parent_ident:
+                    row_assays[parent_ident].add(own)
+
     total = 0
     for sampletype, parent_assay, records in source_files:
         # Resolve cited assay title → (canonical title, ID) via cache+synonyms
         resolved_title, assay_id_val = resolve_assay_id(parent_assay, lookup, synonyms)
-        assay_ids_cell = str(assay_id_val) if assay_id_val is not None else ""
 
         for rec in records:
             # NExtSEEK expects UID inside json_metadata (verified by validate
@@ -293,8 +347,17 @@ def build_arm_flat(arm_name, source_files, out_dir, lookup, synonyms, out_name):
             # json_metadata: all attributes as compact JSON (INCLUDING UID)
             json_meta = json.dumps(rec, separators=(",", ":"), default=str)
 
+            # assay_ids / assay_titles are the UNION for this row: its own
+            # assay plus every assay it is a parent to (issue #8). Fall back to
+            # the file-level assay when the row has no resolvable identity.
+            ident = str(uid or name or "").strip()
+            pairs = sorted(row_assays.get(ident) or
+                           ({(resolved_title, assay_id_val)} if resolved_title else set()))
+            titles_cell = ", ".join(t for t, _ in pairs)
+            assay_ids_cell = ", ".join(str(i) for _, i in pairs if i is not None)
+
             ws.append([uid, sampletype, name, parent, notes_summary,
-                       resolved_title, assay_ids_cell, json_meta])
+                       titles_cell, assay_ids_cell, json_meta])
             total += 1
 
     # Column widths tuned for readability
