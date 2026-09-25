@@ -8,8 +8,8 @@ Design: `docs/superpowers/specs/2026-07-21-schema-mode-design.md`.
 Answer "what are we collecting?" for a NExtSEEK sample type. Given a type - say
 `D.VIA` - produce resources a human reviews and then applies by hand.
 
-The problem it attacks: of **1059 distinct field names across 101 sample types,
-857 are used by exactly one type**, and none of the 1059 carries a description,
+The problem it attacks: of **1118 distinct field names across 109 sample types,
+901 are used by exactly one type**, and none of the 1118 carries a description,
 datatype or vocabulary anywhere. There is no way for an author to answer "does a
 field for this already exist?", so new near-duplicates get minted by default.
 
@@ -245,7 +245,7 @@ empty section that states its reason.
 ## The field dictionary
 
 **Lazy and cwd-only.** No pre-built dictionary ships, and none is generated for
-all 1059 names. Each run creates entries only for the fields it touched.
+all 1118 names. Each run creates entries only for the fields it touched.
 
 Accepting the non-accumulation is deliberate: the plugin already has a
 three-copies-of-context problem, and shipping another data file that drifts
@@ -318,7 +318,7 @@ comes from Tags, observed values and sibling types.
   in place. The one exception is the explicit `apply` verb — see
   [Applying: the one live-write path](#applying-the-one-live-write-path).
 - Emitting CEDAR templates (see tree vs graph).
-- Migrating the 101 existing sample types.
+- Migrating the 109 existing sample types.
 - Renaming or splitting field names shared across types.
 - A shared, accumulating field dictionary (deliberately deferred).
 

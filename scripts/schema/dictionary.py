@@ -5,7 +5,7 @@
 """The lazy, cwd-only field dictionary.
 
 No pre-built dictionary ships with the plugin, and none is generated for all
-1059 field names. Each run creates entries only for the fields it touched, in
+1118 field names. Each run creates entries only for the fields it touched, in
 the current working directory.
 
 Why lazy: the plugin already has a three-copies-of-context problem

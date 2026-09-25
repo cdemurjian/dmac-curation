@@ -4,8 +4,8 @@
 # ///
 """Field index and reuse check over the NExtSEEK sample type catalog.
 
-The problem this attacks: of 1059 distinct field names across 101 sample types,
-857 are used by exactly one type, and none of the 1059 carries a description,
+The problem this attacks: of 1118 distinct field names across 109 sample types,
+901 are used by exactly one type, and none of the 1118 carries a description,
 datatype or vocabulary anywhere. There is no way for an author to answer "does a
 field for this already exist?", so new near-duplicates get minted by default.
 
@@ -227,11 +227,12 @@ def _words(name: str) -> set[str]:
 def parents_of(catalog: list[dict], sampletype: str) -> list[str]:
     """The sample types this one descends from, in declared order.
 
-    `Parent_SampleTypes` is PROSE and every naive split is wrong. Four
-    separators are in use - `,`, ` or `, ` and `, and a bare `.` (MUS reads
-    'AB, BAC. CHM') - CEL is missing a comma entirely ('CEL, TIS MUS, NHP,
-    PAV'), and splitting on `.` would shatter the type codes themselves, since
-    `D.SEQ` contains one.
+    `Parent_SampleTypes` was PROSE in the 2026-05 catalog and every naive
+    split was wrong. Four separators were in use - `,`, ` or `, ` and `, and a
+    bare `.` (MUS read 'AB, BAC. CHM') - CEL was missing a comma entirely
+    ('CEL, TIS MUS, NHP, PAV'), and splitting on `.` would shatter the type
+    codes themselves, since `D.SEQ` contains one. The curated 2026-09 catalog
+    is a plain `, ` list, but a caller can still pass an older vintage.
 
     So parents are FOUND rather than split: every known code is matched against
     the string, longest first so `D.SEQ` wins over a bare `SEQ`. Anything that
