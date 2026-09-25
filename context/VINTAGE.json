@@ -1,31 +1,31 @@
 {
-  "bundled_date": "2026-07-22",
+  "bundled_date": "2026-09-25",
   "bundled_date_meaning": "Date these snapshots were assembled into the dmac-curation plugin. Per-file provenance, including source commit and sha256, is in context/PROVENANCE.json.",
-  "source": "chat_nextseek context exports (src/chat_nextseek/context/), commit 367d72732da3ffcc099a367b0ff6f87eaea0bed7",
+  "source": "NExtSEEK origin/dev at commit 926be1e3f3658b57512062293fe95e11681bf0e4, directory NessieAI/chat_nextseek/src/chat_nextseek/context/ (the five managed files). The report_templates/ assets are unchanged from chat_nextseek 367d72732da3ffcc099a367b0ff6f87eaea0bed7 and are byte-identical to NessieAI/chat_nextseek/src/chat_nextseek/reports/templates/ at the same NExtSEEK commit.",
   "instance": {
-    "neo4j_schema.json": "PRODUCTION (nextseek.mit.edu), fetched_at 2026-05-11. The 2026-05-27 bundle shipped a DEV snapshot with 23 Sample properties; the live production schema has 85.",
-    "neo4j_assay-sample-conn.json": "PRODUCTION, fetched_at 2026-05-11 (163 allowed edges; the prior DEV bundle carried 176)",
-    "sampletypes_db.json": "PRODUCTION (byte-identical to the live chat_nextseek export)",
-    "assays_db.json": "PRODUCTION (byte-identical to the live chat_nextseek export)",
-    "projects_db.json": "PRODUCTION (byte-identical to the live chat_nextseek export)"
+    "neo4j_schema.json": "LOCAL graph, NOT production: schema 1.2, catalog_hash 7c3840b3d0be (the production snapshot plus TCGA), captured 2026-09-24 by NExtSEEK scripts/graph_schema_fallback.py (commit 8c6e0c70). It is the graph agent's committed fallback schema. 1180 Sample properties, because at schema 1.2 every attribute title holding a value is a Sample property; the vocabulary includes the TCGA study titles, which production does not hold. The 2026-07-22 bundle shipped a PRODUCTION capture of 2026-05-11 with 85 Sample properties.",
+    "neo4j_assay-sample-conn.json": "LOCAL graph, NOT production: the same schema 1.2 capture, fetched_at 2026-09-24 (322 allowed edges; the 2026-07-22 PRODUCTION bundle carried 163). A.MET, A.RPPA and D.ARR appear as endpoints but are not in sampletypes_db.json, and 38 of its 138 assay names have no assays_db.json row.",
+    "sampletypes_db.json": "CURATED: NExtSEEK scripts/context_gen.py --emit exports over context/sample_types.json, the rows the 2026-09-21 curated write put in the context tables (commit 1641ea0c).",
+    "assays_db.json": "CURATED: NExtSEEK scripts/context_gen.py --emit exports over context/assays.json (commit 1641ea0c), deduplicated to one row per internal assay.",
+    "projects_db.json": "CURATED: NExtSEEK scripts/context_gen.py --emit exports over context/projects.json (last changed e10ad724, 2026-09-24: PUBLISHED is project 6). The database write of that last change waits for the operator's sign-off at the production deploy, so production may still differ on the PUBLISHED row."
   },
   "neo4j_schema_vintages_seen": {
-    "note": "chat_nextseek's context/ holds THREE schema files with very different Sample-property counts. The bundled copy is the 85-property LIVE file, chosen because chat_nextseek's own config.py _ensure_neo4j_schema()/_fetch_neo4j_schema loads exactly neo4j_schema.json and overwrites it from the production graph on each fetch -- so that file is what the running system actually reads. Do NOT 'upgrade' to the 200-property dump.",
-    "neo4j_schema.json": "23 Sample properties in the DEV snapshot fetched 2026-03-26; 85 in the LIVE production copy fetched 2026-05-11 (bundled here).",
-    "neo4j_schema_dev.json": "23 Sample properties, fetched 2026-03-26 -- the stale DEV snapshot; byte-identical to what this plugin shipped through 2026-05-27. This was the bug.",
-    "neo4j_schema_prod.json": "200 Sample properties, fetched 2026-03-26 -- an OLDER, uncurated/flattened raw dump that the live system does NOT load. Its overlap with the live 85-prop file is only 27 properties: a different shape, not a newer version. NOT bundled."
+    "note": "As of NExtSEEK origin/dev 926be1e3, chat_nextseek's context/ tracks ONE full graph schema, neo4j_schema.json, beside min_graph_schema.json (a hand-written parser-routing summary, not a schema dump) and neo4j_protocol_schema.json. The runtime stopped fetching neo4j_schema.json from the graph (689f00be); the committed file is the fallback the graph agent reads when the live catalog cannot be read, so it is still the file to bundle. Its 1180 Sample properties are the schema 1.2 shape, not the uncurated 200-property dump warned about below.",
+    "neo4j_schema.json": "23 Sample properties in the DEV snapshot fetched 2026-03-26; 85 in the LIVE production copy fetched 2026-05-11 (bundled 2026-07-22); 1180 in the schema 1.2 LOCAL capture of 2026-09-24 (bundled here).",
+    "neo4j_schema_dev.json": "23 Sample properties, fetched 2026-03-26 -- the stale DEV snapshot this plugin shipped through 2026-05-27. No longer tracked upstream.",
+    "neo4j_schema_prod.json": "200 Sample properties, fetched 2026-03-26 -- an older, uncurated/flattened raw dump the live system never loaded. No longer tracked upstream. NOT bundled."
   },
   "files": {
-    "sampletypes_db.json": "101 sample types",
-    "assays_db.json": "217 assays",
-    "projects_db.json": "10 projects: Break Through Cancer, CSBC, GBM, Griffith, Impact, MetNet, PUBLISHED, RMS-NGC, Shoulders, SRP",
-    "neo4j_schema.json": "Neo4j labels and relationships (85 Sample properties, PRODUCTION)",
-    "neo4j_assay-sample-conn.json": "163 allowed (assay, parent_type, child_type) edges (wrapper has {fetched_at, connections})",
-    "min_api_endpoints_enriched.json": "13 enriched API endpoint records (hand-maintained; not auto-refreshed)",
-    "NExtSEEK_API.yaml": "OpenAPI spec for nextseek.mit.edu (hand-maintained; not auto-refreshed)",
+    "sampletypes_db.json": "109 sample types (was 101 on 2026-07-22; added A.ICM, A.VLT, D.CAD, D.ICM, D.VLT, FLT, LYS, WTR; LYS is described as deprecated)",
+    "assays_db.json": "138 assays, one per internal assay (was 217 rows on 2026-07-22)",
+    "projects_db.json": "21 rows (12 projects, 9 investigations): BioMicroCenter, BPRC, Break Through Cancer, Collagen Study, CSBC (project and investigation), Endometriosis, GBM_BTC, Griffith, Impact, Impactb Investigation, MetNet (project and investigation), MIT-Koch, MIT_SRP, NAMs, PUBLISHED, RMS-NGC, Shoulders, SRP, TCGA (was 10 on 2026-07-22)",
+    "neo4j_schema.json": "Neo4j schema 1.2: 8 labels, 7 relationship types, 1180 Sample properties (LOCAL graph capture; see instance)",
+    "neo4j_assay-sample-conn.json": "322 allowed (assay, parent_type, child_type) edges (wrapper has {fetched_at, connections})",
+    "min_api_endpoints_enriched.json": "13 enriched API endpoint records (hand-maintained; not auto-refreshed; not refreshed 2026-09-25, see note)",
+    "NExtSEEK_API.yaml": "OpenAPI spec for nextseek.mit.edu, 41 paths (hand-maintained; not auto-refreshed; not refreshed 2026-09-25, see note)",
     "fdh_api_index.json": "FairDomHub API intent index with yaml_lines back-pointers (hand-maintained)",
     "full-fdh-openapi-spec.yaml": "FairDomHub OpenAPI spec (640KB; never read whole, use the index; hand-maintained)"
   },
   "refresh": "uv run --script scripts/refresh_context.py --check   (report staleness)   |   uv run --script scripts/refresh_context.py --from-dir <DIR> --write   (apply). Per-file provenance is in context/PROVENANCE.json.",
-  "note": "Each curation project's lockfile records which bundled_date was used at /curate-init. NExtSEEK_API.yaml is NOT auto-refreshed; its claim that the flat upload format lacks ontology support is dated 2026-05-27 and must be confirmed with the API owner before anything new is designed around it."
+  "note": "Each curation project's lockfile records which bundled_date was used at /curate-init. NExtSEEK_API.yaml is NOT auto-refreshed; its claim that the flat upload format lacks ontology support is dated 2026-05-27 and must be confirmed with the API owner before anything new is designed around it. Not refreshed on 2026-09-25, on purpose: NessieAI's nextseek_api.yaml and min_api_endpoints_enriched.json are the chatbot's narrower copies, not newer versions of these. nextseek_api.yaml has 24 paths against this file's 41 and drops batch-upload/* (/curate-qc calls batch-upload/validate/), entity_tree/*, sops/download and people/current; the NessieAI endpoint list has 8 records and drops the sample create, patch, delete, advanced_search and parents_by_child_types endpoints. Both also carry sample identifiers outside the reserved 19MMDD synthetic band, which tests/test_identifier_exposure.py forbids in this public repository. One real change they record: the download endpoint's canonical name is now /nextseek_api/samples/retrieve/ (NExtSEEK 4cfd48d8); /nextseek_api/admin/samples/retrieve/, which scripts/report/adapters.py calls, stays as a deprecated alias on origin/dev."
 }

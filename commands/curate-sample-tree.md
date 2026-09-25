@@ -70,7 +70,7 @@ this ordering prevents.
 1. Complete the **Harvest** above first (whole Methods main + SI; fetch any named deposit; cross-check
    `files/`). From it, identify the experimental arms AND the deposit-anchored data-tier structure
    (`D.*`/`A.*` counts and their files). Manuscript may be `.pdf` or `.docx` — extract text accordingly.
-2. Read `<PLUGIN>/context/sampletypes_db.json` (101 types) and `<PLUGIN>/context/assays_db.json` (217 assays).
+2. Read `<PLUGIN>/context/sampletypes_db.json` (109 types) and `<PLUGIN>/context/assays_db.json` (138 assays).
 3. For each arm, identify required sample types. Use the master xlsx to determine `[EXIST]` (existing UIDs) vs `[NEW]` (to be created).
 4. For each new sample type, infer parent type — **sample existing PI rows first**, fall back to `sampletypes_db.json` if no precedent.
 5. Build ASCII trees per arm.
