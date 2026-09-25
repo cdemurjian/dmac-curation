@@ -2,36 +2,36 @@
   "description": "Provenance for every vendored file in this plugin: source repo, source path, commit SHA, vendoring date, local divergence, and sha256. sampletypes_db.json already existed in three copies at three vintages with no record of which was authoritative; this file exists so that never happens again. Managed context files are updated by scripts/refresh_context.py --write; vendored report assets are recorded by hand when added.",
   "entries": {
     "context/assays_db.json": {
-      "source_repo": "chat_nextseek",
-      "source_path": "src/chat_nextseek/context/assays_db.json",
-      "commit_sha": "367d72732da3ffcc099a367b0ff6f87eaea0bed7",
-      "vendored_date": "2026-07-22",
-      "local_divergence": "none",
-      "sha256": "c8a7ebaf6c7e46b18728a4fec5cd86db488f1fcd326bfd33c564574dc3703c7f"
+      "source_repo": "NExtSEEK (origin/dev)",
+      "source_path": "NessieAI/chat_nextseek/src/chat_nextseek/context/assays_db.json",
+      "commit_sha": "926be1e3f3658b57512062293fe95e11681bf0e4",
+      "vendored_date": "2026-09-25",
+      "local_divergence": "none; Generated upstream by scripts/context_gen.py --emit exports from the curated context/assays.json (commit 1641ea0c, 2026-09-21): one row per internal assay.",
+      "sha256": "36baf255d63daf18c66055508ef4f4a5f8d82ea21b713f3733d477426af34072"
     },
     "context/neo4j_assay-sample-conn.json": {
-      "source_repo": "chat_nextseek",
-      "source_path": "src/chat_nextseek/context/neo4j_assay-sample-conn.json",
-      "commit_sha": "367d72732da3ffcc099a367b0ff6f87eaea0bed7",
-      "vendored_date": "2026-07-22",
-      "local_divergence": "none",
-      "sha256": "2550143a923ada7a078120d85d7bc811686aa933ff21ccd3b733e6e3507b80d3"
+      "source_repo": "NExtSEEK (origin/dev)",
+      "source_path": "NessieAI/chat_nextseek/src/chat_nextseek/context/neo4j_assay-sample-conn.json",
+      "commit_sha": "926be1e3f3658b57512062293fe95e11681bf0e4",
+      "vendored_date": "2026-09-25",
+      "local_divergence": "none; Captured upstream by scripts/graph_schema_fallback.py (commit 8c6e0c70, 2026-09-24) from the LOCAL graph at schema 1.2, not production; see VINTAGE.json.",
+      "sha256": "81a901ace2fd11d145c457dda3da864e3e61d0b075446921af7cce8e8fb08c36"
     },
     "context/neo4j_schema.json": {
-      "source_repo": "chat_nextseek",
-      "source_path": "src/chat_nextseek/context/neo4j_schema.json",
-      "commit_sha": "367d72732da3ffcc099a367b0ff6f87eaea0bed7",
-      "vendored_date": "2026-07-22",
-      "local_divergence": "none",
-      "sha256": "5aa69f432d730d5f8fa57fd27b44e7f2b63c0331e33d6c1d6797c7b673683456"
+      "source_repo": "NExtSEEK (origin/dev)",
+      "source_path": "NessieAI/chat_nextseek/src/chat_nextseek/context/neo4j_schema.json",
+      "commit_sha": "926be1e3f3658b57512062293fe95e11681bf0e4",
+      "vendored_date": "2026-09-25",
+      "local_divergence": "none; Captured upstream by scripts/graph_schema_fallback.py (commit 8c6e0c70, 2026-09-24) from the LOCAL graph at schema 1.2, not production; see VINTAGE.json.",
+      "sha256": "69ce691df3214109d81b6a906ddeb94d540e01cfb19393f13896b1e13d923d09"
     },
     "context/projects_db.json": {
-      "source_repo": "chat_nextseek",
-      "source_path": "src/chat_nextseek/context/projects_db.json",
-      "commit_sha": "367d72732da3ffcc099a367b0ff6f87eaea0bed7",
-      "vendored_date": "2026-07-22",
-      "local_divergence": "none",
-      "sha256": "110da7b411e4cb73c5adb5b7324c871de6b40a26c3cfa5084a17437aab672619"
+      "source_repo": "NExtSEEK (origin/dev)",
+      "source_path": "NessieAI/chat_nextseek/src/chat_nextseek/context/projects_db.json",
+      "commit_sha": "926be1e3f3658b57512062293fe95e11681bf0e4",
+      "vendored_date": "2026-09-25",
+      "local_divergence": "none; Generated upstream by scripts/context_gen.py --emit exports from the curated context/projects.json (last changed e10ad724, 2026-09-24). Rows carry no `labs` key; the NExtSEEK runtime adds those.",
+      "sha256": "458d26f5b63c33d1ea0d690bdea9326660e731152d9e50113b8c93913ad14275"
     },
     "context/report_templates/GEO-updated.json": {
       "source_repo": "chat_nextseek",
@@ -82,12 +82,12 @@
       "sha256": "5508e6edfcf9184c299a03861b8860901ad44bfa56def819ab12236ca52b4844"
     },
     "context/sampletypes_db.json": {
-      "source_repo": "chat_nextseek",
-      "source_path": "src/chat_nextseek/context/sampletypes_db.json",
-      "commit_sha": "367d72732da3ffcc099a367b0ff6f87eaea0bed7",
-      "vendored_date": "2026-07-22",
-      "local_divergence": "none",
-      "sha256": "58ec12d1c97149ae03996b0b32bb693839a016bee32b4408d9167aa30b74c0e3"
+      "source_repo": "NExtSEEK (origin/dev)",
+      "source_path": "NessieAI/chat_nextseek/src/chat_nextseek/context/sampletypes_db.json",
+      "commit_sha": "926be1e3f3658b57512062293fe95e11681bf0e4",
+      "vendored_date": "2026-09-25",
+      "local_divergence": "none; Generated upstream by scripts/context_gen.py --emit exports from the curated context/sample_types.json (commit 1641ea0c, 2026-09-21).",
+      "sha256": "c0ae944d417c724fa1c807aba01785e96115c5f20613d7a4eeab42d2c9f83756"
     },
     "scripts/report/validate_artifact.py": {
       "source_repo": "dmac-assistant",

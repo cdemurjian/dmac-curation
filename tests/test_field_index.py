@@ -1,4 +1,4 @@
-"""Field index and reuse check over the 1059-name sample type catalog."""
+"""Field index and reuse check over the 1118-name sample type catalog."""
 import sys
 from pathlib import Path
 
@@ -35,7 +35,7 @@ CATALOG = [
 
 def test_load_catalog_reads_the_bundled_file():
     types = fi.load_catalog()
-    assert len(types) == 101
+    assert len(types) == 109
     assert all("SampleType" in t for t in types)
 
 
@@ -57,10 +57,10 @@ def test_build_field_index_covers_all_three_sources():
 def test_real_catalog_shape_matches_the_spec():
     """Guards the numbers the schema spec reasons from."""
     idx = fi.build_field_index(fi.load_catalog())
-    assert len(idx) == 1059
+    assert len(idx) == 1118
     singletons = [f for f in idx.values() if f.count == 1]
-    assert len(singletons) == 857
-    assert idx["UID"].count == 101
+    assert len(singletons) == 901
+    assert idx["UID"].count == 109
 
 
 def test_normalize_field_name_handles_case_underscores_and_plurals():
@@ -194,12 +194,28 @@ def test_the_reuse_check_can_now_see_a_field_behind_an_acronym():
 
 # --- parent lineage ---------------------------------------------------------
 #
-# `Parent_SampleTypes` is PROSE, not a list, and every naive split is wrong.
-# Four separators are in use across the catalog - `,` (6 records), ` or ` (15),
-# ` and ` (1) and `.` (MUS reads 'AB, BAC. CHM') - CEL is missing a comma
+# `Parent_SampleTypes` was PROSE, not a list, and every naive split was wrong.
+# The 2026-05 catalog used four separators - `,` (6 records), ` or ` (15),
+# ` and ` (1) and `.` (MUS read 'AB, BAC. CHM') - CEL was missing a comma
 # entirely ('CEL, TIS MUS, NHP, PAV'), and splitting on `.` shatters the type
 # codes themselves, which contain one. So parents are FOUND by matching known
 # codes rather than split out by delimiter.
+#
+# The curated 2026-09 catalog writes every one of those as a plain `, ` list,
+# so the bundled file no longer exercises the messy separators. The tests for
+# them therefore carry the old prose as inline fixtures (a project can still
+# point `load_catalog` at an older vintage), and one test pins that every
+# bundled row parses to exactly its own comma list.
+
+# Every code the prose fixtures below mention, so `parents_of` can find them.
+_CODES = ("AB", "ABP", "BAC", "CEL", "CHM", "D.ELSA", "D.SEQ", "DNA", "MUS",
+          "NHP", "PAV", "RNA", "SEQ", "TIS")
+
+
+def _prose_catalog(sampletype: str, parents: str) -> list[dict]:
+    rows = [{"SampleType": c} for c in _CODES if c != sampletype]
+    return rows + [{"SampleType": sampletype, "Parent_SampleTypes": parents}]
+
 
 def test_a_single_parent_is_returned():
     catalog = fi.load_catalog()
@@ -207,25 +223,48 @@ def test_a_single_parent_is_returned():
 
 
 def test_or_separated_parents_are_all_returned():
-    catalog = fi.load_catalog()
+    catalog = _prose_catalog("DNA", "CEL or RNA or DNA or TIS or BAC")
     assert fi.parents_of(catalog, "DNA") == ["CEL", "RNA", "DNA", "TIS", "BAC"]
 
 
 def test_mixed_or_and_and_separators():
-    catalog = fi.load_catalog()
+    catalog = _prose_catalog("D.ELSA", "AB or ABP and CEL or TIS")
     assert fi.parents_of(catalog, "D.ELSA") == ["AB", "ABP", "CEL", "TIS"]
 
 
 def test_a_missing_comma_does_not_lose_a_parent():
-    """CEL reads 'CEL, TIS MUS, NHP, PAV' - TIS and MUS share a separator."""
-    catalog = fi.load_catalog()
+    """CEL read 'CEL, TIS MUS, NHP, PAV' - TIS and MUS share a separator."""
+    catalog = _prose_catalog("CEL", "CEL, TIS MUS, NHP, PAV")
     assert fi.parents_of(catalog, "CEL") == ["CEL", "TIS", "MUS", "NHP", "PAV"]
 
 
 def test_a_period_separator_does_not_shatter_the_codes():
-    """MUS reads 'AB, BAC. CHM'. Splitting on '.' would also break `D.SEQ`."""
-    catalog = fi.load_catalog()
+    """MUS read 'AB, BAC. CHM'. Splitting on '.' would also break `D.SEQ`."""
+    catalog = _prose_catalog("MUS", "AB, BAC. CHM")
     assert fi.parents_of(catalog, "MUS") == ["AB", "BAC", "CHM"]
+    catalog = _prose_catalog("D.ELSA", "D.SEQ. DNA")
+    assert fi.parents_of(catalog, "D.ELSA") == ["D.SEQ", "DNA"]
+
+
+def test_every_bundled_row_parses_to_its_own_comma_list():
+    """The curated catalog is `, `-separated; the finder must agree with it.
+
+    Only codes that are real sample types count, which is what `parents_of`
+    promises, so a listed parent that is not in the catalog is dropped from
+    the expectation too.
+    """
+    catalog = fi.load_catalog()
+    codes = {r["SampleType"] for r in catalog if r.get("SampleType")}
+    checked = 0
+    for row in catalog:
+        raw = row.get("Parent_SampleTypes") or ""
+        expected = []
+        for part in (p.strip() for p in raw.split(",")):
+            if part in codes and part not in expected:
+                expected.append(part)
+        assert fi.parents_of(catalog, row["SampleType"]) == expected, row["SampleType"]
+        checked += bool(expected)
+    assert checked >= 90, "the bundled catalog should declare parents on most rows"
 
 
 def test_a_type_with_no_declared_parents_returns_empty():
