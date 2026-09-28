@@ -70,7 +70,7 @@ protocol documents:
    documents:
 
    ```json
-   {"lab": "SHE", "stamp": "260807", "version": 1,
+   {"lab": "GHI", "stamp": "190111", "version": 1,
     "study": "Oak et al., Sci. Adv. 11, eadq0638 (2025)",
     "doi": "10.1126/sciadv.adq0638",
     "protocols": [
@@ -142,7 +142,7 @@ protocol documents:
 
 8. Suggest `/curate-build <arm>`, and remind the user that the `Protocol` column
    takes the **SOP title verbatim**, which is the filename, e.g.
-   `P.SHE-260807-V1_AFM.docx`. A SOP has no separate `uid` attribute.
+   `P.GHI-190111-V1_AFM.docx`. A SOP has no separate `uid` attribute.
 
 ## Behavioral rules
 

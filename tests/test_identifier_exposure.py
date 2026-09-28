@@ -89,9 +89,16 @@ STAMP_RE = re.compile(r"[0-9]{6}[A-Z]{2,5}")
 # ratchets on SHAPE: a suite about uid grammar legitimately needs well-formed
 # uids, and every one of these is now synthetic. The REALITY tiers below are
 # not ratchets -- they assert zero.
-PROTOCOL_OCCURRENCES = 42          # case-tolerant; the case-sensitive count is 21.
+PROTOCOL_OCCURRENCES = 42          # case-tolerant.
                                    # +16 over the 0.5.0 baseline of 26: /curate-protocols
-                                   # ships doc examples and test fixtures, all synthetic.
+                                   # ships doc examples and test fixtures. When it landed
+                                   # (PR #10) those were NOT synthetic: they carried a real
+                                   # lab's real batch stamp, and two of the titles resolve
+                                   # to registered SOPs. This ratchet stayed green because
+                                   # it counts shape, and STAMP_RE cannot see a stamp
+                                   # written as `-YYMMDD-V`. Re-stamped 2026-09-28 into the
+                                   # 19MMDD band under reserved lab codes absent from every
+                                   # SOP title on the server; all synthetic from then on.
                                    # (No identifier is written here - see the docstring.)
 # 440 -> 445 on 2026-08-27: the assay-hygiene mode-commands plan carries five
 # occurrences of one synthetic example uid in its preflight and workflow test

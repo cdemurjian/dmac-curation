@@ -37,7 +37,7 @@ METHODS = [
 ]
 
 MANIFEST = {
-    "lab": "SHE", "stamp": "260807", "version": 1,
+    "lab": "GHI", "stamp": "190111", "version": 1,
     "study": "Test et al. 2026",
     "protocols": [
         {"topic": "CellCulture", "headings": ["Cell culture"],
@@ -88,16 +88,16 @@ def test_builds_one_docx_per_manifest_entry(project):
     r = run(project)
     assert r.returncode == 0, r.stdout + r.stderr
     names = {p.name for p in (project / "protocols").glob("*.docx")}
-    assert names == {"P.SHE-260807-V1_CellCulture.docx",
-                     "P.SHE-260807-V1_Imaging.docx",
-                     "P.SHE-260807-V1_Statistics.docx"}
+    assert names == {"P.GHI-190111-V1_CellCulture.docx",
+                     "P.GHI-190111-V1_Imaging.docx",
+                     "P.GHI-190111-V1_Statistics.docx"}
 
 
 def test_body_text_is_the_manuscript_prose_verbatim(project):
     docx = pytest.importorskip("docx")
     run(project)
     paras = [p.text for p in docx.Document(
-        str(project / "protocols" / "P.SHE-260807-V1_CellCulture.docx")).paragraphs]
+        str(project / "protocols" / "P.GHI-190111-V1_CellCulture.docx")).paragraphs]
     assert paras[0] == "Cell culture"                    # italic heading
     assert paras[1:] == ["NHEKs were grown in KSFM.", "Medium was changed daily."]
 
@@ -106,7 +106,7 @@ def test_heading_is_italic_and_body_is_not(project):
     docx = pytest.importorskip("docx")
     run(project)
     doc = docx.Document(
-        str(project / "protocols" / "P.SHE-260807-V1_CellCulture.docx"))
+        str(project / "protocols" / "P.GHI-190111-V1_CellCulture.docx"))
     assert doc.paragraphs[0].runs[0].italic is True
     assert not any(r.italic for r in doc.paragraphs[1].runs)
 
@@ -116,14 +116,14 @@ def test_nothing_but_the_excerpt_is_written(project):
     docx = pytest.importorskip("docx")
     run(project)
     text = "\n".join(p.text for p in docx.Document(
-        str(project / "protocols" / "P.SHE-260807-V1_Imaging.docx")).paragraphs)
-    for leaked in ("SOP", "dmac", "curation", "Generated", "P.SHE-260807"):
+        str(project / "protocols" / "P.GHI-190111-V1_Imaging.docx")).paragraphs)
+    for leaked in ("SOP", "dmac", "curation", "Generated", "P.GHI-190111"):
         assert leaked not in text
 
 
 def test_existing_docx_is_not_overwritten_without_force(project):
     run(project)
-    target = project / "protocols" / "P.SHE-260807-V1_Imaging.docx"
+    target = project / "protocols" / "P.GHI-190111-V1_Imaging.docx"
     target.write_bytes(b"HANDED OVER ALREADY")
     r = run(project)
     assert target.read_bytes() == b"HANDED OVER ALREADY"
@@ -132,7 +132,7 @@ def test_existing_docx_is_not_overwritten_without_force(project):
 
 def test_force_rewrites_an_existing_docx(project):
     run(project)
-    target = project / "protocols" / "P.SHE-260807-V1_Imaging.docx"
+    target = project / "protocols" / "P.GHI-190111-V1_Imaging.docx"
     target.write_bytes(b"HANDED OVER ALREADY")
     run(project, "--force")
     assert target.read_bytes() != b"HANDED OVER ALREADY"
@@ -142,7 +142,7 @@ def test_only_renders_a_single_protocol(project):
     r = run(project, "--only", "Statistics")
     assert r.returncode == 0, r.stdout + r.stderr
     assert {p.name for p in (project / "protocols").glob("*.docx")} == {
-        "P.SHE-260807-V1_Statistics.docx"}
+        "P.GHI-190111-V1_Statistics.docx"}
 
 
 def test_repeated_heading_is_consumed_in_document_order(project):
@@ -161,7 +161,7 @@ def test_repeated_heading_is_consumed_in_document_order(project):
 
     def body(topic):
         return [p.text for p in docx.Document(str(
-            project / "protocols" / f"P.SHE-260807-V1_{topic}.docx")).paragraphs][1:]
+            project / "protocols" / f"P.GHI-190111-V1_{topic}.docx")).paragraphs][1:]
 
     assert body("AfmOne") == ["First occurrence."]
     assert body("AfmTwo") == ["Second occurrence."]
@@ -209,14 +209,14 @@ def test_declared_non_verbatim_section_is_exempt_from_the_check(project):
 # ── manifest validation ──────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("bad,expect", [
-    ({"stamp": "260807", "protocols": []}, "lab"),
-    ({"lab": "SHE", "protocols": []}, "stamp"),
-    ({"lab": "SHE", "stamp": "26087", "protocols": [{"topic": "A", "headings": ["Imaging"]}]},
+    ({"stamp": "190111", "protocols": []}, "lab"),
+    ({"lab": "GHI", "protocols": []}, "stamp"),
+    ({"lab": "GHI", "stamp": "19011", "protocols": [{"topic": "A", "headings": ["Imaging"]}]},
      "YYMMDD"),
-    ({"lab": "SHE", "stamp": "260807", "protocols": []}, "declares no protocols"),
-    ({"lab": "SHE", "stamp": "260807",
+    ({"lab": "GHI", "stamp": "190111", "protocols": []}, "declares no protocols"),
+    ({"lab": "GHI", "stamp": "190111",
       "protocols": [{"topic": "has space", "headings": ["Imaging"]}]}, "CamelCase"),
-    ({"lab": "SHE", "stamp": "260807",
+    ({"lab": "GHI", "stamp": "190111",
       "protocols": [{"topic": "A", "headings": ["Imaging"]},
                     {"topic": "A", "headings": ["Imaging"]}]}, "duplicate topic"),
 ])
@@ -287,20 +287,20 @@ def test_missing_sample_tree_still_renders_and_says_why(project):
 
 def test_sop_ids_appear_once_registration_has_run(project):
     (project / "protocols" / "_sops.json").write_text(json.dumps({
-        "P.SHE-260807-V1_CellCulture.docx": {
-            "id": "649", "title": "P.SHE-260807-V1_CellCulture.docx",
-            "url": "https://example.invalid/sops/649"}}))
+        "P.GHI-190111-V1_CellCulture.docx": {
+            "id": "9001", "title": "P.GHI-190111-V1_CellCulture.docx",
+            "url": "https://example.invalid/sops/9001"}}))
     run(project, "--coverage-only")
     row = [l for l in coverage_text(project).splitlines()
            if l.startswith("| `CellCulture` |")][0]
-    assert "| 649 |" in row
+    assert "| 9001 |" in row
 
 
 # ── phase wiring ─────────────────────────────────────────────────────────────
 
 def test_status_reports_protocols_as_phase_3b_not_4(curation_project):
     (curation_project / "protocols").mkdir()
-    (curation_project / "protocols" / "P.KAM-260807-V1_X.docx").write_bytes(b"x")
+    (curation_project / "protocols" / "P.JKL-190112-V1_X.docx").write_bytes(b"x")
     st = status_mod.collect_status(curation_project)
     art = {a["name"]: a for a in st["modes"]["pipeline"]["artifacts"]}["protocols"]
     assert art["phase"] == "3b"
@@ -323,7 +323,7 @@ def test_status_flags_a_stale_coverage_file(curation_project):
     d.mkdir()
     (d / "COVERAGE.md").write_text("old")
     time.sleep(0.01)
-    doc = d / "P.KAM-260807-V1_X.docx"
+    doc = d / "P.JKL-190112-V1_X.docx"
     doc.write_bytes(b"x")
     os.utime(doc, (time.time() + 10, time.time() + 10))
     st = status_mod.collect_status(curation_project)

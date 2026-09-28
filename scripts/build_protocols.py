@@ -34,8 +34,8 @@ motivating case. Everything else must survive the verbatim check below.
 Input: protocols/_manifest.json (the mapping, and the only place judgment sits):
 
     {
-      "lab": "SHE",                     required, uppercase lab tag
-      "stamp": "260807",                required, YYMMDD batch stamp
+      "lab": "GHI",                     required, uppercase lab tag
+      "stamp": "190111",                required, YYMMDD batch stamp
       "version": 1,                     optional, default 1  -> V1
       "study": "Oak et al., ...",       optional, printed in COVERAGE.md
       "protocols": [
