@@ -120,7 +120,13 @@ PROTOCOL_OCCURRENCES = 42          # case-tolerant; the case-sensitive count is 
 # two synthetic uids as module constants, the same pair the sheet-builder suite
 # uses, for the payload the API client builds. Both in the reserved 19MMDD band;
 # the REALITY tier below confirms neither resolves to a real sample.
-UID_PATTERN_OCCURRENCES = 454      # all synthetic
+# 454 -> 496 on 2026-09-28: the issue-8 fixes (PR #9) added three test modules,
+# test_consolidate_assay_union.py, test_flat_pipeline_cli.py and
+# test_qa_assay_membership.py, whose fixtures build small synthetic lineages.
+# All 42 occurrences sit in the reserved 19MMDD band, under the placeholder lab
+# codes those modules use, and none resolves to a real sample. PR #9 merged
+# without moving this baseline, which left dev red on this test alone.
+UID_PATTERN_OCCURRENCES = 496      # all synthetic
 # 439 -> 440 on 2026-08-27: the prerequisites plan under docs/superpowers/plans/
 # cites one 19MMDD-band uid as the example new fixtures must follow. Verified
 # absent from all 177,393 production uids, and no 19xx-band uid is real for any
