@@ -63,6 +63,41 @@ Protocols become a pipeline phase instead of a per-project one-off.
   `V1` underneath the record that cites it.
 - Every batch authors its own protocol set. `upload_sops.py` skipping a filename
   it already sees is idempotency for re-runs, not reuse of another curator's SOP.
+### Changed
+
+- **A row's `assay_ids` is now its own assay plus every assay it feeds** (issue
+  #8, PR #9). NExtSEEK labels a DERIVED_FROM edge only when parent and child
+  share an assay, so `/curate-consolidate` pushes each child's assay up to its
+  parents in the flat file. `/curate-retrieve` splits semicolon-joined parents
+  before deciding which rows are leaves, finds the all-in-one workbook, and keeps
+  parent-type leaves.
+- **`/curate-protocols` registers a lab-supplied PDF**, not only an authored
+  `.docx`. `upload_sops.py` picks up `P.*.pdf` beside `P.*.docx` and sends each
+  with its own content type; the confirm gate is unchanged.
+- **Context refresh.** The five managed catalogs follow NExtSEEK origin/dev
+  (PR #12), and four identifier-free compact files join them as managed files:
+  `min_assays_db.json`, `min_sampletypes_db.json`, `min_graph_schema.json`,
+  `scope_fallback_endpoints.json`. Their siblings that carry real identifiers
+  stay out; see `context/VINTAGE.json`.
+
+### Fixed
+
+- **`assay_titles` and `assay_ids` could differ in length**, which NExtSEEK's
+  batch upload rejects outright. It happened when the assay pushed up from a
+  child was not in the project cache. Only resolved pairs are emitted now, and
+  `/curate-qa` gains `assay_title_id_mismatch` as a hard reject. `/curate-qa`'s
+  doc now lists that and the two issue-8 rejects, `assay_membership_gap` and
+  `row_has_no_assay`.
+- **`/curate-validate` reported every multi-parent row as changed**, because
+  NExtSEEK canonicalises `"A; B"` to `"A;B"`. Semicolon lists are compared
+  normalised.
+- **Protocol examples and fixtures carried real SOP titles** from the batch
+  `/curate-protocols` was ported from; two resolve to registered records. They
+  are re-stamped into the reserved synthetic band. The identifier ratchet had
+  counted them as synthetic because it measures shape.
+- The identifier ratchet's uid baseline follows the synthetic fixtures PR #9
+  added, which had left `dev` red on that one test.
+
 ## 0.5.0 - 2026-08-27
 
 A fifth mode. `assay` is house-scoped assay hygiene — one production extract, all
