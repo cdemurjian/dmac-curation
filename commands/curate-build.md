@@ -19,7 +19,7 @@ Parse `$ARGUMENTS`: optional `<arm>` (letter or short name). If omitted, list ar
 - `./CLAUDE.md` exists (lab + pi)
 - `./protocols/*.docx` exist, if the study has Methods text (run `/curate-protocols`
   first). The `Protocol` column carries the **SOP title verbatim**, which is the
-  filename, e.g. `P.SHE-260807-V1_AFM.docx`, and `protocols/_sops.json` maps each
+  filename, e.g. `P.GHI-190111-V1_AFM.docx`, and `protocols/_sops.json` maps each
   filename to its registered SOP id. A study with no Methods has no protocols and
   builds with a blank `Protocol` column; that is expected, not a gap to fill.
 - `./.env` exists (warn if missing — needed at consolidate)

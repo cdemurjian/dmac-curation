@@ -42,6 +42,25 @@ protocol documents:
 4. Do **not** create `protocols/`. Phase 5 can proceed with a blank `Protocol`
    column; a directory of empty documents helps nobody.
 
+## A protocol the lab supplied
+
+When the lab hands over its own protocol (a PDF or a `.docx` of a procedure it
+already runs) there is nothing to author, so skip steps 1 to 5. Register the
+document as it arrived:
+
+1. Copy it into `protocols/` under the house name
+   `P.<LAB>-<STAMP>-V<n>_<Topic>.pdf` (or `.docx`), with `<LAB>` and `<STAMP>`
+   from the lockfile and the batch, like an authored protocol. Copy, never edit:
+   the registered bytes should be the lab's own.
+2. Run step 6 as written, passing `--description` (there is no `_manifest.json`
+   to build one from). `upload_sops.py` sends a `.pdf` as `application/pdf` and
+   a `.docx` as Word; the preview shows which.
+3. Record the source file and its sha256 in `protocols/README.md`, so the
+   provenance of a document nobody here wrote is not lost.
+
+The ask-before-upload rule applies unchanged. A supplied document is still a
+record in a catalog every curator on the project shares.
+
 ## Steps
 
 1. **Read the whole Methods**, main text AND supplement, end to end. Same rule
@@ -70,7 +89,7 @@ protocol documents:
    documents:
 
    ```json
-   {"lab": "SHE", "stamp": "260807", "version": 1,
+   {"lab": "GHI", "stamp": "190111", "version": 1,
     "study": "Oak et al., Sci. Adv. 11, eadq0638 (2025)",
     "doi": "10.1126/sciadv.adq0638",
     "protocols": [
@@ -113,7 +132,8 @@ protocol documents:
    Registration is a separate decision from authoring. Do it in three steps, in
    this order, and never collapse them:
 
-   a. **Preview.** The command writes nothing without `--write`:
+   a. **Preview.** The command writes nothing without `--write`. It registers
+      every `P.*.docx` and `P.*.pdf` in `protocols/`:
 
       ```bash
       uv run --script <PLUGIN>/scripts/upload_sops.py --project-id N
@@ -142,7 +162,7 @@ protocol documents:
 
 8. Suggest `/curate-build <arm>`, and remind the user that the `Protocol` column
    takes the **SOP title verbatim**, which is the filename, e.g.
-   `P.SHE-260807-V1_AFM.docx`. A SOP has no separate `uid` attribute.
+   `P.GHI-190111-V1_AFM.docx`. A SOP has no separate `uid` attribute.
 
 ## Behavioral rules
 

@@ -77,7 +77,7 @@ An arm is what flows through the whole back half:
 | Phase | What the arm is |
 |---|---|
 | 2 | one ASCII tree per arm in `SAMPLE_TREE.md` |
-| 4 | one task per arm, optionally `blockedBy` other arms |
+| 3 | one task per arm, optionally `blockedBy` other arms (task-plan guidance) |
 | 5 | one `scripts/build_<arm>.py` + a set of `assay_sheets/4sheet_originals/<arm>_<sampletype>.xlsx` |
 | 6 | one flat `assay_sheets/Arm{X}-upload.xlsx` + its `Arm{X}_review.xlsx` twin |
 | 7, 9, 12 | iterated over as `Arm*-upload.xlsx` |
@@ -86,9 +86,9 @@ Arms are labelled by letter (`A`, `B`, `C`, …) and are the argument to `/curat
 `/curate-status` reports progress as "6/8 arms built".
 
 **The word borrows clinical-trial language, but do not take it literally.** A trial arm is a
-treatment group, and treatment groups are independent by construction. Arms here are not: Phase 4
-explicitly supports "Arm G blocked by Arm E + Arm F". An arm is better read as *a coherent chunk of
-the dataset that can be built in one pass* — sometimes a
+treatment group, and treatment groups are independent by construction. Arms here are not: the
+task-plan guidance at the tail of Phase 3 explicitly supports "Arm G blocked by Arm E + Arm F". An
+arm is better read as *a coherent chunk of the dataset that can be built in one pass* — sometimes a
 treatment group, sometimes a downstream product that needs two upstream chunks finished first.
 
 ### When to split into separate arms
@@ -218,7 +218,8 @@ numbered.
 **Inputs:** `sample_tree.json` (which assays need documenting), `manuscript/`
 (the Methods text), `.dmac-curation.json` (lab + stamp), `.env` (registration only)
 
-**Outputs:** `protocols/P.<LAB>-<STAMP>-V<n>_<Topic>.docx` (one per topic),
+**Outputs:** `protocols/P.<LAB>-<STAMP>-V<n>_<Topic>.docx` (one per topic, or a
+lab-supplied `.pdf`),
 `protocols/COVERAGE.md` (build artifact), `protocols/README.md` (narrative),
 `protocols/_sops.json` (registration index, written by the upload)
 
@@ -270,6 +271,14 @@ write placeholder protocols.** A `*** PLACEHOLDER ***` marker is right in a
 spreadsheet cell, where QA greps for it; it is wrong in a SOP, which gets
 registered on a shared server and emailed to a PI as if it described a real
 procedure. Phase 5 can proceed with a blank `Protocol` column.
+
+### A lab-supplied protocol skips authoring, not registration
+
+A protocol the lab already runs, usually a PDF, is filed into `protocols/` under
+the same `P.<LAB>-<STAMP>-V<n>_<Topic>` name, unedited, and registered by the same
+`upload_sops.py`, which sends it as `application/pdf`. No `_methods.json` or
+`_manifest.json` is written for it, and `--description` replaces the one a
+manifest would supply. See `commands/curate-protocols.md`.
 
 ### Registration writes to a live server, so ask the user first
 

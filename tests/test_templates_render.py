@@ -49,7 +49,7 @@ MINIMAL = {
     },
     "pyproject.toml.j2": {"project_slug": "marie_intravchip", "pi_name": "marie"},
     "PROTOCOLS.md.j2": {
-        "lab": "she", "stamp": "260807", "generated_date": "2026-08-17",
+        "lab": "ghi", "stamp": "190111", "generated_date": "2026-08-17",
     },
     "env.example.j2": {},
     "gitignore.j2": {},
@@ -81,7 +81,7 @@ WITH_VALUES = {
         "cross_arm_questions": "Q2 about D.REF schema",
     },
     "PROTOCOLS.md.j2": {
-        "lab": "she", "stamp": "260807", "version": 2,
+        "lab": "ghi", "stamp": "190111", "version": 2,
         "generated_date": "2026-08-17",
         "study_line": "Methods excerpts supporting Oak et al. 2025.",
         "verified_against": "the 2026-08-17 sample tree",

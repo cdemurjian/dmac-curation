@@ -353,8 +353,16 @@ def build_arm_flat(arm_name, source_files, out_dir, lookup, synonyms, out_name):
             ident = str(uid or name or "").strip()
             pairs = sorted(row_assays.get(ident) or
                            ({(resolved_title, assay_id_val)} if resolved_title else set()))
-            titles_cell = ", ".join(t for t, _ in pairs)
-            assay_ids_cell = ", ".join(str(i) for _, i in pairs if i is not None)
+            # TITLES AND IDS MUST PAIR UP. NExtSEEK rejects a row whose
+            # assay_titles and assay_ids differ in length (unless both are one),
+            # so once any assay on the row resolves, only resolved pairs are
+            # emitted. An assay pushed up from a child that is not in the
+            # project cache would otherwise add a title with no id. When nothing
+            # resolves, the titles stay and assay_ids is blank, which the server
+            # accepts and QA reports.
+            resolved = [(t, i) for t, i in pairs if i is not None]
+            titles_cell = ", ".join(t for t, _ in (resolved or pairs))
+            assay_ids_cell = ", ".join(str(i) for _, i in resolved)
 
             ws.append([uid, sampletype, name, parent, notes_summary,
                        titles_cell, assay_ids_cell, json_meta])

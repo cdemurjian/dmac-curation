@@ -43,6 +43,14 @@ MANAGED_FILES = [
     "projects_db.json",
     "neo4j_schema.json",
     "neo4j_assay-sample-conn.json",
+    # The chatbot's compact catalogs and routing files, added 2026-09-28. Only the
+    # identifier-free siblings are vendored: this repository is public, and
+    # capabilities.md, min_api_endpoints*.json, nextseek_api.yaml and
+    # neo4j_protocol_schema.json carry real UIDs or protocol ids upstream.
+    "min_assays_db.json",
+    "min_sampletypes_db.json",
+    "min_graph_schema.json",
+    "scope_fallback_endpoints.json",
 ]
 
 

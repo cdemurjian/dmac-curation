@@ -128,8 +128,18 @@ def url_type(s: str | None) -> str:
 
 
 def normalize(v):
+    """Compare-normalise a cell value.
+
+    Collapses whitespace around ``;`` so that a semicolon-delimited list compares
+    equal regardless of spacing. NExtSEEK canonicalises multi-parent lists on
+    insert (``"A; B"`` is stored as ``"A;B"``), so without this every row with
+    more than one parent reads as a diff on a clean round trip. Verified against
+    a 101-row upload where all 10 multi-parent rows reported false diffs and
+    nothing else differed. Only ``COMPARE_COLS`` pass through here — UID lists,
+    filenames, URLs and checksums — none of which carry meaning in the spacing.
+    """
     if v is None: return ""
-    return str(v).strip()
+    return re.sub(r"\s*;\s*", ";", str(v).strip())
 
 
 def compare_sheet(meta: Path, sheets_dir: Path, stype: str, upload_files: list[str]) -> None:

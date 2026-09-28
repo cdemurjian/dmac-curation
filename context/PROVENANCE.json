@@ -9,6 +9,30 @@
       "local_divergence": "none; Generated upstream by scripts/context_gen.py --emit exports from the curated context/assays.json (commit 1641ea0c, 2026-09-21): one row per internal assay.",
       "sha256": "36baf255d63daf18c66055508ef4f4a5f8d82ea21b713f3733d477426af34072"
     },
+    "context/min_assays_db.json": {
+      "source_repo": "NExtSEEK (origin/dev)",
+      "source_path": "NessieAI/chat_nextseek/src/chat_nextseek/context/min_assays_db.json",
+      "commit_sha": "1c070c081ee87cbd54500ea22a17ed6a3dba3569",
+      "vendored_date": "2026-09-28",
+      "local_divergence": "none; the compact assay catalog chat_nextseek's parser reads, emitted by scripts/context_gen.py --emit from the curated context/assays.json (commit 1641ea0c, 2026-09-21).",
+      "sha256": "51ee32ee23d437415922ab3d6705a6539aea39c9e36c8382450b885d710f538b"
+    },
+    "context/min_graph_schema.json": {
+      "source_repo": "NExtSEEK (origin/dev)",
+      "source_path": "NessieAI/chat_nextseek/src/chat_nextseek/context/min_graph_schema.json",
+      "commit_sha": "1c070c081ee87cbd54500ea22a17ed6a3dba3569",
+      "vendored_date": "2026-09-28",
+      "local_divergence": "none; a hand-written parser-routing summary of the schema 1.2 graph (commit c0cc342b, 2026-09-24), not a schema dump.",
+      "sha256": "740ddf246d37af8c8ff8b3d50291fe90cf172f8a2e5857289497b3262dac77e3"
+    },
+    "context/min_sampletypes_db.json": {
+      "source_repo": "NExtSEEK (origin/dev)",
+      "source_path": "NessieAI/chat_nextseek/src/chat_nextseek/context/min_sampletypes_db.json",
+      "commit_sha": "1c070c081ee87cbd54500ea22a17ed6a3dba3569",
+      "vendored_date": "2026-09-28",
+      "local_divergence": "none; the compact sample-type catalog chat_nextseek's parser reads, emitted by scripts/context_gen.py --emit from the curated context/sample_types.json (commit 1641ea0c, 2026-09-21).",
+      "sha256": "d38fdc6f09c28ff2cd2804e7591ea4a6c415a462f90bfafeb400d2c99f117c61"
+    },
     "context/neo4j_assay-sample-conn.json": {
       "source_repo": "NExtSEEK (origin/dev)",
       "source_path": "NessieAI/chat_nextseek/src/chat_nextseek/context/neo4j_assay-sample-conn.json",
@@ -88,6 +112,14 @@
       "vendored_date": "2026-09-25",
       "local_divergence": "none; Generated upstream by scripts/context_gen.py --emit exports from the curated context/sample_types.json (commit 1641ea0c, 2026-09-21).",
       "sha256": "c0ae944d417c724fa1c807aba01785e96115c5f20613d7a4eeab42d2c9f83756"
+    },
+    "context/scope_fallback_endpoints.json": {
+      "source_repo": "NExtSEEK (origin/dev)",
+      "source_path": "NessieAI/chat_nextseek/src/chat_nextseek/context/scope_fallback_endpoints.json",
+      "commit_sha": "1c070c081ee87cbd54500ea22a17ed6a3dba3569",
+      "vendored_date": "2026-09-28",
+      "local_divergence": "none; the REST endpoints the parser falls back to when a request is out of graph scope (commit 0231e534, 2026-09-24).",
+      "sha256": "972ab6df6eb84a8586224c451067037ba4021bf1529160ac38e79f9b3a41af65"
     },
     "scripts/report/validate_artifact.py": {
       "source_repo": "dmac-assistant",

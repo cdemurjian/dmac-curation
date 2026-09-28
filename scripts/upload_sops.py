@@ -3,7 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["requests>=2.31"]
 # ///
-"""Register a project's protocol .docx files on NExtSEEK as SOP records.
+"""Register a project's protocol files (.docx or .pdf) on NExtSEEK as SOP records.
 
 Usage (from a curation project root):
 
@@ -56,6 +56,8 @@ import nextseek_api as N  # noqa: E402
 
 DOCX_CT = ("application/vnd.openxmlformats-officedocument."
            "wordprocessingml.document")
+# Authored protocols are .docx; a lab's own protocol usually arrives as a PDF.
+CONTENT_TYPES = {".docx": DOCX_CT, ".pdf": "application/pdf"}
 DEFAULT_LICENSE = "CC-BY-4.0"
 MAX_PAGES = 40
 
@@ -162,13 +164,29 @@ def set_title(c, sop_id: str, title: str) -> str:
     return d.get("attributes", {}).get("title", "")
 
 
+def content_type(path: Path) -> str:
+    return CONTENT_TYPES[path.suffix.lower()]
+
+
+def protocol_files(pdir: Path, only: str | None = None) -> list[Path]:
+    """The P.* files to register: authored .docx and supplied .pdf alike.
+
+    `~$` lock files Word leaves beside an open document are skipped.
+    """
+    files = sorted(p for p in pdir.glob("P.*")
+                   if p.suffix.lower() in CONTENT_TYPES)
+    if only:
+        files = [f for f in files if only.lower() in f.name.lower()]
+    return files
+
+
 def create_sop(c, path: Path, metadata: dict) -> tuple[str, str]:
     """POST then PATCH. Returns (sop_id, final_title)."""
     url = f"{c.base_url}/nextseek_api/sops/"
     with open(path, "rb") as fh:
         resp = c.session.post(
             url,
-            files={"file": (path.name, fh, DOCX_CT)},
+            files={"file": (path.name, fh, content_type(path))},
             data={"metadata": json.dumps(metadata)},
             headers=_csrf_headers(c),
             timeout=c.timeout,
@@ -226,11 +244,11 @@ def main() -> None:
         sys.exit(REFUSAL)
 
     pdir = Path(args.protocols_dir).resolve()
-    files = sorted(p for p in pdir.glob("P.*.docx") if not p.name.startswith("~"))
-    if args.only:
-        files = [f for f in files if args.only.lower() in f.name.lower()]
+    files = protocol_files(pdir, args.only)
     if not files:
-        sys.exit(f"no matching P.*.docx in {pdir}; run build_protocols.py first")
+        sys.exit(f"no matching P.*.docx or P.*.pdf in {pdir}; run "
+                 "build_protocols.py first, or file a supplied protocol there "
+                 "under its P.<LAB>-<STAMP>-V<n>_<Topic> name")
 
     description = description_from_manifest(pdir, args.description)
     c = client()
@@ -246,7 +264,7 @@ def main() -> None:
         for f in todo:
             print(f"\n  WOULD POST {f.name}  ({f.stat().st_size} bytes)")
             print(f"    -> {c.base_url}/nextseek_api/sops/")
-            print(f"    file:     ({f.name}, {DOCX_CT})")
+            print(f"    file:     ({f.name}, {content_type(f)})")
             print(f"    metadata: {json.dumps(metadata_for(f.name, args.project_id, description, args.license))}")
         print(f"\npreview: {len(todo)} would be created, {len(files) - len(todo)} "
               f"already registered.")

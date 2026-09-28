@@ -18,7 +18,17 @@ import refresh_context as rc  # noqa: E402
 MANAGED = [
     "sampletypes_db.json", "assays_db.json", "projects_db.json",
     "neo4j_schema.json", "neo4j_assay-sample-conn.json",
+    # The chatbot's compact catalogs and routing files. Identifier-free, which is
+    # why these four and not their siblings: capabilities.md, the endpoint lists,
+    # nextseek_api.yaml and neo4j_protocol_schema.json carry real UIDs or protocol
+    # ids, and labs_db.json is gitignored upstream.
+    "min_assays_db.json", "min_sampletypes_db.json", "min_graph_schema.json",
+    "scope_fallback_endpoints.json",
 ]
+
+
+def test_the_script_manages_exactly_the_files_this_suite_expects():
+    assert rc.MANAGED_FILES == MANAGED
 
 
 def test_script_exists_and_help_runs():
