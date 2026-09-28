@@ -103,3 +103,29 @@ def test_a_row_with_no_resolvable_assay_title_is_not_invented(tmp_path):
            [{"UID": TIS_UID, "Name": "tissue-A", "Parent": ""}])
     got = _build(tmp_path, [tis, _dna(TIS_UID)])
     assert got[TIS_UID] == {"41"}, "keeps the assay it feeds, invents nothing"
+
+
+def test_titles_and_ids_stay_the_same_length_when_a_pushed_up_assay_is_unresolved(
+        tmp_path):
+    """The server rejects a row whose assay_titles and assay_ids differ in length.
+
+    NExtSEEK's InputRowModel raises "assay_titles length must match assay_ids
+    length" unless both are length one. The union pushes a child's assay up to its
+    parent, and when that assay is not in the project cache its title used to be
+    kept while its id was dropped: a TIS row carried two titles and one id, which
+    validates locally and fails on upload.
+    """
+    unresolved = ("DNA", "Assay Not In This Project",
+                  [{"UID": DNA_UID, "Name": "dna-A", "Parent": TIS_UID}])
+    C.build_arm_flat("T", [_tissue(), unresolved], tmp_path, LOOKUP, {},
+                     "T-upload.xlsx")
+    ws = openpyxl.load_workbook(tmp_path / "T-upload.xlsx")["Samples"]
+    rows = list(ws.iter_rows(values_only=True))
+    hdr = rows[0]
+    for r in rows[1:]:
+        d = dict(zip(hdr, r))
+        titles = [t for t in str(d["assay_titles"] or "").split(",") if t.strip()]
+        ids = [t for t in str(d["assay_ids"] or "").split(",") if t.strip()]
+        if ids:
+            assert len(titles) == len(ids), (
+                f"{d['uid']}: {len(titles)} titles {titles} but {len(ids)} ids {ids}")

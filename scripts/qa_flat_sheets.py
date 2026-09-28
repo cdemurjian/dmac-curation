@@ -131,6 +131,7 @@ def main(upload_path, cfg):
         sys.exit(2)
     # assay_ids is optional: older sheets predate it, and check 8 is skipped then.
     assay_idx = headers.index("assay_ids") if "assay_ids" in headers else None
+    titles_idx = headers.index("assay_titles") if "assay_titles" in headers else None
 
     assays_per_uid = {}            # uid -> set(assay_id)  [issue #8]
     rows_per_uid = {}              # uid -> (row_n, sampletype)
@@ -154,6 +155,17 @@ def main(upload_path, cfg):
         if assay_idx is not None and uid:
             assays_per_uid[uid] = {
                 t.strip() for t in str(r[assay_idx] or "").split(",") if t.strip()}
+
+        # (0) assay_titles and assay_ids must pair up. NExtSEEK's InputRowModel
+        # rejects the row otherwise (both of length one is the one exception),
+        # and a local validate cannot see it. Blank ids skip the server's rule.
+        if assay_idx is not None and titles_idx is not None:
+            ids = [t for t in str(r[assay_idx] or "").split(",") if t.strip()]
+            titles = [t for t in str(r[titles_idx] or "").split(",") if t.strip()]
+            if ids and titles and len(ids) != len(titles):
+                issues["assay_title_id_mismatch"].append(
+                    f"row {row_n} ({uid}): {len(titles)} assay_titles but "
+                    f"{len(ids)} assay_ids; the server rejects the row")
 
         sampletype_counts[st] += 1
 
@@ -388,6 +400,7 @@ def main(upload_path, cfg):
         "duplicate_uid", "missing_uid", "unknown_sampletype", "bad_json",
         "missing_json_metadata", "parent_uid_not_found", "duplicate_name",
         "blank_parent_nonroot", "assay_membership_gap", "row_has_no_assay",
+        "assay_title_id_mismatch",
     ]
     for k in blocker_keys:
         if k in issues:

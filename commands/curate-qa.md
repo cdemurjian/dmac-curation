@@ -46,6 +46,9 @@ The user wants Phase 9 — QA pass on the consolidated upload sheets.
 - `Link_PrimaryData` / `Checksum_PrimaryData` blank → SOFT_FLAG (not enforced)
 - Parent UID not in new sheets or master → HARD_REJECT
 - Pending-schema type → HARD_REJECT (move out of upload set)
+- `assay_membership_gap` → HARD_REJECT: a child and a parent inside this sheet share no assay, so NExtSEEK uploads that DERIVED_FROM edge unlabelled (issue #8). Re-run `/curate-consolidate`, which pushes each child's assay up to its parents
+- `row_has_no_assay` → HARD_REJECT: a row with parents has a blank `assay_ids`, so every edge into it uploads unlabelled. Usually an assay title missing from `context/assay_ids_cache.json`; fix with `/curate-resolve-assays`
+- `assay_title_id_mismatch` → HARD_REJECT: `assay_titles` and `assay_ids` differ in length, which NExtSEEK's batch upload rejects outright (both of length one is the only exception). `/curate-consolidate` no longer emits this; a hand-edited or older sheet can
 - `*** PLACEHOLDER: ... ***` marker in `File_PrimaryData` → SOFT_FLAG (intentional; in-prep studies)
 - A blank required field on a **published/submitted** study is still HARD_REJECT, but expect a matching entry in `QUESTIONS_FOR_PI.md` — cross-reference it rather than proposing a placeholder (SKILL.md Published-paper harvest).
 - Don't be the last gate — surface dispositions to user for confirmation.

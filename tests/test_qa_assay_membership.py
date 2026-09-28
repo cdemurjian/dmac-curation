@@ -130,3 +130,24 @@ def test_a_sheet_with_blank_uids_says_it_skipped(tmp_path, capsys):
     ], capsys)
     assert "[SKIP] assay-membership check: no row carries a UID" in out
     assert "assay_membership_gap" not in out
+
+
+def test_titles_and_ids_of_different_lengths_are_a_blocker(tmp_path, capsys):
+    """NExtSEEK rejects the row on upload, so QA must reject it first.
+
+    The server's InputRowModel raises "assay_titles length must match assay_ids
+    length" unless both are length one. A local validate cannot see this.
+    """
+    row = _row(TISSUE, "TIS", "", "10")
+    row[HEADERS.index("assay_titles")] = "Tissue Collection, DNA Extraction"
+    out = _run(tmp_path, [row], capsys)
+    assert "assay_title_id_mismatch" in out
+    assert TISSUE in out
+
+
+def test_titles_without_ids_are_not_a_mismatch(tmp_path, capsys):
+    """Blank assay_ids skips the server's length rule; row_has_no_assay owns that."""
+    row = _row(TISSUE, "TIS", "", "")
+    row[HEADERS.index("assay_titles")] = "Tissue Collection, DNA Extraction"
+    out = _run(tmp_path, [row], capsys)
+    assert "assay_title_id_mismatch" not in out
