@@ -402,3 +402,43 @@ def test_phases_doc_records_that_approval_to_run_is_not_approval_to_upload():
     section = text.split("## Phase 3b", 1)[1].split("\n## ", 1)[0]
     assert "not approval to upload" in section
     assert "AskUserQuestion" in section
+
+
+# ── supplied documents: a researcher's PDF registers like an authored .docx ──
+#
+# Phase 3b authors .docx files, but a lab often hands over its own protocol, most
+# often as a PDF. Registration used to glob `P.*.docx` alone and send every file
+# as Word, so a supplied PDF could not be registered at all.
+
+# Synthetic: reserved lab code, 19MMDD stamp. Defined once so the identifier
+# ratchet counts one occurrence, not one per use.
+SUPPLIED = "P.DEF-190113-V1"
+
+
+def _upload_module():
+    sys.path.insert(0, str(REPO / "scripts"))
+    import upload_sops
+    return upload_sops
+
+
+def test_a_supplied_pdf_is_found_beside_the_authored_docx(tmp_path):
+    us = _upload_module()
+    for name in (f"{SUPPLIED}_Assay.docx", f"{SUPPLIED}_Supplied.pdf",
+                 f"~${SUPPLIED}_Assay.docx", "notes.pdf"):
+        (tmp_path / name).write_bytes(b"x")
+    names = [p.name for p in us.protocol_files(tmp_path)]
+    assert names == [f"{SUPPLIED}_Assay.docx", f"{SUPPLIED}_Supplied.pdf"]
+
+
+def test_only_filters_supplied_files_too(tmp_path):
+    us = _upload_module()
+    for name in (f"{SUPPLIED}_Assay.docx", f"{SUPPLIED}_Supplied.pdf"):
+        (tmp_path / name).write_bytes(b"x")
+    assert [p.name for p in us.protocol_files(tmp_path, only="supplied")] == [
+        f"{SUPPLIED}_Supplied.pdf"]
+
+
+def test_a_pdf_is_sent_as_a_pdf_not_as_word():
+    us = _upload_module()
+    assert us.content_type(Path(f"{SUPPLIED}_X.pdf")) == "application/pdf"
+    assert us.content_type(Path(f"{SUPPLIED}_X.docx")) == us.DOCX_CT
