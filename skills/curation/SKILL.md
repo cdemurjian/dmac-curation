@@ -35,7 +35,7 @@ is nothing to declare in `plugin.json`.
 | `fdh` | `/fdh-upload`, `/fdh-api` | `FDH.md` | credentials only - no project needed |
 | `schema` | `/curate-sampletype` | `SCHEMA.md` | cwd - writes where you are, no project needed |
 | `report` | `/curate-report` | `REPORTS.md` | input - reads a lockfile if present, never requires one |
-| `assay` | `/curate-assay-init`, `/curate-assay-vocabulary`, `/curate-assay-detect`, `/curate-assay-review`, `/curate-assay-resolve`, `/curate-assay-write`,  `/curate-assay-relabel`, `/curate-assay-status`, `/curate-assay-backup` | `ASSAY.md` | house - one extract, all projects, no PI; run lockfile at assets/ |
+| `assay` | `/curate-assay-init`, `/curate-assay-vocabulary`, `/curate-assay-detect`, `/curate-assay-review`, `/curate-assay-resolve`, `/curate-assay-create`, `/curate-assay-write`,  `/curate-assay-relabel`, `/curate-assay-status`, `/curate-assay-backup` | `ASSAY.md` | house - one extract, all projects, no PI; run lockfile at assets/ |
 
 Load a mode's reference doc when you enter that mode, not before. For each
 command's exact behavior, the `commands/*.md` files are authoritative.

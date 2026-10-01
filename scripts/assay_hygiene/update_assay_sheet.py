@@ -257,7 +257,7 @@ def ambiguous_samples(manifest: pd.DataFrame,
                    if counts.get(uid_of.get(int(r.sample_id)), 0) > 1})
 
 
-def main(run_dir=None, out=None, artifacts=None,
+def main(run_dir=None, out=None, artifacts=None, manifest_path=None,
          drop_ambiguous=False) -> int:
     """Build the workbook for a run from its manifest and its own extract.
 
@@ -283,7 +283,7 @@ def main(run_dir=None, out=None, artifacts=None,
             "and nothing before `reconcile` would have caught it. Pass the "
             "run you are building, e.g. main('assets/RUN3').")
     run = Path(run_dir)
-    manifest = pd.read_csv(run / "04-artifacts" / "MANIFEST.csv")
+    manifest = pd.read_csv(manifest_path or run / "04-artifacts" / "MANIFEST.csv")
     samples = pd.read_parquet(run / "01-extract" / "samples.parquet",
                               columns=["sample_id", "uuid"])
     uid_of = dict(zip(samples.sample_id.astype(int), samples.uuid.astype(str)))

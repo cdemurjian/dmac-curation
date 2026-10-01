@@ -74,6 +74,7 @@ immutable at `assets/RUN<n>/`, and one run is open at a time.
 | `/curate-assay-detect` | evidence + detection passes into this run's own directory |
 | `/curate-assay-review` | serve the review surfaces, ingest the operator's rulings, auto-backup the store |
 | `/curate-assay-resolve` | turn approved pairs into per-project SEEK write targets, behind the project gate |
+| `/curate-assay-create` | review and explicitly create missing project-scoped assays, then rebuild the upload sheet |
 | `/curate-assay-write` | **writes to production**, behind eight preflight refusals |
 | `/curate-assay-relabel` | **writes to the production graph** — repairs the DERIVED_FROM assay labels the write invalidated; backup first, SET-back undo |
 | `/curate-assay-status` | report which run is open and where it has got to; writes nothing |
