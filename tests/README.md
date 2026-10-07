@@ -24,6 +24,7 @@ absent, only the pattern-count ratchet runs.
 | `test_identifier_exposure.py` | a two-directional ratchet on identifier-shaped strings in tracked files, including binaries and zip members |
 | `test_dependency_pinning.py` | `pyproject.toml` pins, and its version against `plugin.json` |
 | `test_deposit_write_safety.py` | every deposit script defaults to dry-run |
+| `test_fdh_api_retry.py` | the FDH client never re-sends a POST/PATCH whose outcome is unknown |
 
 ## Fixtures with identifiers
 

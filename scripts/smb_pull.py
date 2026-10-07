@@ -48,7 +48,7 @@ from _config import add_config_args, config_from_args  # noqa: E402
 from _config import ProjectRootError  # noqa: E402
 
 _PLUGIN = Path(__file__).resolve().parents[1]
-# cwd .env first, plugin .env second — matches fdh_api.py:161.
+# cwd .env first, plugin .env second — matches fdh_api.py:185.
 for _candidate in (Path.cwd() / ".env", _PLUGIN / ".env"):
     if _candidate.exists():
         load_dotenv(_candidate, override=False)

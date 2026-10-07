@@ -33,6 +33,11 @@ import requests
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_BASE_URL = "https://fairdomhub.org"
 RETRY_STATUS = (429, 502, 503)
+# Methods whose effect is the same however many times they land. Only these are
+# retried after a network error or a 502/503 — for POST/PATCH the request may have
+# been applied server-side even though the client never saw the response (a read
+# timeout on 2026-10-07 turned one POST /assays into six identical assays).
+IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
 
 
 class FDHError(RuntimeError):
@@ -44,7 +49,8 @@ class FDHError(RuntimeError):
 
 
 class FairDomHubClient:
-    """Thin JSON:API client. Token auth. Retries transient 429/502/503 with backoff."""
+    """Thin JSON:API client. Token auth. Retries transient failures with backoff,
+    but never re-sends a POST/PATCH whose outcome is unknown (see _request)."""
 
     def __init__(self, token: Optional[str] = None,
                  base_url: str = DEFAULT_BASE_URL, timeout: float = 60.0):
@@ -67,20 +73,34 @@ class FairDomHubClient:
         return f"{self.base_url}/{path_or_url.lstrip('/')}"
 
     def _request(self, method, path_or_url, *, params=None, json_body=None, headers=None,
-                 max_retries=5, backoff=2.0):
+                 max_retries=None, backoff=2.0, timeout=None):
+        """Send one request, retrying only what is safe to repeat.
+
+        Idempotent methods retry network errors and 429/502/503 up to `max_retries`
+        (default 5). Non-idempotent methods (POST, PATCH) retry only 429 — a refusal
+        before processing — and default to no retries at all: a timeout, connection
+        error or 502/503 is raised, because the write may have landed. The caller must
+        re-read server state before deciding to send it again.
+        """
+        method = method.upper()
+        idempotent = method in IDEMPOTENT_METHODS
+        if max_retries is None:
+            max_retries = 5 if idempotent else 0
         url = self._abs(path_or_url)
         attempt = 0
         while True:
             try:
                 r = self.session.request(method, url, params=params, json=json_body,
-                                         headers=headers, timeout=self.timeout)
+                                         headers=headers,
+                                         timeout=self.timeout if timeout is None else timeout)
             except requests.RequestException:
-                if attempt < max_retries:
+                if idempotent and attempt < max_retries:
                     time.sleep(backoff ** attempt)
                     attempt += 1
                     continue
                 raise
-            if r.status_code in RETRY_STATUS and attempt < max_retries:
+            retryable = r.status_code in RETRY_STATUS if idempotent else r.status_code == 429
+            if retryable and attempt < max_retries:
                 time.sleep(backoff ** attempt)
                 attempt += 1
                 continue
@@ -144,14 +164,18 @@ class FairDomHubClient:
         return dest
 
     # ── write verbs (used by generated scripts, never by this read CLI) ────
-    def post(self, resource_type, payload):
-        return self._json("POST", f"/{resource_type}", json_body=payload)
+    # post/patch are not retried on a timeout or connection error: the exception
+    # propagates and the caller re-reads the parent to see whether the write landed.
+    # `timeout` overrides the client default for this one call (slow creates).
+    def post(self, resource_type, payload, *, timeout=None):
+        return self._json("POST", f"/{resource_type}", json_body=payload, timeout=timeout)
 
-    def patch(self, resource_type, rid, payload):
-        return self._json("PATCH", f"/{resource_type}/{rid}", json_body=payload)
+    def patch(self, resource_type, rid, payload, *, timeout=None):
+        return self._json("PATCH", f"/{resource_type}/{rid}", json_body=payload,
+                          timeout=timeout)
 
-    def delete(self, resource_type, rid):
-        self._request("DELETE", f"/{resource_type}/{rid}")
+    def delete(self, resource_type, rid, *, timeout=None):
+        self._request("DELETE", f"/{resource_type}/{rid}", timeout=timeout)
         return True
 
 
