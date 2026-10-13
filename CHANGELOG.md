@@ -13,6 +13,9 @@ All notable changes to dmac-curation will be documented in this file.
   assay has no junction row. Such an assay labels nothing, and a mapped assay
   always beats it. The stage 0 report counts these edges on their own line
   instead of the old fallback line.
+- **An internal-id tie keeps the smaller SEEK assay id**, as graph_sync does.
+  Two SEEK assays mapped to the same internal assay used to give whichever
+  the set yielded first as `assay_id`.
 
 ## 0.6.0 - 2026-09-14
 

@@ -325,6 +325,32 @@ def test_multiple_shared_assays_pick_the_minimum_internal_assay_id():
     assert row["assay_id"] == 3               # the assay that carried it
 
 
+def test_an_internal_id_tie_keeps_the_smaller_seek_assay_id():
+    """graph_sync sorts by (internal_assay_id, SEEK assay id) (labels.py edge_labels).
+
+    SEEK assays 3 and 8 both map to internal 4 and both join the TIS edge. The
+    set holding them yields 8 first, so a strict `<` on the internal id alone
+    kept 8, and graph_sync classed the plugin's edge as changed.
+    """
+    fx = S.make_stage0_fixture()
+    assays = pd.concat([
+        fx["assays"],
+        pd.DataFrame([(3, "Three", 9, 3, 2, 10, "MIT_SRP", 4, "Other"),
+                      (8, "Eight", 9, 3, 2, 10, "MIT_SRP", 4, "Other")],
+                     columns=S.ASSAY_COLUMNS),
+    ], ignore_index=True)
+    membership = pd.concat([
+        fx["membership"],
+        pd.DataFrame([(100, 3), (200, 3), (100, 8), (200, 8)],
+                     columns=S.MEMBERSHIP_COLUMNS),
+    ], ignore_index=True)
+    out = _resolve_with(assays, fx=fx, membership=membership)
+    row = out[out["parent_id"] == 200].iloc[0]       # the TIS edge
+    assert row["n_shared"] == 3
+    assert row["internal_assay_id"] == 4
+    assert row["assay_id"] == 3
+
+
 # The cases below are not in the task brief. The brief's resolution loop was
 # last-row-wins over the assays frame; the server is minimum-wins
 # (_resolve_internal_assays, neo4j_sync.py:879-881), and the assays frame

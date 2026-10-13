@@ -190,7 +190,8 @@ def resolve_properties(
     The assay label follows NExtSEEK graph_sync's rule
     (nextseek_api/graph_sync/labels.py `edge_labels`), as BioMicroCenter/NExtSEEK#124
     left it, so an edge this plugin writes equals one graph_sync would write:
-      - when several mapped assays are shared, the minimum internal_assay_id wins
+      - when several mapped assays are shared, the minimum internal_assay_id wins,
+        and on a tie the smaller SEEK assay id (graph_sync sorts by both)
       - an assay with no junction row labels nothing: no SEEK id, no
         `assays.title`. It never competes with a mapped assay, so a mapped one
         always wins, and an edge sharing only unmapped assays goes out dark.
@@ -301,7 +302,7 @@ def resolve_properties(
                 if aid not in resolved_assay:
                     continue
                 ia_id, ia_title, src = resolved_assay[aid]
-                if best is None or ia_id < best[0]:
+                if best is None or (ia_id, aid) < (best[0], best[3]):
                     best = (ia_id, ia_title, src, aid)
             # A shared assay the assays frame does not describe stays
             # unresolved and the edge goes out dark with n_shared standing --
