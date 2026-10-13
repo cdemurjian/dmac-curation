@@ -111,8 +111,9 @@ FROM assay_assets WHERE asset_type = 'Sample'
 # (neo4j_sync._resolve_internal_assays builds `{nextseek_db}.` prefixes).
 #
 # Both junction joins are LEFT: 17 of 458 assays have no junction row, and an
-# inner join would delete them from the extract, so resolve_properties' fallback
-# to (assay_id, assays.title) would never fire for them.
+# inner join would delete them from the extract, so resolve_properties could not
+# tell them apart from assays it never saw: their edges would read as an extract
+# gap (dark_unresolved, expected 0) instead of dark by rule (`unmapped`).
 ASSAYS_SQL = """
 SELECT a.id AS assay_id, a.title AS title,
        a.sample_type_id AS sample_type_id, a.study_id AS study_id,
@@ -165,8 +166,8 @@ SQL_EXTRACTS: dict[str, tuple[str, list[str]]] = {
 # row count of 470 is equally consistent with "correct" and with "the 17
 # junction-less assays were silently dropped by the inner joins, and 29 rows were
 # duplicated by multi-project assays" -- which is exactly the failure the LEFT
-# JOINs exist to prevent, and it resolves those 17 assays' edges wrong instead of
-# firing resolve_properties' fallback. The step 6 assertion is therefore
+# JOINs exist to prevent, and it counts those 17 assays' edges as an extract gap
+# instead of `unmapped`. The step 6 assertion is therefore
 # `nunique == 458`, never `len == 458`.
 #
 # No other frame is multiplicative: `edges`/`childof` are one row per
