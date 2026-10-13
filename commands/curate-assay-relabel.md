@@ -159,9 +159,14 @@ cannot be run by accident.
 **A plan or row file from before BioMicroCenter/NExtSEEK#124 is refused.** Every
 plan row and every row file row carries `label_rule`; the driver's
 `apply_rows` raises `StalePlan` on any other value, or none, before it sends a
-chunk, because such a file replays the old fallback labels. That covers an undo
-built from an old plan too; `relabel-before.csv.gz` is the backup then. Rebuild
-the plan from a fresh post-write extract; the old files are left where they are.
+chunk, because such a file replays the old fallback labels. Rebuild the plan
+from a fresh post-write extract; the old files are left where they are.
+
+So an old run's undo is refused on every route: rows built from its plan, and
+rows built by hand from its `relabel-before.csv.gz` (a record of what the edges
+held, in the backup's own columns, not a row file), carry no stamp. To put back
+the labels an old run overwrote, restore the graph from a Neo4j backup taken
+before that run.
 
 ## Verify
 

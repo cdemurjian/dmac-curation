@@ -260,8 +260,10 @@ def apply_rows(driver, db_name: str, rows: list[dict],
     production relationships is exactly what this stage must not have.
 
     Rows from a plan built under an older label rule are refused whole, before
-    the first chunk (`StalePlan`): see `_schema.LABEL_RULE`. That includes an
-    undo built from such a plan; `relabel-before.csv.gz` is the backup then.
+    the first chunk (`StalePlan`): see `_schema.LABEL_RULE`. So an old run's
+    undo is refused on every route, from its plan or from its
+    `relabel-before.csv.gz` (no stamp either); a Neo4j backup taken before
+    that run is the restore.
 
     Returns rows SENT, not relationships matched. The two differ when a uuid
     pair names an edge that no longer exists: the MATCH finds nothing and that
