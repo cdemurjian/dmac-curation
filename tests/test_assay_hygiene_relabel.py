@@ -19,7 +19,7 @@ from assay_hygiene import relabel as R  # noqa: E402
 
 @pytest.fixture
 def assays():
-    """Assay 100 has a junction row; 200 falls back to being its own id."""
+    """Assay 100 has a junction row; 200 has none, so it labels nothing (NExtSEEK#124)."""
     return pd.DataFrame({
         "assay_id": [100, 200],
         "title": ["Flow Cytometry", "Bare Assay"],
@@ -121,6 +121,62 @@ def test_an_edge_whose_endpoints_no_longer_share_an_assay_is_never_cleared(
     assert len(R.write_set(plan, allow_clear=True)) == 1
 
 
+def _unmapped_below(assays):
+    """Add SEEK assay 7, no junction row: its SEEK id is below internal id 30."""
+    extra = assays.iloc[[1]].assign(assay_id=7, title="Seven - Data Linked")
+    return pd.concat([assays, extra], ignore_index=True)
+
+
+def test_an_unlabelled_edge_sharing_only_an_unmapped_assay_stays_dark(
+        samples, assays, sops):
+    """BioMicroCenter/NExtSEEK#124: no SEEK id or title stands in for a label."""
+    only_200 = pd.DataFrame({"sample_id": [1, 2], "assay_id": [200, 200]})
+    plan = R.plan_relabel(_edge(None), samples, only_200, assays, sops)
+
+    assert list(plan.disposition) == [R.D_NO_SHARED]
+    assert pd.isna(plan.after_assay_id.iloc[0])
+    assert pd.isna(plan.after_internal_assay_title.iloc[0])
+    assert list(plan.assay_source) == ["unmapped"]
+    assert R.write_set(plan).empty
+
+
+def test_a_leaked_fallback_label_would_clear_and_is_not_written_by_default(
+        samples, assays, sops):
+    """An edge still holding the old fallback (SEEK id 200) is not rewritten.
+
+    graph_sync's own relabel clears these (#124); this stage only reports them,
+    as it reports every label its rule would remove.
+    """
+    only_200 = pd.DataFrame({"sample_id": [1, 2], "assay_id": [200, 200]})
+    plan = R.plan_relabel(_edge(200.0), samples, only_200, assays, sops)
+
+    assert list(plan.disposition) == [R.D_WOULD_CLEAR]
+    assert R.write_set(plan).empty
+
+
+def test_a_mapped_assay_beats_an_unmapped_one_with_a_smaller_seek_id(
+        samples, assays, sops):
+    """Shared {100 -> internal 30, 7 unmapped}: internal 30 wins, never SEEK 7."""
+    both = pd.DataFrame({"sample_id": [1, 2, 1, 2], "assay_id": [100, 100, 7, 7]})
+    plan = R.plan_relabel(_edge(None), samples, both, _unmapped_below(assays), sops)
+
+    assert list(plan.disposition) == [R.D_GAIN]
+    assert list(plan.after_assay_id) == [100]
+    assert list(plan.after_internal_assay_id) == [30]
+    assert list(plan.after_internal_assay_title) == ["Flow Cytometry"]
+
+
+def test_a_leaked_label_beside_a_mapped_assay_changes_to_the_mapped_one(
+        samples, assays, sops):
+    """The edge holds the old fallback 7; the rule now gives internal 30."""
+    both = pd.DataFrame({"sample_id": [1, 2, 1, 2], "assay_id": [100, 100, 7, 7]})
+    plan = R.plan_relabel(_edge(7.0), samples, both, _unmapped_below(assays), sops)
+
+    assert list(plan.disposition) == [R.D_CHANGE]
+    assert list(plan.after_internal_assay_id) == [30]
+    assert len(R.write_set(plan)) == 1
+
+
 # --- the golden test: reproduce the production run of 2026-08-28 -------------
 
 EXTRACT = REPO / "assets" / "RUN2" / "01-extract"
@@ -138,6 +194,12 @@ PRODUCTION_2026_08_28 = {
 }
 
 
+@pytest.mark.xfail(
+    strict=False,
+    reason="the 2026-08-28 counts were made under the SEEK fallback that "
+           "BioMicroCenter/NExtSEEK#124 removed; fallback edges now move to "
+           "NO_SHARED / WOULD_CLEAR / CHANGE, so the historical census no "
+           "longer reproduces. Not re-measured: the extract is not on this box.")
 def test_the_real_extract_reproduces_the_production_relabel():
     """The whole stage, measured against a run that actually happened.
 

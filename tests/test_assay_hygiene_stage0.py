@@ -252,10 +252,14 @@ def test_the_plans_own_columns_ride_through_unchanged_and_in_order():
     pd.testing.assert_frame_equal(out[carried], plan[carried])
 
 
-def test_assay_with_no_junction_row_falls_back_to_assay_id_and_title():
-    # neo4j_sync.py:1418-1431 (v4-stable-wt; 944-957 in NExtSEEK/dev-v3-merge).
-    # 17 of 458 production assays have no junction row;
-    # the server does NOT skip them, it uses (assay_id, assays.title).
+def test_an_unmapped_assay_labels_nothing():
+    """graph_sync's rule after BioMicroCenter/NExtSEEK#124: no raw SEEK fallback.
+
+    An assay with no junction row used to stand for itself, its SEEK id and its
+    `assays.title` written into the internal assay fields. That is the leak
+    #124 removes: the edge goes out dark, with n_shared standing and
+    assay_source "unmapped" so the report can tell it from an extract gap.
+    """
     fx = S.make_stage0_fixture()
     # put BOTH endpoints of the AB edge in assay 2, which has no junction row
     membership = pd.concat([
@@ -267,10 +271,35 @@ def test_assay_with_no_junction_row_falls_back_to_assay_id_and_title():
         plan, fx["samples"], membership, fx["assays"], fx["sops"]
     )
     row = out[out["parent_uuid"] == "AB-260101ABC-1"].iloc[0]
-    assert row["assay_id"] == 2
-    assert row["internal_assay_id"] == 2
-    assert row["internal_assay_title"] == "Antibody Panel"
-    assert row["assay_source"] == "fallback"
+    assert pd.isna(row["assay_id"])
+    assert pd.isna(row["internal_assay_id"])
+    assert pd.isna(row["internal_assay_title"])
+    assert row["n_shared"] == 1
+    assert row["assay_source"] == "unmapped"
+
+
+def test_a_mapped_assay_beats_an_unmapped_one_with_a_smaller_seek_id():
+    """BioMicroCenter/NExtSEEK#124: a SEEK id never competes with an internal id.
+
+    The TIS edge shares assay 1 (junction to internal 11) and assay 2 (no
+    junction). Under the old fallback, SEEK id 2 < internal id 11 handed the
+    edge the unmapped assay. Now only the mapped one can win.
+    """
+    fx = S.make_stage0_fixture()
+    membership = pd.concat([
+        fx["membership"],
+        pd.DataFrame([(100, 2), (200, 2)], columns=S.MEMBERSHIP_COLUMNS),
+    ], ignore_index=True)
+    plan, _ = stage0.plan_edges(fx["parents"], fx["nodes"], fx["existing"])
+    out = stage0.resolve_properties(
+        plan, fx["samples"], membership, fx["assays"], fx["sops"]
+    )
+    row = out[out["parent_id"] == 200].iloc[0]       # the TIS edge
+    assert row["n_shared"] == 2
+    assert row["assay_id"] == 1
+    assert row["internal_assay_id"] == 11
+    assert row["internal_assay_title"] == "Comet Chip"
+    assert row["assay_source"] == "junction"
 
 
 def test_multiple_shared_assays_pick_the_minimum_internal_assay_id():
@@ -371,21 +400,15 @@ def test_a_junction_row_beats_a_fallback_row_for_the_same_assay():
         assert row["assay_source"] == "junction"
 
 
-def test_a_fallback_assay_with_no_title_carries_an_empty_string():
-    """neo4j_sync.py:1021 writes `title or ""` on the fallback path, never NULL.
-
-    Mirrored rather than improved. The applier ships internal_assay_title
-    straight into DerivedFromRelRow, so an edge carrying "" is what the upload
-    pipeline would have produced for a titleless assay; emitting None instead
-    would make stage 0's edges distinguishable from the server's.
-    """
+def test_an_unmapped_assay_with_no_title_labels_nothing():
+    """No title, no junction row: still nothing, never "" (NExtSEEK#124)."""
     out = _resolve_with(
         pd.DataFrame([_assay_row(1, None, None, None)], columns=S.ASSAY_COLUMNS))
     row = out[out["parent_uuid"] == "TIS-260101ABC-1"].iloc[0]
-    assert row["assay_source"] == "fallback"
-    assert row["assay_id"] == 1
-    assert row["internal_assay_id"] == 1
-    assert row["internal_assay_title"] == ""
+    assert row["assay_source"] == "unmapped"
+    assert pd.isna(row["assay_id"])
+    assert pd.isna(row["internal_assay_id"])
+    assert pd.isna(row["internal_assay_title"])
 
 
 def test_a_shared_assay_missing_from_the_assays_frame_is_reported_not_guessed():
@@ -1117,6 +1140,23 @@ def test_report_separates_a_dark_edge_from_an_unresolvable_shared_assay():
     assert "1 labelled" in report and "2 dark" in report
     assert "**1**" in _row(report, "no assay is shared by both endpoints")
     assert "**1**" in _row(report, "the assays extract does not describe")
+
+
+def test_report_keeps_an_unmapped_edge_out_of_the_extract_gap_count():
+    """An edge whose shared assays all lack a junction row is dark by rule.
+
+    BioMicroCenter/NExtSEEK#124: it carries no label on purpose, so it is not
+    the extract gap the report says should be 0; it gets its own line.
+    """
+    report = stage0.build_report(
+        _resolved_frame(
+            _edge(n_shared=1, assay_source="unmapped"),
+            _edge(n_shared=2, assay_source="none"),
+        ),
+        _residues(), _no_childof(),
+    )
+    assert "**1**" in _row(report, "the assays extract does not describe")
+    assert "**1**" in _row(report, "no junction row")
 
 
 def test_report_counts_labelled_edges_per_hop():

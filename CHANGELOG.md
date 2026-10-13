@@ -2,6 +2,18 @@
 
 All notable changes to dmac-curation will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- **Assay hygiene labels DERIVED_FROM edges by graph_sync's rule**
+  (BioMicroCenter/NExtSEEK#124). `stage0.resolve_properties`, which both graph
+  writers use (`/curate-assay-relabel` and stage 0's MERGE), no longer writes a
+  SEEK assay's own id and `assays.title` into the internal assay fields when the
+  assay has no junction row. Such an assay labels nothing, and a mapped assay
+  always beats it. The stage 0 report counts these edges on their own line
+  instead of the old fallback line.
+
 ## 0.6.0 - 2026-09-14
 
 Protocols become a pipeline phase instead of a per-project one-off.

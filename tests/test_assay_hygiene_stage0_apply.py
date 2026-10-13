@@ -87,6 +87,28 @@ def _dark(payload):
 
 # --- the three safety properties ---------------------------------------------
 
+def test_an_edge_sharing_only_an_unmapped_assay_goes_out_with_no_assay_label():
+    """The MERGE payload follows graph_sync's rule (BioMicroCenter/NExtSEEK#124).
+
+    Both endpoints of the AB edge share only assay 2, which has no junction
+    row. The payload must carry no SEEK id and no SEEK title in the three assay
+    fields, so stage 0 cannot write the leak #124 removes.
+    """
+    fx = S.make_stage0_fixture()
+    membership = pd.concat([
+        fx["membership"],
+        pd.DataFrame([(100, 2)], columns=S.MEMBERSHIP_COLUMNS),
+    ], ignore_index=True)
+    plan, _ = stage0.plan_edges(fx["parents"], fx["nodes"], fx["existing"])
+    resolved = stage0.resolve_properties(
+        plan, fx["samples"], membership, fx["assays"], fx["sops"])
+    payload = stage0_apply.apply_edges(FakeDriver(), "neo4j", resolved)
+    row = next(r for r in payload if r["parent_id"] == 300)   # the AB edge
+    assert row["assay_id"] is None
+    assert row["internal_assay_id"] is None
+    assert row["internal_assay_title"] is None
+
+
 def test_dry_run_is_the_default_and_issues_no_query():
     driver = FakeDriver()
     manifest = stage0_apply.apply_edges(driver, "neo4j", _resolved())

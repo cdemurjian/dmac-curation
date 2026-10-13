@@ -186,3 +186,10 @@ manifest says which edges had a tiebreak. This reproduces the upload path's own
 rule (`neo4j_sync.py`) rather than fixing it — a relabel that disagreed with the
 uploader would be a second source of truth. Filed as
 BioMicroCenter/NExtSEEK#118.
+
+An assay with no junction row labels nothing (BioMicroCenter/NExtSEEK#124, the
+same rule as graph_sync): it never stands in with its SEEK id and title, and a
+mapped assay always beats it. An edge still holding such a fallback label shows
+up as `WOULD_CLEAR`; NExtSEEK's `graph_sync --labels` clears those, not this
+stage. This stage writes the three singular fields only, never the
+`internal_assay_ids` / `internal_assay_titles` lists graph_sync also keeps.

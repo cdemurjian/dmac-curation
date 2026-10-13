@@ -187,16 +187,18 @@ def resolve_properties(
 ) -> pd.DataFrame:
     """Compute each new edge's properties exactly as the server would.
 
-    Mirrors nextseek_api/batch_upload/neo4j_sync.py:888-1098. Deliberately does
-    not improve on two behaviours, so that an edge stage 0 writes is
-    indistinguishable from one the upload pipeline would have written:
-      - when several assays are shared, the minimum internal_assay_id wins
-      - an assay with no junction row falls back to (assay_id, assays.title)
+    The assay label follows NExtSEEK graph_sync's rule
+    (nextseek_api/graph_sync/labels.py `edge_labels`), as BioMicroCenter/NExtSEEK#124
+    left it, so an edge this plugin writes equals one graph_sync would write:
+      - when several mapped assays are shared, the minimum internal_assay_id wins
+      - an assay with no junction row labels nothing: no SEEK id, no
+        `assays.title`. It never competes with a mapped assay, so a mapped one
+        always wins, and an edge sharing only unmapped assays goes out dark.
 
-    Both are arbitrary rather than wrong, so neither is hidden: ``n_shared``
-    reports how many assays the tiebreak had to choose between, and
-    ``assay_source`` says which of the two id spaces the label came from. An
-    edge with n_shared > 1 is a curator's to settle, not this stage's to guess.
+    ``n_shared`` reports how many assays the tiebreak had to choose between, and
+    ``assay_source`` says why the edge has its label or none: "junction",
+    "unmapped" (shared assays, none with a junction row) or "none". An edge
+    with n_shared > 1 is a curator's to settle, not this stage's to guess.
 
     The one server input with no counterpart here is the upload sheet itself:
     the server lets a submitted row override the sop_id and the assay title
@@ -254,8 +256,7 @@ def resolve_properties(
 
     # assay_id -> (internal_assay_id, internal_assay_title, source)
     #
-    # Two passes, mirroring the server's steps 3b-3d (neo4j_sync.py:1003-1027).
-    # Pass 1 is the junction table, and an assay mapped to several internal
+    # The junction table, and an assay mapped to several internal
     # assays keeps the SMALLEST internal_assay_id -- the server's own rule, and
     # its own comment: "Keep smallest internal_assay_id per assay_id
     # (deterministic for 1:N)" (neo4j_sync.py:879-881). Duplicate assay_id rows
@@ -264,11 +265,11 @@ def resolve_properties(
     # row per (internal assay x project) and their order is not stable across
     # extracts. Last-row-wins would therefore be non-deterministic.
     #
-    # Pass 2 is the fallback and only fills assay_ids pass 1 never resolved, so
-    # a real junction row beats a fallback for the same assay in any row order.
-    # The passes must stay separate: a fallback's id is an assays.id, not an
-    # internal_assays.id, so letting it into the minimum above would compare two
-    # unrelated id spaces and could hand the edge the wrong internal assay.
+    # An assay the frame describes with no junction row at all is `unmapped`:
+    # it labels nothing (BioMicroCenter/NExtSEEK#124, graph_sync's rule). It
+    # used to fall back to (assay_id, assays.title), which wrote a SEEK id and a
+    # SEEK title into the internal assay fields and, being an assays.id, could
+    # beat a real internal id in the minimum below.
     resolved_assay: dict[int, tuple[int, str, str]] = {}
     assay_rows = assays[S.ASSAY_COLUMNS]
     for row in assay_rows.itertuples(index=False):
@@ -280,12 +281,7 @@ def resolve_properties(
             resolved_assay[row.assay_id] = (
                 ia_id, row.internal_assay_title, "junction",
             )
-    for row in assay_rows.itertuples(index=False):
-        if row.assay_id in resolved_assay:
-            continue
-        # neo4j_sync.py:1021 coerces a NULL assays.title to "" here.
-        title = row.title if pd.notna(row.title) else ""
-        resolved_assay[row.assay_id] = (row.assay_id, title, "fallback")
+    unmapped = set(assay_rows.assay_id) - set(resolved_assay)
 
     out: list[tuple] = []
     for r in plan.itertuples(index=False):
@@ -309,9 +305,12 @@ def resolve_properties(
                     best = (ia_id, ia_title, src, aid)
             # A shared assay the assays frame does not describe stays
             # unresolved and the edge goes out dark with n_shared standing --
-            # visibly an extract gap rather than a genuinely dark edge.
+            # visibly an extract gap rather than a genuinely dark edge. One
+            # the frame describes with no junction row is dark by rule.
             if best is not None:
                 internal_id, internal_title, source, assay_id = best
+            elif shared & unmapped:
+                source = "unmapped"
 
         out.append((
             r.child_id, r.child_uuid, r.parent_id, r.parent_uuid,
@@ -515,15 +514,16 @@ def build_report(
     # An edge with a shared assay that stayed dark is an extract gap, not a dark
     # edge: something the assays frame does not describe was shared by both
     # endpoints. Pooling the two hides a broken extract behind a plausible count.
-    dark_unresolved = int((shared_col & ~labelled_col).sum())
-    dark_no_share = dark - dark_unresolved
+    unmapped_col = resolved["assay_source"] == "unmapped"
+    dark_unmapped = int((~labelled_col & unmapped_col).sum())
+    dark_unresolved = int((shared_col & ~labelled_col & ~unmapped_col).sum())
+    dark_no_share = dark - dark_unresolved - dark_unmapped
     # n_shared > 1 alone is not a tiebreak: if nothing resolved, nothing was
     # chosen. Restricted to labelled edges, matching the spec's "28 out of
     # 82,663 labelled edges". Still an upper bound -- a shared assay the extract
     # does not describe never entered the comparison.
     tiebreak_col = (resolved["n_shared"] > 1) & labelled_col
     tiebreak = int(tiebreak_col.sum())
-    fallback = int((resolved["assay_source"] == "fallback").sum())
     with_protocol = int(resolved["protocol_id"].notna().sum())
     no_protocol = total - with_protocol
 
@@ -623,7 +623,8 @@ def build_report(
         "- dark because the only shared assay is one the assays extract does not"
         f" describe: **{dark_unresolved:,}** (an extract gap, and expected to be 0)",
         f"- edges resting on the min-internal_assay_id tiebreak: **{tiebreak:,}**",
-        f"- edges whose assay had no junction row (fallback path): **{fallback:,}**",
+        "- dark because every shared assay has no junction row (labels nothing,"
+        f" BioMicroCenter/NExtSEEK#124): **{dark_unmapped:,}**",
         "",
     ]
 

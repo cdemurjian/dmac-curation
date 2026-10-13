@@ -16,12 +16,14 @@ Measured on production 2026-08-28, after a curator added ~25,765 registrations:
 DERIVED_FROM assay coverage was 46%. After the repair it was 98%.
 
 THE RULE IS NOT RESTATED HERE. `stage0.resolve_properties` already mirrors
-`nextseek_api/batch_upload/neo4j_sync.py` -- the intersection, the minimum
-resolved `internal_assay_id` on a tie, and the fallback to `(assay_id,
-assays.title)` for an assay with no junction row. It exists twice already (there
-and in the server); a third copy is how two of them silently disagree. This
-module diffs its output against what the graph currently stores and does nothing
-else.
+NExtSEEK graph_sync's rule (`nextseek_api/graph_sync/labels.py`) -- the
+intersection and the minimum resolved `internal_assay_id` on a tie; an assay
+with no junction row labels nothing (BioMicroCenter/NExtSEEK#124: no SEEK id or
+`assays.title` fallback). It exists twice already (there and in the server); a
+third copy is how two of them silently disagree. This module diffs its output
+against what the graph currently stores and does nothing else. An edge that
+still holds the old fallback and shares only unmapped assays is `WOULD_CLEAR`
+below; graph_sync's own relabel clears those.
 
 NEVER CLEARS BY DEFAULT. An edge that HAS a label whose endpoints no longer
 share an assay is `D_WOULD_CLEAR`: reported, counted, and left alone. On the
