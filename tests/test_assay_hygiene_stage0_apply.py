@@ -71,7 +71,7 @@ def _wide_plan(n: int) -> pd.DataFrame:
     rows = [
         (1000 + i, f"D.IMG-260101ABC-{i}", 2000 + i, f"TIS-260101ABC-{i}",
          5, "Comet Chip SOP", 1, 11, "Comet Chip",
-         "D.IMG", "TIS", "Parent", 1, "junction", "title")
+         "D.IMG", "TIS", "Parent", 1, "junction", "title", S.LABEL_RULE)
         for i in range(n)
     ]
     return pd.DataFrame(rows, columns=S.STAGE0_PLAN_COLUMNS)
@@ -584,6 +584,52 @@ def test_apply_manifest_refuses_a_manifest_stamped_with_another_rule():
     with pytest.raises(stage0_apply.StaleManifest, match="rebuild"):
         stage0_apply.apply_manifest(driver, "neo4j", rows)
     assert driver.calls == []
+
+
+# What an archived plan.parquet from before the stamp holds: the plan columns
+# with no stamp, and an unmapped assay labelled with its raw SEEK id and title.
+_PRE_STAMP_COLUMNS = [c for c in S.STAGE0_PLAN_COLUMNS if c != S.LABEL_RULE_KEY]
+
+
+def _pre_rule_plan(tmp_path):
+    rows = [(1000, "child-uuid", 2000, "parent-uuid",
+             5, "Comet Chip SOP", 20, 20, "raw SEEK title",
+             "D.IMG", "TIS", "Parent", 1, "fallback", "title")]
+    path = tmp_path / "plan.parquet"
+    pd.DataFrame(rows, columns=_PRE_STAMP_COLUMNS).to_parquet(path, index=False)
+    return pd.read_parquet(path)
+
+
+def test_a_manifest_built_from_an_old_plan_is_refused_at_the_write(tmp_path):
+    """The documented stage 0 write builds the manifest from the archived
+    plan.parquet with to_payload, then the box applies it. The plan is where
+    the labels were computed, so the stamp must come from the plan: an old one
+    goes out unstamped and the box refuses it, rather than today's stamp
+    passing its old labels."""
+    rows = [json.loads(json.dumps(r, default=str))
+            for r in stage0_apply.to_payload(_pre_rule_plan(tmp_path))]
+    driver = FakeDriver()
+    with pytest.raises(stage0_apply.StaleManifest, match="rebuild"):
+        stage0_apply.apply_manifest(driver, "neo4j", rows)
+    assert driver.calls == []
+
+
+def test_apply_edges_refuses_an_old_plan(tmp_path):
+    driver = FakeDriver()
+    with pytest.raises(ValueError, match="columns"):
+        stage0_apply.apply_edges(driver, "neo4j", _pre_rule_plan(tmp_path),
+                                 dry_run=False)
+    assert driver.calls == []
+
+
+def test_a_new_plan_read_back_from_parquet_still_applies(tmp_path):
+    path = tmp_path / "plan.parquet"
+    _resolved().to_parquet(path, index=False)
+    driver = FakeDriver()
+    manifest = stage0_apply.apply_edges(driver, "neo4j", pd.read_parquet(path),
+                                        dry_run=False)
+    assert manifest and len(driver.calls) == 1
+    assert all(row[S.LABEL_RULE_KEY] == S.LABEL_RULE for row in manifest)
 
 
 def test_the_stamp_never_reaches_the_graph():

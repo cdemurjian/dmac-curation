@@ -318,7 +318,7 @@ def resolve_properties(
             protocol_id, protocol_title, assay_id,
             internal_id, internal_title,
             r.child_type, r.parent_type, r.field, len(shared), source,
-            protocol_source,
+            protocol_source, S.LABEL_RULE,
         ))
 
     return pd.DataFrame(out, columns=S.STAGE0_PLAN_COLUMNS)

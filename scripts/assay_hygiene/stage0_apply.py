@@ -203,7 +203,8 @@ def _chunks(rows: list, size: int):
 
 
 def to_payload(resolved: pd.DataFrame) -> list[dict]:
-    """Slice the plan down to exactly DerivedFromRelRow's fields, typed.
+    """Slice the plan down to exactly DerivedFromRelRow's fields, typed, plus
+    the plan's label-rule stamp (None when the plan has none).
 
     That model is extra="forbid", so a reporting column reaching the server is
     a hard rejection. Row order is the plan's order and is preserved, because
@@ -224,8 +225,13 @@ def to_payload(resolved: pd.DataFrame) -> list[dict]:
     # internal_assay_title carry the `str` dtype whose missing value is float
     # nan, which the naive form leaves behind exactly the same way.
     frame = frame.astype(object).where(pd.notna(frame), None)
-    return [{**_normalise_row(row), S.LABEL_RULE_KEY: S.LABEL_RULE}
-            for row in frame.to_dict(orient="records")]
+    # The stamp is the plan's, set where the labels were computed. A plan from
+    # before there was one has no column, so its rows go out unstamped and
+    # apply_manifest refuses them: stamping here would pass its old labels.
+    stamps = (resolved[S.LABEL_RULE_KEY].tolist()
+              if S.LABEL_RULE_KEY in resolved.columns else [None] * len(frame))
+    return [{**_normalise_row(row), S.LABEL_RULE_KEY: stamp}
+            for row, stamp in zip(frame.to_dict(orient="records"), stamps)]
 
 
 def apply_edges(

@@ -71,8 +71,11 @@ EDGE_ROW_COLUMNS = [
 # write files are made on the laptop and applied later on the box; one built
 # under an older rule replays that rule's labels (before
 # BioMicroCenter/NExtSEEK#124, a raw SEEK id and title on an unmapped assay).
-# New files carry this stamp on every row and the apply refuses any other.
-# Change the value whenever `stage0.resolve_properties` labels edges differently.
+# `stage0.resolve_properties` stamps every row where it computes the labels;
+# the stage 0 manifest and the relabel plan copy that stamp, never set their
+# own, so a plan built before the stamp existed stays unstamped and the apply
+# refuses it like any other. Change the value whenever `resolve_properties`
+# labels edges differently.
 LABEL_RULE_KEY = "label_rule"
 LABEL_RULE = "graph_sync NExtSEEK#124"
 
@@ -80,10 +83,10 @@ LABEL_RULE = "graph_sync NExtSEEK#124"
 # stage0_apply.to_payload slices EDGE_ROW_COLUMNS out of the front and
 # apply_edges asserts this whole list, in order. A column inserted anywhere but
 # the end shifts the payload slice onto a field DerivedFromRelRow forbids, which
-# the server rejects outright.
+# the server rejects outright. The label-rule stamp rides last.
 STAGE0_PLAN_COLUMNS = EDGE_ROW_COLUMNS + [
     "child_type", "parent_type", "field", "n_shared", "assay_source",
-    "protocol_source",
+    "protocol_source", LABEL_RULE_KEY,
 ]
 
 D_NOT_UID = "not_a_uid"

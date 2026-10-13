@@ -609,7 +609,7 @@ def test_protocol_source_is_appended_after_the_payload_columns():
     extra="forbid", so a reporting column that reached the payload would be a
     hard rejection at the server rather than a wrong value.
     """
-    assert S.STAGE0_PLAN_COLUMNS[-1] == "protocol_source"
+    assert S.STAGE0_PLAN_COLUMNS[-2:] == ["protocol_source", S.LABEL_RULE_KEY]
     assert "protocol_source" not in S.EDGE_ROW_COLUMNS
     assert S.STAGE0_PLAN_COLUMNS[:len(S.EDGE_ROW_COLUMNS)] == S.EDGE_ROW_COLUMNS
     assert len(set(S.STAGE0_PLAN_COLUMNS)) == len(S.STAGE0_PLAN_COLUMNS)

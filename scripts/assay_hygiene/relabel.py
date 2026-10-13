@@ -131,7 +131,7 @@ def plan_relabel(edges: pd.DataFrame, samples: pd.DataFrame,
         "n_shared": _nullable_int(resolved.n_shared.values),
         "assay_source": resolved.assay_source.values,
         "disposition": [_disposition(b, a) for b, a in zip(before, after)],
-        S.LABEL_RULE_KEY: S.LABEL_RULE,
+        S.LABEL_RULE_KEY: resolved[S.LABEL_RULE_KEY].values,
     })
     return out[PLAN_COLUMNS]
 

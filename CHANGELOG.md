@@ -18,10 +18,13 @@ All notable changes to dmac-curation will be documented in this file.
   the set yielded first as `assay_id`.
 - **A stage 0 manifest or relabel plan built before that change is refused**
   (BioMicroCenter/NExtSEEK#124). Those files still carry the old fallback, so
-  replaying one would write the leaked labels again. New manifests and plans
-  stamp every row with `label_rule` (`_schema.LABEL_RULE`);
-  `stage0_apply.apply_manifest` and `relabel.apply_rows` refuse any other stamp,
-  or none, before the first chunk, and say to rebuild. The file stays on disk.
+  replaying one would write the leaked labels again. `stage0.resolve_properties`
+  stamps every row it labels with `label_rule` (`_schema.LABEL_RULE`), and the
+  stage 0 plan, its manifest and the relabel plan carry that stamp rather than
+  set their own; `stage0_apply.apply_manifest` and `relabel.apply_rows` refuse
+  any other stamp, or none, before the first chunk, and say to rebuild. So an
+  archived stage 0 `plan.parquet` is refused too, whether it goes through
+  `to_payload` or `apply_edges`. The file stays on disk.
 
 ## 0.6.0 - 2026-09-14
 
