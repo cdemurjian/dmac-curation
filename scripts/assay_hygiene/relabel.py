@@ -68,7 +68,7 @@ PLAN_COLUMNS = [
     "child_uuid", "parent_uuid", "child_id", "parent_id",
     "before_assay_id", "before_internal_assay_id", "before_internal_assay_title",
     "after_assay_id", "after_internal_assay_id", "after_internal_assay_title",
-    "n_shared", "assay_source", "disposition",
+    "n_shared", "assay_source", "disposition", S.LABEL_RULE_KEY,
 ]
 
 
@@ -131,6 +131,7 @@ def plan_relabel(edges: pd.DataFrame, samples: pd.DataFrame,
         "n_shared": _nullable_int(resolved.n_shared.values),
         "assay_source": resolved.assay_source.values,
         "disposition": [_disposition(b, a) for b, a in zip(before, after)],
+        S.LABEL_RULE_KEY: S.LABEL_RULE,
     })
     return out[PLAN_COLUMNS]
 
@@ -226,6 +227,9 @@ def to_rows(frame: pd.DataFrame, half: str = "after") -> list[dict]:
     """-> `$rows` for SET_CYPHER, taking the `after_` or `before_` half.
 
     `half="before"` IS the undo. One statement, one row shape, two directions.
+
+    Each row carries the plan's label-rule stamp (None from a plan built before
+    there was one), and `apply_rows` checks it.
     """
     if half not in ("before", "after"):
         raise ValueError(f"half must be 'before' or 'after', not {half!r}")
@@ -235,7 +239,12 @@ def to_rows(frame: pd.DataFrame, half: str = "after") -> list[dict]:
         f"{half}_internal_assay_title",
     ]].copy()
     out.columns = SET_ROW_COLUMNS
+    out[S.LABEL_RULE_KEY] = frame.get(S.LABEL_RULE_KEY)
     return out.astype(object).where(pd.notna(out), None).to_dict("records")
+
+
+class StalePlan(ValueError):
+    """The rows come from a plan built under an older label rule."""
 
 
 # 5,000 is the hand run's chunk size, which moved 416,568 edges in 30 seconds.
@@ -250,6 +259,10 @@ def apply_rows(driver, db_name: str, rows: list[dict],
     of its own -- an untested chunking loop on the path that rewrites 416,568
     production relationships is exactly what this stage must not have.
 
+    Rows from a plan built under an older label rule are refused whole, before
+    the first chunk (`StalePlan`): see `_schema.LABEL_RULE`. That includes an
+    undo built from such a plan; `relabel-before.csv.gz` is the backup then.
+
     Returns rows SENT, not relationships matched. The two differ when a uuid
     pair names an edge that no longer exists: the MATCH finds nothing and that
     row changes nothing, silently. The post-write coverage count is what settles
@@ -257,6 +270,15 @@ def apply_rows(driver, db_name: str, rows: list[dict],
     """
     if chunk_size < 1:
         raise ValueError(f"chunk_size must be positive, not {chunk_size}")
+    stale = {r.get(S.LABEL_RULE_KEY) for r in rows} - {S.LABEL_RULE}
+    if stale:
+        raise StalePlan(
+            f"these rows come from a plan built under label rule(s) "
+            f"{sorted(stale, key=str)}, not {S.LABEL_RULE!r}: replaying them "
+            f"would write that rule's labels (before BioMicroCenter/NExtSEEK#124, "
+            f"a raw SEEK assay id and title on an unmapped assay). Nothing was "
+            f"written and the files are left as they are; rebuild the plan from "
+            f"a fresh post-write extract with the current plugin.")
     sent = 0
     for start in range(0, len(rows), chunk_size):
         chunk = rows[start:start + chunk_size]

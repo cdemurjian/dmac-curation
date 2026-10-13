@@ -67,6 +67,15 @@ EDGE_ROW_COLUMNS = [
     "protocol_id", "protocol_title", "assay_id",
     "internal_assay_id", "internal_assay_title",
 ]
+# The label rule a stage 0 manifest or a relabel plan was built under. Both
+# write files are made on the laptop and applied later on the box; one built
+# under an older rule replays that rule's labels (before
+# BioMicroCenter/NExtSEEK#124, a raw SEEK id and title on an unmapped assay).
+# New files carry this stamp on every row and the apply refuses any other.
+# Change the value whenever `stage0.resolve_properties` labels edges differently.
+LABEL_RULE_KEY = "label_rule"
+LABEL_RULE = "graph_sync NExtSEEK#124"
+
 # The reporting columns ride BEHIND the payload ones and nowhere else:
 # stage0_apply.to_payload slices EDGE_ROW_COLUMNS out of the front and
 # apply_edges asserts this whole list, in order. A column inserted anywhere but

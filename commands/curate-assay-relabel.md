@@ -156,6 +156,13 @@ Then pipe it with the same driver after pointing `ROWS` at the undo file. It is
 a documented paste rather than a second pipeable script, deliberately, so it
 cannot be run by accident.
 
+**A plan or row file from before BioMicroCenter/NExtSEEK#124 is refused.** Every
+plan row and every row file row carries `label_rule`; the driver's
+`apply_rows` raises `StalePlan` on any other value, or none, before it sends a
+chunk, because such a file replays the old fallback labels. That covers an undo
+built from an old plan too; `relabel-before.csv.gz` is the backup then. Rebuild
+the plan from a fresh post-write extract; the old files are left where they are.
+
 ## Verify
 
 ```bash

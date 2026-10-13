@@ -16,6 +16,12 @@ All notable changes to dmac-curation will be documented in this file.
 - **An internal-id tie keeps the smaller SEEK assay id**, as graph_sync does.
   Two SEEK assays mapped to the same internal assay used to give whichever
   the set yielded first as `assay_id`.
+- **A stage 0 manifest or relabel plan built before that change is refused**
+  (BioMicroCenter/NExtSEEK#124). Those files still carry the old fallback, so
+  replaying one would write the leaked labels again. New manifests and plans
+  stamp every row with `label_rule` (`_schema.LABEL_RULE`);
+  `stage0_apply.apply_manifest` and `relabel.apply_rows` refuse any other stamp,
+  or none, before the first chunk, and say to rebuild. The file stays on disk.
 
 ## 0.6.0 - 2026-09-14
 

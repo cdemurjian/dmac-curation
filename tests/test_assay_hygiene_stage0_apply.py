@@ -85,6 +85,12 @@ def _dark(payload):
     return [r for r in payload if r["parent_uuid"] == "AB-260101ABC-1"][0]
 
 
+def _sent_form(manifest):
+    """The manifest as the graph receives it: the label-rule stamp is the
+    file's, so apply_manifest drops it before the MERGE."""
+    return [{k: v for k, v in r.items() if k != S.LABEL_RULE_KEY} for r in manifest]
+
+
 # --- the three safety properties ---------------------------------------------
 
 def test_an_edge_sharing_only_an_unmapped_assay_goes_out_with_no_assay_label():
@@ -140,7 +146,7 @@ def test_payload_carries_only_the_server_model_fields():
     # DerivedFromRelRow is extra="forbid"; a reporting column leaking into the
     # payload is a hard rejection at the server.
     payload = stage0_apply.to_payload(_resolved())
-    assert set(payload[0].keys()) == set(S.EDGE_ROW_COLUMNS)
+    assert set(payload[0].keys()) == set(S.EDGE_ROW_COLUMNS) | {S.LABEL_RULE_KEY}
     for extra in ("child_type", "parent_type", "field", "n_shared", "assay_source"):
         assert extra not in payload[0]
 
@@ -292,7 +298,7 @@ def test_the_dry_run_manifest_is_exactly_what_a_write_would_send():
     reviewed = stage0_apply.apply_edges(FakeDriver(), "neo4j", resolved)
     driver = FakeDriver()
     stage0_apply.apply_edges(driver, "neo4j", resolved, dry_run=False)
-    assert driver.calls[0][1]["rows"] == reviewed
+    assert driver.calls[0][1]["rows"] == _sent_form(reviewed)
 
 
 # --- the write loop ----------------------------------------------------------
@@ -304,7 +310,7 @@ def test_every_edge_is_written_exactly_once_across_chunks():
     )
     assert [len(params["rows"]) for _c, params, _d in driver.calls] == [2, 2, 1]
     sent = [row for _c, params, _d in driver.calls for row in params["rows"]]
-    assert sent == manifest
+    assert sent == _sent_form(manifest)
 
 
 def test_the_write_uses_the_reviewed_cypher_and_the_named_database():
@@ -362,7 +368,7 @@ def test_apply_manifest_writes_the_rows_it_is_given():
     manifest = stage0_apply.to_payload(_wide_plan(5))
     assert stage0_apply.apply_manifest(driver, "neo4j", manifest, chunk_size=2) == 5
     sent = [row for _c, params, _d in driver.calls for row in params["rows"]]
-    assert sent == manifest
+    assert sent == _sent_form(manifest)
     assert all(c == stage0_apply.MERGE_CYPHER for c, _p, _d in driver.calls)
 
 
@@ -547,3 +553,43 @@ def test_the_in_container_driver_cannot_delete_and_never_names_child_of():
     src = DRIVER.read_text().upper()
     for forbidden in ("DELETE", "DETACH", "REMOVE", "CHILD_OF", "ROLLBACK"):
         assert forbidden not in src, forbidden
+
+
+# --- a manifest built under an older label rule (BioMicroCenter/NExtSEEK#124) --
+
+def test_a_new_manifest_is_stamped_with_the_current_label_rule():
+    manifest = stage0_apply.apply_edges(FakeDriver(), "neo4j", _resolved())
+    assert manifest and all(
+        row[S.LABEL_RULE_KEY] == S.LABEL_RULE for row in manifest)
+
+
+def test_apply_manifest_refuses_a_manifest_built_before_the_rule_change():
+    # A manifest from before #124 carries the old fallback (a raw SEEK id and
+    # title on an unmapped assay). Replaying it writes those leaks again, so
+    # the box refuses it whole, before any chunk lands. Such a manifest has no
+    # stamp at all, which is exactly what an old file read off disk looks like.
+    driver = FakeDriver()
+    rows = stage0_apply.to_payload(_wide_plan(5))
+    for row in rows:
+        del row[S.LABEL_RULE_KEY]
+    with pytest.raises(stage0_apply.StaleManifest, match="rebuild"):
+        stage0_apply.apply_manifest(driver, "neo4j", rows, chunk_size=2)
+    assert driver.calls == []
+
+
+def test_apply_manifest_refuses_a_manifest_stamped_with_another_rule():
+    driver = FakeDriver()
+    rows = stage0_apply.to_payload(_wide_plan(3))
+    rows[2][S.LABEL_RULE_KEY] = "an older rule"
+    with pytest.raises(stage0_apply.StaleManifest, match="rebuild"):
+        stage0_apply.apply_manifest(driver, "neo4j", rows)
+    assert driver.calls == []
+
+
+def test_the_stamp_never_reaches_the_graph():
+    # DerivedFromRelRow is extra="forbid": the stamp is the file's, not the
+    # edge's, so the rows sent carry the server model's fields and no more.
+    driver = FakeDriver()
+    stage0_apply.apply_manifest(driver, "neo4j", stage0_apply.to_payload(_wide_plan(2)))
+    for row in driver.calls[0][1]["rows"]:
+        assert set(row) == set(S.EDGE_ROW_COLUMNS)

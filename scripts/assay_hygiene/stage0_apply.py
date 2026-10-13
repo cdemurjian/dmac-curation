@@ -176,6 +176,27 @@ def _normalise_row(row: dict) -> dict:
     return out
 
 
+class StaleManifest(ValueError):
+    """The manifest was built under an older label rule; it must be rebuilt."""
+
+
+def _check_rule(row: dict) -> dict:
+    """-> the row without its label-rule stamp, or raise StaleManifest.
+
+    The stamp belongs to the file, not the edge, so it is dropped here before
+    `_normalise_row` holds the row to DerivedFromRelRow's exact fields.
+    """
+    rule = row.get(S.LABEL_RULE_KEY)
+    if rule != S.LABEL_RULE:
+        raise StaleManifest(
+            f"this manifest was built under label rule {rule!r}, not "
+            f"{S.LABEL_RULE!r}: replaying it would write that rule's labels "
+            f"(before BioMicroCenter/NExtSEEK#124, a raw SEEK assay id and "
+            f"title on an unmapped assay). Nothing was written and the file is "
+            f"left as it is; rebuild the manifest with the current plugin.")
+    return {k: v for k, v in row.items() if k != S.LABEL_RULE_KEY}
+
+
 def _chunks(rows: list, size: int):
     for i in range(0, len(rows), size):
         yield rows[i : i + size]
@@ -203,7 +224,8 @@ def to_payload(resolved: pd.DataFrame) -> list[dict]:
     # internal_assay_title carry the `str` dtype whose missing value is float
     # nan, which the naive form leaves behind exactly the same way.
     frame = frame.astype(object).where(pd.notna(frame), None)
-    return [_normalise_row(row) for row in frame.to_dict(orient="records")]
+    return [{**_normalise_row(row), S.LABEL_RULE_KEY: S.LABEL_RULE}
+            for row in frame.to_dict(orient="records")]
 
 
 def apply_edges(
@@ -256,13 +278,16 @@ def apply_manifest(
     from a hung one, and the running total is also what tells them how far a
     part-way failure got.
 
+    A manifest built under an older label rule is refused whole, before the
+    first chunk (`StaleManifest`): see `_schema.LABEL_RULE`.
+
     Returns rows sent, not relationships created. The two differ if a Sample
     node named in the manifest no longer exists: the MATCH finds nothing and
     that row silently creates no edge. Stage 8's post-write count is what
     settles that, not this number.
     """
     _check_chunk_size(chunk_size)
-    rows = [_normalise_row(row) for row in manifest_rows]
+    rows = [_normalise_row(_check_rule(row)) for row in manifest_rows]
     sent = 0
     for chunk in _chunks(rows, chunk_size):
         driver.execute_query(MERGE_CYPHER, {"rows": chunk}, database_=db_name)

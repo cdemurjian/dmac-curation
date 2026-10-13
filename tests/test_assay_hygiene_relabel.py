@@ -274,7 +274,7 @@ def test_a_missing_label_travels_as_null_and_never_as_nan(samples, assays,
 
     assert rows[0]["internal_assay_id"] is None
     assert rows[0]["internal_assay_title"] is None
-    assert list(rows[0]) == R.SET_ROW_COLUMNS
+    assert list(rows[0]) == R.SET_ROW_COLUMNS + [R.S.LABEL_RULE_KEY]
 
 
 def test_to_rows_before_half_is_the_undo(samples, membership, assays, sops):
@@ -304,7 +304,8 @@ def test_the_write_is_chunked_and_reports_progress():
     slow chunk from a hung one, and the running total is what says how far a
     part-way failure got."""
     rows = [{"child_uuid": f"C-{i}", "parent_uuid": "P", "assay_id": 1,
-             "internal_assay_id": 1, "internal_assay_title": "t"}
+             "internal_assay_id": 1, "internal_assay_title": "t",
+             R.S.LABEL_RULE_KEY: R.S.LABEL_RULE}
             for i in range(250)]
     driver, seen = FakeDriver(), []
 
@@ -325,3 +326,54 @@ def test_the_in_container_driver_carries_no_destructive_vocabulary():
 
     for word in ("DELETE", "DETACH", "REMOVE", "MERGE", "undo_set"):
         assert word not in src, f"{word} must not appear in the piped driver"
+
+
+# --- a plan built under an older label rule (BioMicroCenter/NExtSEEK#124) -----
+
+
+def test_a_new_plan_and_its_rows_carry_the_current_label_rule(samples,
+                                                             membership,
+                                                             assays, sops):
+    plan = R.plan_relabel(_edge(999.0), samples, membership, assays, sops)
+    assert set(plan[R.S.LABEL_RULE_KEY]) == {R.S.LABEL_RULE}
+    for half in ("after", "before"):
+        for row in R.to_rows(R.write_set(plan), half=half):
+            assert row[R.S.LABEL_RULE_KEY] == R.S.LABEL_RULE
+
+
+def test_apply_refuses_rows_from_a_plan_built_before_the_rule_change(
+        samples, membership, assays, sops, tmp_path):
+    """A plan from before #124 has no stamp column. Rows rebuilt from it carry
+    the old fallback labels, so the box refuses them before any chunk lands;
+    the plan file itself is left where it is."""
+    plan = R.plan_relabel(_edge(999.0), samples, membership, assays, sops)
+    old = tmp_path / "relabel-manifest.csv.gz"
+    plan.drop(columns=[R.S.LABEL_RULE_KEY]).to_csv(old, index=False,
+                                                   compression="gzip")
+    rows = R.to_rows(R.write_set(pd.read_csv(old)), half="after")
+    driver = FakeDriver()
+
+    with pytest.raises(R.StalePlan, match="rebuild"):
+        R.apply_rows(driver, "neo4j", rows)
+    assert driver.calls == []
+    assert old.exists()
+
+
+def test_apply_refuses_a_row_file_written_before_the_rule_change():
+    """The row file an older plugin wrote has no stamp on any row."""
+    rows = [{"child_uuid": "C", "parent_uuid": "P", "assay_id": 1,
+             "internal_assay_id": 1, "internal_assay_title": "t"}]
+    driver = FakeDriver()
+    with pytest.raises(R.StalePlan, match="rebuild"):
+        R.apply_rows(driver, "neo4j", rows)
+    assert driver.calls == []
+
+
+def test_a_plan_read_back_from_csv_still_applies(samples, membership, assays,
+                                                 sops, tmp_path):
+    plan = R.plan_relabel(_edge(999.0), samples, membership, assays, sops)
+    path = tmp_path / "relabel-manifest.csv.gz"
+    plan.to_csv(path, index=False, compression="gzip")
+    rows = R.to_rows(R.write_set(pd.read_csv(path)), half="after")
+    driver = FakeDriver()
+    assert R.apply_rows(driver, "neo4j", rows) == 1
