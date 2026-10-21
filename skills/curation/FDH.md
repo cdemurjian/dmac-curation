@@ -6,7 +6,7 @@ pipeline (12 phases across 11 numbers, `PHASES.md`); they do not consume
 `assay_sheets/` / flat sheets.
 
 - **Module 2 (`/fdh-api`)** — host `https://fairdomhub.org` by default; override
-  with `--base-url` or `.env` `FDH_BASE_URL` (`scripts/fdh/fdh_api.py:198-201`).
+  with `--base-url` or `.env` `FDH_BASE_URL` (`scripts/fdh/fdh_api.py:222-225`).
 - **Module 1 (`/fdh-upload`) is production-only.** `submit.py` hardcodes
   `BASE_URL = "https://fairdomhub.org/"` (`scripts/fdh/submit.py:73`) and reads no
   host from the environment; its only flags are `--step N` and `--resume`
@@ -14,11 +14,11 @@ pipeline (12 phases across 11 numbers, `PHASES.md`); they do not consume
 - Auth: `.env` `FDH_API` = JSON `{ "<name>": "<token>" }`. Token from
   fairdomhub.org → Profile → Actions → API Token. Never log tokens.
   - Module 2 resolves in order `--token` → `$FDH_TOKEN` → `$FDH_API`
-    (`scripts/fdh/fdh_api.py:172-195`). Inside `FDH_API`: `--user NAME` selects;
+    (`scripts/fdh/fdh_api.py:196-219`). Inside `FDH_API`: `--user NAME` selects;
     a one-entry map auto-selects; **two or more entries with no `--user` exits 2.**
   - `.env` is read from the current directory first, then the plugin checkout,
     with `setdefault` semantics — an exported shell variable wins over both
-    (`fdh_api.py:159-169`).
+    (`fdh_api.py:183-193`).
   - Module 1 reads only `FDH_API` and picks the user through an interactive
     prompt (`submit.py:1281`, `:1295-1301`); it honours neither `FDH_TOKEN` nor
     `--token`.
@@ -104,7 +104,7 @@ It rewrites `context/fdh_api_index.json` **inside the plugin checkout**
 ### The read-only CLI — try this before generating anything
 
 `fdh_api.py` is also a CLI with five read verbs
-(`scripts/fdh/fdh_api.py:234-274`). Every subcommand takes `--token`, `--user`
+(`scripts/fdh/fdh_api.py:258-298`). Every subcommand takes `--token`, `--user`
 and `--base-url`.
 
 ```bash
@@ -117,21 +117,37 @@ uv run --script <PLUGIN>/scripts/fdh/fdh_api.py download-blob <url> --out <path>
 
 **There is no write verb, by design.** `post` / `patch` / `delete` exist on the
 client but are wired to no subcommand — "used by generated scripts, never by this
-read CLI" (`fdh_api.py:146`). Every FDH write goes through a per-task generated
-script carrying its own `--write` gate. Transient `429/502/503` are retried up to
-5 times with exponential backoff (`fdh_api.py:35`, `:69-89`); anything else `>=400`
-raises `FDHError`.
+read CLI" (`fdh_api.py:166`). Every FDH write goes through a per-task generated
+script carrying its own `--write` gate.
+
+Retries depend on the method (`fdh_api.py:35-40`, `:75-109`). GET/HEAD/PUT/DELETE
+retry network errors and `429/502/503` up to 5 times with exponential backoff.
+**POST and PATCH are never retried on a timeout, connection error or `502/503`** —
+the write may have landed even though the response never arrived (on 2026-10-07 a
+60 s read timeout on one `POST /assays` produced six identical assays). The
+exception propagates instead. Anything else `>=400` raises `FDHError`.
 
 ### The shared client
 
 `from fdh_api import FairDomHubClient` (add `scripts/fdh/` to `sys.path` — see template).
 Methods: `get(type, id)`, `search(q, search_type=None)`, `page_through(url)`,
-`list_related(type, id, relationship)`, `whoami()`, `post(type, payload)`,
-`patch(type, id, payload)`, `delete(type, id)`, `download_blob(url, dest)`.
+`list_related(type, id, relationship)`, `whoami()`, `post(type, payload, timeout=None)`,
+`patch(type, id, payload, timeout=None)`, `delete(type, id, timeout=None)`,
+`download_blob(url, dest)`. `timeout` overrides the client's 60 s default for that
+one call — give slow creates more (e.g. `timeout=300`).
 Common patterns:
 - Samples linked to an assay: `client.list_related("assays", assay_id, "samples")` →
   list of `{id, type}` refs.
 - Delete a sample: `client.delete("samples", sample_id)`.
+
+**Creates are not retried — the script must be.** A `requests.RequestException` or
+`FDHError` 502/503 from `post`/`patch` means *outcome unknown*, not *failed*. Never
+catch it and POST again. Instead:
+1. Before each create, re-read the parent's children (`list_related`) and skip the
+   item if it already exists — this also makes a re-run resume safely.
+2. On an exception from `post`, poll the parent for the item for a few minutes.
+   Found → it landed; carry on. Not found → stop and tell the user; a re-run picks
+   up where it left off.
 
 ### Generated-script template (dry-run first, always)
 
@@ -182,10 +198,39 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
+For a script that **creates**, replace the write loop with the re-read-then-POST
+pattern (needs `import time, requests` and `from fdh_api import FDHError`). It is safe
+to re-run: anything already on the server is skipped.
+
+```python
+def titles(client, study_id):
+    return {(r.get("attributes") or {}).get("title")
+            or client.get("assays", r["id"])["data"]["attributes"]["title"]
+            for r in client.list_related("studies", study_id, "assays")}
+
+for title in planned:
+    if title in titles(client, study_id):        # re-read before every create
+        print(f"exists: {title}"); continue
+    try:
+        r = client.post("assays", payload(title), timeout=300)
+        print(f"created assay {r['data']['id']}: {title}")
+    except (requests.RequestException, FDHError) as e:
+        # Outcome unknown — the POST may have landed. Look, don't re-send.
+        print(f"POST for {title!r} did not return ({type(e).__name__}); checking…")
+        for _ in range(6):
+            time.sleep(20)
+            if title in titles(client, study_id):
+                print(f"  landed: {title}"); break
+        else:
+            sys.exit("not found after timeout — stopping. Re-run to resume.")
+```
+
 ## Safety (hard rules)
 
 - Destructive generated scripts default to dry-run; require `--write` + an interactive
   confirmation before any DELETE/PATCH.
+- Generated scripts never re-send a POST/PATCH after a timeout or connection error;
+  they re-read server state (see "Creates are not retried" above).
 - New generated scripts are committed only after the user reviews the diff (review-then-commit).
 - Credentials come from `.env` only; never printed or committed. `Assets/Output/session.json`
   (from submit.py) holds a token in plaintext — the user must add `Assets/Output/` to their

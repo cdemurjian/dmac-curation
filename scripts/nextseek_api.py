@@ -423,7 +423,7 @@ class NExtSEEKClient:
 def _load_dotenv():
     """setdefault env vars from cwd/.env then <plugin>/.env (idempotent).
 
-    Mirrors scripts/fdh/fdh_api.py:159-169, the reference implementation.
+    Mirrors scripts/fdh/fdh_api.py:183-193, the reference implementation.
     Skips lines that are blank or start with '#'. Strips surrounding quotes.
     Existing env vars take precedence (we only setdefault).
     """
