@@ -280,18 +280,13 @@ def build_arm_flat(arm_name, source_files, out_dir, lookup, synonyms, out_name):
     # of that assay, so registering only the output leaves every edge into the
     # assay unlabelled. The 4-sheet schema has one assay per file and cannot
     # express this; the flat format carries assay_ids per row, which is why it
-    # exists. Three passes below.
+    # exists. Two passes below.
     #
     # Closure note: the union only closes over parents present in THIS workbook.
     # A parent minted in another arm stays unregistered here and is left to
     # `assay` mode to repair — a deliberate, documented residue, not an oversight.
 
-    # Pass 1 — each sample type's own assay.
-    assay_of_type = {}
-    for sampletype, parent_assay, _records in source_files:
-        assay_of_type[sampletype] = resolve_assay_id(parent_assay, lookup, synonyms)
-
-    # Pass 1b — every spelling of a record maps to the ONE key the emission loop
+    # Pass 1 — every spelling of a record maps to the ONE key the emission loop
     # looks it up by. A record is addressable as its UID or its Name (NExtSEEK
     # resolves a physical parent by Name), but it is emitted under `uid or name`.
     # Accumulating against the raw parent token instead silently drops the
@@ -309,11 +304,18 @@ def build_arm_flat(arm_name, source_files, out_dir, lookup, synonyms, out_name):
                 if key:
                     ident_of_identity[key] = canonical
 
-    # Pass 2 — seed each row with its own assay, then push that assay up to
-    # every parent it names. Parent tokens are ';'-separated, names or UIDs.
+    # Pass 2 — seed each row with its own FILE's assay, then push that assay up
+    # to every parent it names. The assay is per source file, not per sample
+    # type: a type split across files with different assays (parental vs
+    # engineered CEL) used to take whichever file sorted last. Every column whose
+    # name contains "parent" is lineage (Parent, Treatment1Parent,
+    # AntibodyParent, ...), the rule NExtSEEK's
+    # batch_upload/helpers.py::collect_parent_tokens applies; reading only
+    # `Parent` left the other edges unlabelled. Tokens are ';'-separated, names
+    # or UIDs.
     row_assays = defaultdict(set)      # canonical ident -> {(title, id)}
-    for sampletype, _parent_assay, records in source_files:
-        own = assay_of_type.get(sampletype)
+    for _sampletype, parent_assay, records in source_files:
+        own = resolve_assay_id(parent_assay, lookup, synonyms)
         if not (own and own[0]):
             continue
         for rec in records:
@@ -321,7 +323,9 @@ def build_arm_flat(arm_name, source_files, out_dir, lookup, synonyms, out_name):
             if not ident:
                 continue
             row_assays[ident].add(own)
-            for token in str(rec.get("Parent", "")).split(";"):
+            tokens = [t for k, v in rec.items() if "parent" in str(k).lower()
+                      for t in str(v or "").split(";")]
+            for token in tokens:
                 token = token.strip()
                 # A parent outside this workbook is not ours to register; the
                 # closure note above says who owns that residue.

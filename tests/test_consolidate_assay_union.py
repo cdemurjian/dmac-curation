@@ -27,6 +27,7 @@ LOOKUP = {"Tissue Collection": 10, "DNA Extraction": 41, "Sequencing": 77}
 TIS_UID = "TIS-190101ABC-1"
 DNA_UID = "DNA-190101ABC-1"
 SEQ_UID = "D.SEQ-190101ABC-1"
+DNA_B_UID = "DNA-190101ABC-2"
 
 
 def _build(tmp_path, source_files):
@@ -129,3 +130,38 @@ def test_titles_and_ids_stay_the_same_length_when_a_pushed_up_assay_is_unresolve
         if ids:
             assert len(titles) == len(ids), (
                 f"{d['uid']}: {len(titles)} titles {titles} but {len(ids)} ids {ids}")
+
+
+def test_a_type_split_across_files_keeps_each_files_assay(tmp_path):
+    """Each file's rows get that file's assay, not the last file of the same type.
+
+    Assay was keyed by sample type, so when one type came from two files with
+    different assays (parental vs engineered cell lines) the file that sorted
+    last won for both, and its parent never received the other assay.
+    """
+    first = ("DNA", "DNA Extraction",
+             [{"UID": DNA_UID, "Name": "dna-A", "Parent": TIS_UID}])
+    second = ("DNA", "Sequencing",
+              [{"UID": DNA_B_UID, "Name": "dna-B", "Parent": ""}])
+    got = _build(tmp_path, [_tissue(), first, second])
+    assert got[DNA_UID] == {"41"}
+    assert got[DNA_B_UID] == {"77"}
+    assert got[TIS_UID] == {"10", "41"}
+
+
+def test_every_parent_column_is_lineage(tmp_path):
+    """Treatment1Parent and the like push the assay up, as the server reads them.
+
+    NExtSEEK's collect_parent_tokens treats any key containing "parent" as a
+    parent edge. Reading only `Parent` left a compound feeding a plate read
+    through Treatment1Parent without the read's assay, so that edge uploaded
+    unlabelled.
+    """
+    seq = ("D.SEQ", "Sequencing",
+           [{"UID": SEQ_UID, "Name": "seq-A", "Parent": DNA_UID,
+             "Treatment1Parent": "tissue-A"}])
+    dna = ("DNA", "DNA Extraction",
+           [{"UID": DNA_UID, "Name": "dna-A", "Parent": ""}])
+    got = _build(tmp_path, [_tissue(), dna, seq])
+    assert got[TIS_UID] == {"10", "77"}
+    assert got[DNA_UID] == {"41", "77"}

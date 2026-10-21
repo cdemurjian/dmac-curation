@@ -140,7 +140,9 @@ PROTOCOL_OCCURRENCES = 43          # case-tolerant.
 # occurrences in test_review_metadata.py. They arrived under a real batch stamp
 # and were re-stamped into the 19MMDD band on the way in, keeping type prefix,
 # lab code and serial as docs/SECURITY.md prescribes.
-UID_PATTERN_OCCURRENCES = 502      # all synthetic
+# 502 -> 503 on 2026-10-21: the consolidate per-file-assay fix adds one synthetic
+# 19MMDD-band DNA fixture uid to test_consolidate_assay_union.py.
+UID_PATTERN_OCCURRENCES = 503      # all synthetic
 # 439 -> 440 on 2026-08-27: the prerequisites plan under docs/superpowers/plans/
 # cites one 19MMDD-band uid as the example new fixtures must follow. Verified
 # absent from all 177,393 production uids, and no 19xx-band uid is real for any
