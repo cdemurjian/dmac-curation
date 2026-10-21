@@ -20,7 +20,7 @@ pipeline (12 phases across 11 numbers, `PHASES.md`); they do not consume
     with `setdefault` semantics — an exported shell variable wins over both
     (`fdh_api.py:159-169`).
   - Module 1 reads only `FDH_API` and picks the user through an interactive
-    prompt (`submit.py:1281`, `:1295-1301`); it honours neither `FDH_TOKEN` nor
+    prompt (`submit.py:1321`, `:1335-1341`); it honours neither `FDH_TOKEN` nor
     `--token`.
 
 ## Module 1 — Upload a study (`/fdh-upload`)
@@ -29,10 +29,16 @@ Interactive, human-run tool: `scripts/fdh/submit.py`. Claude checks prereqs and
 hands off; it cannot answer the tool's prompts. See `commands/fdh-upload.md`.
 **Production-only** — see the host note above.
 
+Writes (`_write_jsonapi`, behind `_post_jsonapi` / `_patch_jsonapi`) retry only
+`429`. A timeout, connection error or `5xx` is raised and never re-sent, since the
+create may have landed. Step 1 then re-reads the study for the assay and skips titles
+already there on a re-run; Steps 4 and 5 stop and list what they had created, so check
+FairDOMHub before re-running them.
+
 Workbook format: each sheet = one Sample Type; each column = one attribute; a
 `UID` column is required (it becomes the record title,
-`scripts/fdh/submit.py:700`, `:869-870`). Columns whose every non-empty cell is a
-URL/DOI are auto-typed URI (`column_is_all_links`, `:630-633`). Known project IDs
+`scripts/fdh/submit.py:764`, `:930-931`). Columns whose every non-empty cell is a
+URL/DOI are auto-typed URI (`column_is_all_links`, `:694-697`). Known project IDs
 live in `PROJECT_MAPPING` (`:77-83`); a manual numeric id can also be entered.
 
 Resumable via `--resume` / `--step N` (mutually exclusive; the only two flags).

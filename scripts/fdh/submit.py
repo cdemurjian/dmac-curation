@@ -121,6 +121,45 @@ def _bin_headers(api_token: str) -> Dict:
     }
 
 
+def _write_jsonapi(
+    method: str,
+    url: str,
+    api_token: str,
+    payload: dict,
+    max_retries: int = 5,
+    backoff_factor: float = 2.0,
+    timeout: float = 60,
+) -> dict:
+    """
+    Send one POST/PATCH, retrying only what is safe to repeat.
+
+    The only retry is on 429 Too Many Requests — a refusal before processing.
+    A timeout, connection error, 502/503 or any other >=400 is raised at once:
+    for a timeout or a 5xx the write may have landed even though the response
+    never arrived (on 2026-10-07 re-sending a timed-out POST /assays created six
+    identical assays). The caller must re-read server state before deciding to
+    send it again. Same policy as FairDomHubClient._request in fdh_api.py.
+    """
+    attempt = 0
+    while True:
+        # Deliberately not wrapped in try/except: a network error propagates.
+        r = requests.request(method, url, json=payload, headers=_headers(api_token),
+                             timeout=timeout)
+        if r.status_code == 429 and attempt < max_retries:
+            wait = backoff_factor ** attempt
+            console.print(f"[yellow]⚠  Rate limited (429). Retrying in {wait:.0f}s...[/yellow]")
+            time.sleep(wait)
+            attempt += 1
+            continue
+        if r.status_code >= 400:
+            try:
+                console.print(f"[red]ERROR BODY:[/red] {r.json()}")
+            except Exception:
+                console.print(f"[red]ERROR BODY (text):[/red] {r.text[:2000]}")
+            r.raise_for_status()
+        return r.json()
+
+
 def _post_jsonapi(
     base_url: str,
     path: str,
@@ -128,45 +167,19 @@ def _post_jsonapi(
     payload: dict,
     max_retries: int = 5,
     backoff_factor: float = 2.0,
+    timeout: float = 60,
 ) -> dict:
     """
-    POST to a JSON:API endpoint with exponential backoff for transient errors.
+    POST to a JSON:API endpoint. Retries 429 only (see _write_jsonapi).
 
-    Retries automatically on:
-      429 — Too Many Requests (rate limit)
-      502 — Bad Gateway
-      503 — Service Unavailable
-
-    Any other 4xx or 5xx is raised immediately without retry (e.g. 422
-    Unprocessable Entity means your payload has a validation error — retrying
-    won't help).
+    A timeout, connection error or 5xx is raised, not retried: the create may
+    have landed. Any 4xx is raised immediately (e.g. 422 Unprocessable Entity
+    means your payload has a validation error — retrying won't help).
     """
     url = f"{base_url.rstrip('/')}/{path.lstrip('/')}"
-    attempt = 0
-    while True:
-        try:
-            r = requests.post(url, json=payload, headers=_headers(api_token), timeout=60)
-            if r.status_code >= 400:
-                if r.status_code in (429, 502, 503) and attempt < max_retries:
-                    wait = backoff_factor ** attempt
-                    console.print(f"[yellow]⚠  Server busy ({r.status_code}). Retrying in {wait:.0f}s...[/yellow]")
-                    time.sleep(wait)
-                    attempt += 1
-                    continue
-                try:
-                    console.print(f"[red]ERROR BODY:[/red] {r.json()}")
-                except Exception:
-                    console.print(f"[red]ERROR BODY (text):[/red] {r.text}")
-                r.raise_for_status()
-            return r.json()
-        except requests.exceptions.RequestException as e:
-            if attempt < max_retries:
-                wait = backoff_factor ** attempt
-                console.print(f"[yellow]⚠  Request failed ({e}). Retrying in {wait:.0f}s...[/yellow]")
-                time.sleep(wait)
-                attempt += 1
-            else:
-                raise
+    return _write_jsonapi("POST", url, api_token, payload,
+                          max_retries=max_retries, backoff_factor=backoff_factor,
+                          timeout=timeout)
 
 
 def _patch_jsonapi(
@@ -175,36 +188,26 @@ def _patch_jsonapi(
     payload: dict,
     max_retries: int = 5,
     backoff_factor: float = 2.0,
+    timeout: float = 60,
 ) -> dict:
     """
-    PATCH a JSON:API endpoint with exponential backoff for transient errors.
+    PATCH a JSON:API endpoint. Retries 429 only (see _write_jsonapi).
     url must be the full absolute URL.
     """
-    attempt = 0
-    while True:
-        try:
-            r = requests.patch(url, json=payload, headers=_headers(api_token), timeout=60)
-            if r.status_code >= 400:
-                if r.status_code in (429, 502, 503) and attempt < max_retries:
-                    wait = backoff_factor ** attempt
-                    console.print(f"[yellow]⚠  Server busy ({r.status_code}). Retrying in {wait:.0f}s...[/yellow]")
-                    time.sleep(wait)
-                    attempt += 1
-                    continue
-                try:
-                    console.print(f"[red]ERROR BODY:[/red] {r.json()}")
-                except Exception:
-                    console.print(f"[red]ERROR BODY (text):[/red] {r.text}")
-                r.raise_for_status()
-            return r.json()
-        except requests.exceptions.RequestException as e:
-            if attempt < max_retries:
-                wait = backoff_factor ** attempt
-                console.print(f"[yellow]⚠  Request failed ({e}). Retrying in {wait:.0f}s...[/yellow]")
-                time.sleep(wait)
-                attempt += 1
-            else:
-                raise
+    return _write_jsonapi("PATCH", url, api_token, payload,
+                          max_retries=max_retries, backoff_factor=backoff_factor,
+                          timeout=timeout)
+
+
+def _outcome_unknown(exc: Exception) -> bool:
+    """
+    True when a write raised without telling us whether it was applied:
+    a timeout / connection error, or a 5xx. A 4xx means it was refused.
+    """
+    if isinstance(exc, requests.exceptions.HTTPError):
+        resp = exc.response
+        return resp is None or resp.status_code >= 500
+    return isinstance(exc, requests.exceptions.RequestException)
 
 
 def _page_through(base_url: str, url: str, api_token: str) -> List[dict]:
@@ -281,6 +284,33 @@ def create_assay(
     return _post_jsonapi(base_url, "/assays", api_token, payload)
 
 
+def _await_assay(
+    base_url: str,
+    api_token: str,
+    study_id: str,
+    title: str,
+    known_ids: set,
+    polls: int = 6,
+    interval: float = 20,
+) -> Optional[str]:
+    """
+    After a POST /assays whose outcome is unknown, re-read the study until an
+    assay with this title and an ID not in known_ids appears. Returns its ID, or
+    None if it never shows up.
+    """
+    for _ in range(polls):
+        time.sleep(interval)
+        try:
+            df = get_assays_for_study(base_url, api_token, study_id)
+        except requests.exceptions.RequestException as e:
+            console.print(f"[yellow]⚠  Re-read failed ({e}); trying again...[/yellow]")
+            continue
+        for _, row in df.iterrows():
+            if row["assay_title"] == title and str(row["assay_id"]) not in known_ids:
+                return str(row["assay_id"])
+    return None
+
+
 def bulk_create_assays_df(
     base_url: str,
     api_token: str,
@@ -292,18 +322,52 @@ def bulk_create_assays_df(
     Create multiple assays from a list of names.
 
     Returns a DataFrame with columns: assay_title, assay_id.
-    If return_responses=True, also returns the raw API response list.
+    If return_responses=True, also returns the raw API response list (None for
+    an assay that was found by re-reading the study rather than from its POST).
+
+    If a POST times out or gets a 5xx, it is not re-sent: the study is re-read
+    to see whether the assay landed. If it did, creation carries on; if not,
+    a RuntimeError stops the run before anything else is created.
     """
+    # IDs already in the study, so a re-read after a failed POST can tell the new
+    # assay apart from an older one with the same title.
+    known_ids: set = set()
+    if assay_names:
+        before = get_assays_for_study(base_url, api_token, study_id)
+        if not before.empty:
+            known_ids = set(before["assay_id"].astype(str))
     records, responses = [], []
     for name in assay_names:
         console.print(f"  Creating assay: [cyan]{name}[/cyan]")
-        r = create_assay(base_url, api_token, title=name, study_id=study_id)
-        records.append({
-            "assay_title": r["data"]["attributes"]["title"],
-            "assay_id": r["data"]["id"],
-        })
+        try:
+            r = create_assay(base_url, api_token, title=name, study_id=study_id)
+        except requests.exceptions.RequestException as e:
+            if not _outcome_unknown(e):
+                raise
+            console.print(
+                f"[yellow]⚠  POST for '{name}' did not return ({type(e).__name__}). "
+                f"It may have landed — checking study {study_id}, not re-sending...[/yellow]"
+            )
+            assay_id = _await_assay(base_url, api_token, study_id, name, known_ids)
+            if assay_id is None:
+                created = ", ".join(f"{x['assay_id']} ({x['assay_title']})" for x in records) or "none"
+                raise RuntimeError(
+                    f"Assay '{name}' did not appear in study {study_id} after the POST failed. "
+                    f"Created before it this run: {created}. Check FairDOMHub, then re-run "
+                    f"Step 1 — titles already in the study are skipped."
+                ) from e
+            console.print(f"  [green]✓ landed:[/green] assay {assay_id}")
+            r = None
+            records.append({"assay_title": name, "assay_id": assay_id})
+        else:
+            assay_id = str(r["data"]["id"])
+            records.append({
+                "assay_title": r["data"]["attributes"]["title"],
+                "assay_id": r["data"]["id"],
+            })
+        known_ids.add(assay_id)
         responses.append(r)
-    df = pd.DataFrame(records)
+    df = pd.DataFrame(records, columns=["assay_title", "assay_id"])
     return (df, responses) if return_responses else df
 
 
@@ -745,40 +809,32 @@ def create_sample_type(
     base_url: str,
     api_token: str,
     payload: dict,
-    max_retries: int = 5,
-    backoff_seconds: int = 5,
 ) -> dict:
-    """POST /sample_types with exponential backoff for transient errors."""
-    url = f"{base_url.rstrip('/')}/sample_types"
-    attempt = 0
-    while True:
-        try:
-            r = requests.post(url, headers=_json_headers(api_token), json=payload, timeout=120)
-            if r.status_code >= 400:
-                try:
-                    console.print(f"[red]ERROR BODY:[/red] {r.json()}")
-                except Exception:
-                    console.print(f"[red]ERROR BODY (text):[/red] {r.text}")
-                if r.status_code in (429, 500, 502, 503) and attempt < max_retries:
-                    wait = backoff_seconds * (2 ** attempt)
-                    console.print(f"[yellow]⚠  Server {r.status_code}. Retrying in {wait}s...[/yellow]")
-                    time.sleep(wait)
-                    attempt += 1
-                    continue
-                r.raise_for_status()
-            resp = r.json()
-            st_id = resp["data"]["id"]
-            st_title = resp["data"]["attributes"]["title"]
-            console.print(f"  [green]✓ SampleType {st_id}[/green]: {st_title}")
-            return resp
-        except requests.exceptions.RequestException as e:
-            if attempt < max_retries:
-                wait = backoff_seconds * (2 ** attempt)
-                console.print(f"[yellow]⚠  Network error: {e}. Retrying in {wait}s...[/yellow]")
-                time.sleep(wait)
-                attempt += 1
-            else:
-                raise
+    """
+    POST /sample_types. Retries 429 only; a timeout or 5xx is raised, not
+    re-sent, because the sample type may have been created (see _write_jsonapi).
+    """
+    resp = _post_jsonapi(base_url, "/sample_types", api_token, payload, timeout=120)
+    st_id = resp["data"]["id"]
+    st_title = resp["data"]["attributes"]["title"]
+    console.print(f"  [green]✓ SampleType {st_id}[/green]: {st_title}")
+    return resp
+
+
+def _report_unknown_write(exc: Exception, what: str, created: List[str]) -> None:
+    """
+    Print what a failed bulk create left behind when the failing write's outcome
+    is unknown, so the user checks FairDOMHub before re-running the step (a re-run
+    creates every item again, including any that landed).
+    """
+    if not _outcome_unknown(exc):
+        return
+    console.print(
+        f"[red]✗ {what} did not return ({type(exc).__name__}) and was NOT re-sent — "
+        f"it may exist on FairDOMHub.[/red]"
+    )
+    console.print(f"[red]  Created earlier this run: {', '.join(created) or 'none'}[/red]")
+    console.print("[red]  Check FairDOMHub before re-running this step.[/red]")
 
 
 def create_sample_types_from_workbook(
@@ -811,7 +867,12 @@ def create_sample_types_from_workbook(
             continue
         console.print(f"\n  Sheet [cyan]{sheet}[/cyan]")
         payload = build_sample_type_payload(sheet, title_suffix, df, project_ids, type_ids)
-        resp = create_sample_type(base_url, api_token, payload)
+        try:
+            resp = create_sample_type(base_url, api_token, payload)
+        except requests.exceptions.RequestException as e:
+            _report_unknown_write(e, f"SampleType for sheet '{sheet}'",
+                                  [f"{r['sample_type_id']} ({r['sheet_name']})" for r in rows])
+            raise
         st_id = resp["data"]["id"]
         rows.append({
             "sheet_name": sheet,
@@ -903,42 +964,16 @@ def create_sample(
     base_url: str,
     api_token: str,
     payload: dict,
-    max_retries: int = 5,
-    backoff_seconds: int = 5,
 ) -> dict:
     """
-    POST /samples with retries for transient server errors.
+    POST /samples. Retries 429 only; a timeout or 5xx is raised, not re-sent,
+    because the sample may have been created (see _write_jsonapi).
 
     422 Unprocessable Entity is raised immediately — it means the attribute_map
     contains invalid data (wrong type, missing required field, etc.).
     Check the ERROR BODY printed above the exception for details.
     """
-    url = f"{base_url.rstrip('/')}/samples"
-    attempt = 0
-    while True:
-        try:
-            r = requests.post(url, headers=_json_headers(api_token), json=payload, timeout=120)
-            if r.status_code >= 400:
-                try:
-                    console.print(f"[red]ERROR BODY:[/red] {r.json()}")
-                except Exception:
-                    console.print(f"[red]ERROR BODY (text):[/red] {r.text[:2000]}")
-                if r.status_code in (429, 500, 502, 503) and attempt < max_retries:
-                    wait = backoff_seconds * (2 ** attempt)
-                    console.print(f"[yellow]⚠  Server {r.status_code}. Retrying in {wait}s...[/yellow]")
-                    time.sleep(wait)
-                    attempt += 1
-                    continue
-                r.raise_for_status()
-            return r.json()
-        except requests.exceptions.RequestException as e:
-            if attempt < max_retries:
-                wait = backoff_seconds * (2 ** attempt)
-                console.print(f"[yellow]⚠  Network error: {e}. Retrying in {wait}s...[/yellow]")
-                time.sleep(wait)
-                attempt += 1
-            else:
-                raise
+    return _post_jsonapi(base_url, "/samples", api_token, payload, timeout=120)
 
 
 def create_samples_from_workbook(
@@ -991,7 +1026,12 @@ def create_samples_from_workbook(
             payload = build_sample_payload(row, st_id, project_ids, assay_ids)
             title_val = payload["data"]["attributes"]["title"]
             console.print(f"    ⬆  {title_val}")
-            resp = create_sample(base_url, api_token, payload)
+            try:
+                resp = create_sample(base_url, api_token, payload)
+            except requests.exceptions.RequestException as e:
+                _report_unknown_write(e, f"Sample '{title_val}'",
+                                      [f"{r['sample_id']} ({r['uid']})" for r in rows])
+                raise
             sample_id = resp["data"]["id"]
             rows.append({
                 "sheet": sheet,
@@ -1384,6 +1424,12 @@ def step_assays(cfg: dict) -> pd.DataFrame:
             multiline=True,
         ).ask()
         names = [n.strip() for n in (raw or "").splitlines() if n.strip()]
+        # Skip titles already in the study (e.g. re-running after an interrupted create).
+        existing = set(df_assays["assay_title"]) if not df_assays.empty else set()
+        for n in names:
+            if n in existing:
+                console.print(f"  [yellow]Already in study, skipping:[/yellow] {n}")
+        names = [n for n in names if n not in existing]
         if names:
             console.print(f"\nCreating {len(names)} assay(s)...")
             new_df = bulk_create_assays_df(BASE_URL, cfg["api_token"], cfg["study_id"], names)
