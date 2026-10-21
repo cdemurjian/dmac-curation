@@ -6,6 +6,13 @@ All notable changes to dmac-curation will be documented in this file.
 
 ### Fixed
 
+- **`consolidate_to_flat.py` takes each row's assay from its own file, and
+  follows every parent column.** The assay was keyed by sample type, so a type
+  split across files with different assays (parental vs engineered cell lines)
+  took whichever file sorted last. Only `Parent` was read as lineage, so edges
+  through `Treatment1Parent`, `AntibodyParent` and the like got no pushed-up
+  assay and uploaded unlabelled; every key containing "parent" now counts, as in
+  NExtSEEK's `collect_parent_tokens`. Found on RMS-NGC (project 12).
 - **Assay hygiene labels DERIVED_FROM edges by graph_sync's rule**
   (BioMicroCenter/NExtSEEK#124). `stage0.resolve_properties`, which both graph
   writers use (`/curate-assay-relabel` and stage 0's MERGE), no longer writes a
